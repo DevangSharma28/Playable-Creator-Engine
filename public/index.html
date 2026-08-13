@@ -6,6 +6,29 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Cube Roll — DEV PREVIEW</title>
   <style>
+    :root {
+      --eng-bg: #0a0b0d;
+      --eng-panel: #16181c;
+      --eng-panel-2: #1d2024;
+      --eng-panel-3: #24272c;
+      --eng-border: #2c2f35;
+      --eng-border-soft: rgba(255, 255, 255, 0.07);
+      --eng-accent: #e8961e;
+      --eng-accent-soft: rgba(232, 150, 30, 0.16);
+      --eng-accent-hover: #ffab3d;
+      --eng-danger: #ff5252;
+      --eng-danger-soft: rgba(255, 82, 82, 0.14);
+      --eng-ok: #4ade80;
+      --eng-warn: #ffcc4d;
+      --eng-text: #e8e9eb;
+      --eng-text-dim: #9aa0a8;
+      --eng-text-faint: #676c74;
+      --eng-mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+      --eng-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --eng-radius: 8px;
+      --eng-radius-sm: 5px;
+    }
+
     html,
     body {
       margin: 0;
@@ -14,7 +37,7 @@
       width: 100%;
       height: 100%;
       background: #000;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: var(--eng-sans);
       touch-action: none;
       user-select: none;
       -webkit-user-select: none;
@@ -32,6 +55,10 @@
       position: fixed;
       inset: 0;
       z-index: 0;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+        linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px) 0 0 / 28px 28px,
+        var(--eng-bg);
     }
 
     /* The actual "device screen" — full window (or full available area,
@@ -48,8 +75,8 @@
       position: absolute;
       overflow: hidden;
       background: #8ed1ef;
-      border: 2px solid rgba(180, 185, 195, 0.55);
-      box-shadow: 0 0 0 1px #4fd1ff, 0 20px 60px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(232, 150, 30, 0.5);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6), 0 0 24px rgba(232, 150, 30, 0.12), 0 20px 60px rgba(0, 0, 0, 0.55);
       transition: left 0.15s ease, top 0.15s ease, width 0.15s ease, height 0.15s ease;
     }
 
@@ -77,44 +104,136 @@
       pointer-events: none;
     }
 
-    /* Engine Room: dev-only control panel. Editor/Build live here now
+    /* ===================================================================
+       Shared "engine panel" chrome — used by Engine Room, Hierarchy,
+       Inspector. A header strip (icon + uppercase label) over a body.
+       =================================================================== */
+    .eng-panel {
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(8px);
+      pointer-events: auto;
+    }
+
+    .eng-panel-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--eng-text-dim);
+      border-bottom: 1px solid var(--eng-border-soft);
+      background: rgba(255, 255, 255, 0.015);
+    }
+
+    .eng-panel-header .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--eng-ok);
+      box-shadow: 0 0 5px var(--eng-ok);
+      flex-shrink: 0;
+    }
+
+    .eng-panel-header .tag {
+      margin-left: auto;
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      color: var(--eng-accent);
+      background: var(--eng-accent-soft);
+      border: 1px solid rgba(232, 150, 30, 0.3);
+      border-radius: 999px;
+      padding: 1.5px 7px;
+    }
+
+    /* ---- Engine Room: dev-only control panel. Editor/Build live here
        (Build button doesn't exist without scripts/dev-build-api.js running
        alongside the dev server — see scripts/dev.js); stats + the view
        helper gizmo are fed live by Game.ts/main.ts (see the bottom
-       script). Nothing here exists in the production build. */
+       script). Nothing here exists in the production build.
+       A full-height dock flush against the right edge (not a floating
+       card) — ENGINE_ROOM_WIDTH below in the script keeps the device-frame
+       simulator's math in sync so the game view is always inset out from
+       under it, never covered by it. */
     #engine-room {
       position: fixed;
-      top: 8px;
-      right: 10px;
+      top: 0;
+      right: 0;
+      bottom: 0;
       z-index: 70;
-      width: 172px;
-      background: rgba(15, 17, 20, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 10px;
-      padding: 9px;
-      font-family: inherit;
+      width: 232px;
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel) 45%, var(--eng-panel-2));
+      border-left: 1px solid var(--eng-border);
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(0, 0, 0, 0.3);
       font-size: 11px;
-      color: #fff;
+      color: var(--eng-text);
+      overflow-y: auto;
       pointer-events: auto;
-      backdrop-filter: blur(6px);
     }
 
     #engine-room-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      font-weight: 800;
-      letter-spacing: 0.02em;
-      margin-bottom: 8px;
+      flex-shrink: 0;
     }
 
     #engine-room-header .live-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #4ade80;
-      box-shadow: 0 0 4px #4ade80;
+      background: var(--eng-ok);
+      box-shadow: 0 0 5px var(--eng-ok);
       flex-shrink: 0;
+      animation: eng-pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes eng-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    #engine-room-body {
+      padding: 14px;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #engine-room-footer {
+      flex-shrink: 0;
+      margin-top: auto;
+      padding-top: 12px;
+      text-align: center;
+    }
+
+    #engine-room-footer .brand {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--eng-text-faint);
+    }
+
+    /* Live version + short commit hash of the local HEAD, fetched from
+       scripts/dev-build-api.js's GET /version (same 127.0.0.1:8001 API the
+       Build button uses) — so it always reflects whatever's actually
+       checked out, not a hand-maintained number that drifts. */
+    #engine-room-version {
+      margin-top: 3px;
+      font-family: var(--eng-mono);
+      font-size: 10px;
+      color: var(--eng-text-dim);
+      cursor: default;
+    }
+
+    #engine-room-version .dirty {
+      color: var(--eng-warn);
     }
 
     #engine-room-actions {
@@ -128,16 +247,22 @@
       font-family: inherit;
       font-size: 10.5px;
       font-weight: 700;
-      color: #fff;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.18);
-      padding: 6px 4px;
-      border-radius: 7px;
+      color: var(--eng-text);
+      background: var(--eng-panel-3);
+      border: 1px solid var(--eng-border);
+      padding: 7px 4px;
+      border-radius: var(--eng-radius-sm);
       cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
     }
 
     #engine-room-actions button:hover:not(:disabled) {
-      background: rgba(255, 255, 255, 0.16);
+      background: #2c3036;
+      border-color: #3a3e45;
+    }
+
+    #engine-room-actions button:active:not(:disabled) {
+      transform: scale(0.96);
     }
 
     #engine-room-actions button:disabled {
@@ -146,27 +271,33 @@
     }
 
     #engine-room-actions button.primary {
-      background: #ff5252;
-      border-color: #ff5252;
+      background: var(--eng-accent);
+      border-color: var(--eng-accent);
+      color: #1a1204;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.25) inset;
     }
 
     #engine-room-actions button.primary:hover:not(:disabled) {
-      background: #ff6b6b;
+      background: var(--eng-accent-hover);
     }
 
     #er-btn-viewer {
-      display: block;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
       width: 100%;
       font-family: inherit;
       font-size: 10.5px;
       font-weight: 700;
-      color: #06202b;
+      color: #062230;
       background: #7cd6f7;
       border: 1px solid #7cd6f7;
-      padding: 6px 4px;
-      border-radius: 7px;
+      padding: 7px 4px;
+      border-radius: var(--eng-radius-sm);
       cursor: pointer;
-      margin-bottom: 8px;
+      margin-bottom: 9px;
+      transition: background 0.12s ease;
     }
 
     #er-btn-viewer:hover {
@@ -180,45 +311,58 @@
     #er-exit-3d {
       display: none;
       position: fixed;
-      top: 8px;
+      top: 54px;
       right: 10px;
       z-index: 71;
+      align-items: center;
+      gap: 8px;
       font-family: inherit;
       font-size: 11.5px;
       font-weight: 700;
       color: #ffe066;
-      background: #0b1f5c;
-      border: 1.5px solid #ffe066;
-      border-radius: 10px;
-      padding: 8px 14px;
+      background: linear-gradient(180deg, #142c78, #0b1f5c);
+      border: 1px solid #ffe066;
+      border-radius: var(--eng-radius);
+      padding: 9px 15px;
       cursor: pointer;
       pointer-events: auto;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 18px rgba(255, 224, 102, 0.15);
     }
 
     #er-exit-3d.visible {
-      display: block;
+      display: flex;
     }
 
     #er-exit-3d:hover {
-      background: #142c78;
+      background: linear-gradient(180deg, #1a3690, #0e256e);
+    }
+
+    #er-exit-3d::before {
+      content: "\25C9";
+      color: #ffe066;
+      font-size: 10px;
+      animation: eng-pulse 1.4s ease-in-out infinite;
     }
 
     /* Scene hierarchy + inspector: dev-only, only meaningful while freecam
        is active (see script section) — same visual language as the Engine
        Room panel, just repositioned so they don't collide with it (which
-       is hidden anyway while these show). */
+       is hidden anyway while these show). SceneInspector.ts writes directly
+       into these elements' innerHTML, so any static header lives in CSS
+       (::before), not real DOM, or it would be wiped on every rebuild. */
     #si-hierarchy,
     #si-inspector {
       display: none;
       position: fixed;
       z-index: 70;
-      background: rgba(15, 17, 20, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      border-radius: 10px;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
       font-size: 11px;
-      color: #fff;
+      color: var(--eng-text);
       pointer-events: auto;
-      backdrop-filter: blur(6px);
+      backdrop-filter: blur(8px);
     }
 
     #si-hierarchy.visible,
@@ -226,134 +370,424 @@
       display: block;
     }
 
+    #si-hierarchy::before,
+    #si-inspector::before {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      font-size: 10.5px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--eng-text-dim);
+      border-bottom: 1px solid var(--eng-border-soft);
+      background: rgba(255, 255, 255, 0.015);
+      border-radius: var(--eng-radius) var(--eng-radius) 0 0;
+      margin: -1px -1px 6px -1px;
+    }
+
+    #si-hierarchy::before {
+      content: "\1F5C2  Hierarchy";
+    }
+
+    #si-inspector::before {
+      content: "\1F50E  Inspector";
+    }
+
+    /* 54px = the docked #device-topbar's 44px height + a 10px margin —
+       kept below in the script as TOP_BAR_HEIGHT; update both together. */
     #si-hierarchy {
-      top: 8px;
+      top: 54px;
       left: 10px;
-      width: 210px;
-      max-height: 78vh;
+      width: 216px;
+      max-height: calc(78vh - 44px);
       overflow-y: auto;
-      padding: 6px;
+      padding-bottom: 6px;
     }
 
     .si-row {
-      padding: 3px 6px;
-      border-radius: 5px;
+      margin: 0 6px 1px;
+      padding: 4px 7px;
+      border-radius: var(--eng-radius-sm);
       cursor: pointer;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      border-left: 2px solid transparent;
+      transition: background 0.1s ease;
     }
 
     .si-row:hover {
-      background: rgba(255, 255, 255, 0.1);
+      background: rgba(255, 255, 255, 0.06);
     }
 
     .si-row.selected {
-      background: #ffe066;
-      color: #0b1f5c;
+      background: var(--eng-accent-soft);
+      border-left-color: var(--eng-accent);
+      color: #ffd8a3;
       font-weight: 700;
     }
 
+    /* Below #er-exit-3d (also top-right, ~54px tall itself), not level
+       with it — they'd otherwise land in the same spot and stack on top
+       of each other. */
     #si-inspector {
-      top: 54px;
+      top: 100px;
       right: 10px;
-      width: 190px;
-      padding: 9px;
+      width: 222px;
+      max-height: calc(100vh - 116px);
+      overflow-y: auto;
+      padding: 0 10px 10px;
     }
 
     .si-insp-empty {
-      color: rgba(255, 255, 255, 0.55);
+      color: var(--eng-text-faint);
       font-style: italic;
+      padding: 4px 0 2px;
     }
 
     .si-insp-row {
       display: flex;
       justify-content: space-between;
-      padding: 2px 0;
+      padding: 2.5px 0;
+      font-family: var(--eng-mono);
+      font-size: 10.5px;
     }
 
     .si-insp-row span {
-      color: rgba(255, 255, 255, 0.6);
+      color: var(--eng-text-faint);
+      font-family: var(--eng-sans);
+      font-size: 11px;
     }
 
     .si-insp-row b {
       font-variant-numeric: tabular-nums;
+      color: var(--eng-text);
     }
 
     .si-insp-sub {
-      margin-top: 6px;
-      padding-top: 5px;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
-      font-weight: 700;
-      color: #ffe066;
+      margin-top: 9px;
+      padding-top: 6px;
+      border-top: 1px solid var(--eng-border-soft);
+      font-weight: 800;
+      font-size: 9.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--eng-accent);
+    }
+
+    /* Visible toggle — a real checkbox now (SceneInspector's inspector
+       fields became editable, not just readouts; see its buildInspectorFields). */
+    .si-insp-visible-row {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 0 2px;
+      cursor: pointer;
+      font-size: 11px;
+      color: var(--eng-text-dim);
+    }
+
+    .si-insp-visible-row input {
+      accent-color: var(--eng-accent);
+      cursor: pointer;
+    }
+
+    /* Position/Rotation/Scale — three axis fields per row, each a small
+       colored X/Y/Z tag (matching the Engine Room view-helper gizmo's own
+       red/green/blue axis convention) next to a real number input. Typing
+       in one edits the live 3D object directly (see SceneInspector's
+       buildAxisRow) — dragging the gizmo in the viewport updates these
+       right back, both directions kept in sync every frame. */
+    .si-insp-axisgrid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+      margin-top: 5px;
+    }
+
+    .si-insp-axisfield {
+      display: flex;
+      align-items: center;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid var(--eng-border-soft);
+      border-radius: var(--eng-radius-sm);
+      overflow: hidden;
+    }
+
+    .si-insp-axisfield span {
+      flex-shrink: 0;
+      width: 16px;
+      text-align: center;
+      font-size: 9.5px;
+      font-weight: 800;
+      padding: 5px 0;
+      color: #fff;
+    }
+
+    .si-insp-axisfield.axis-x span {
+      background: rgba(255, 82, 82, 0.6);
+    }
+
+    .si-insp-axisfield.axis-y span {
+      background: rgba(122, 224, 120, 0.55);
+    }
+
+    .si-insp-axisfield.axis-z span {
+      background: rgba(90, 170, 255, 0.6);
+    }
+
+    .si-insp-axisfield input {
+      width: 100%;
+      min-width: 0;
+      background: transparent;
+      border: none;
+      color: var(--eng-text);
+      font-family: var(--eng-mono);
+      font-size: 10.5px;
+      padding: 5px 5px;
+      -moz-appearance: textfield;
+    }
+
+    .si-insp-axisfield input:focus {
+      outline: none;
+      background: rgba(232, 150, 30, 0.1);
+    }
+
+    .si-insp-axisfield input::-webkit-outer-spin-button,
+    .si-insp-axisfield input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+
+    /* Select / Move / Rotate / Scale — the gizmo-mode toolbar, bottom-center
+       (the one part of the freecam viewport otherwise left empty), same
+       visual family as #device-topbar's buttons. W/E/R/Q do the same thing
+       from the keyboard (see SceneInspector.onKeyDown) — clicking here just
+       keeps the mode discoverable/mouse-reachable too, and stays in sync
+       with the keyboard shortcuts via __onGizmoModeChanged. */
+    #si-gizmo-toolbar {
+      display: none;
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 70;
+      gap: 2px;
+      padding: 4px;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      pointer-events: auto;
+    }
+
+    #si-gizmo-toolbar.visible {
+      display: flex;
+    }
+
+    #si-gizmo-toolbar button {
+      font-family: inherit;
+      font-size: 15px;
+      color: var(--eng-text-dim);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--eng-radius-sm);
+      width: 34px;
+      height: 30px;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    #si-gizmo-toolbar button:hover:not(.active) {
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    #si-gizmo-toolbar button.active {
+      background: linear-gradient(180deg, var(--eng-accent-hover), var(--eng-accent));
+      border-color: var(--eng-accent-hover);
+      color: #1a1204;
+      box-shadow: 0 0 0 1px rgba(232, 150, 30, 0.35), 0 2px 10px rgba(232, 150, 30, 0.4);
     }
 
     #engine-room-stats {
       display: grid;
       grid-template-columns: 1fr auto;
-      gap: 3px 8px;
-      color: rgba(255, 255, 255, 0.7);
+      gap: 4px 8px;
+      color: var(--eng-text-dim);
       font-variant-numeric: tabular-nums;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      border-top: 1px solid var(--eng-border-soft);
       padding-top: 8px;
     }
 
     #engine-room-stats span.val {
-      color: #fff;
+      font-family: var(--eng-mono);
+      color: var(--eng-text);
       font-weight: 700;
       text-align: right;
+    }
+
+    #engine-room-stats span.val.warn {
+      color: var(--eng-warn);
+    }
+
+    #engine-room-stats span.val.bad {
+      color: var(--eng-danger);
     }
 
     #engine-room-viewhelper-wrap {
       display: flex;
       justify-content: center;
-      margin-top: 7px;
-      border-top: 1px solid rgba(255, 255, 255, 0.12);
-      padding-top: 7px;
+      margin-top: 8px;
+      border-top: 1px solid var(--eng-border-soft);
+      padding-top: 8px;
+    }
+
+    #er-viewhelper-frame {
+      width: 68px;
+      height: 68px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 50% 40%, rgba(232, 150, 30, 0.1), transparent 70%);
+      border: 1px solid var(--eng-border-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     #er-viewhelper {
-      width: 64px;
-      height: 64px;
+      width: 60px;
+      height: 60px;
     }
 
     /* Device-frame simulator: switches the "screen" between the real
-       window and a letterboxed 16:9 box (landscape or portrait). Fixed to
-       the real window, not the frame — dev chrome, always reachable
-       regardless of how small the simulated frame is. */
-    #sim-tabs {
+       window and a letterboxed 16:9 box (landscape or portrait; portrait
+       is the default — see `simMode` below, since this is a mobile
+       playable ad). A flush, full-width dock across the top — same
+       treatment as #engine-room's dock on the right, not a floating pill —
+       so it reserves its own real space instead of sitting on top of the
+       game view. --dock-left/--dock-right are kept in sync with
+       applyDeviceFrame()'s own stage insets (see script, TOP_BAR_HEIGHT),
+       so this always spans exactly the width the game view itself is
+       using — full window, inset from the Engine Room dock, or inset from
+       the UI editor's panels — instead of drifting out of alignment
+       whenever a dock is showing. */
+    #device-topbar {
       position: fixed;
-      top: 8px;
-      left: 50%;
-      transform: translateX(-50%);
+      top: 0;
+      left: var(--dock-left, 0px);
+      right: var(--dock-right, 232px);
+      height: 44px;
       z-index: 60;
       display: flex;
-      background: rgba(0, 0, 0, 0.55);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 10px;
-      padding: 2px;
-      pointer-events: auto;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border-bottom: 1px solid var(--eng-border);
+      box-shadow: 0 8px 22px rgba(0, 0, 0, 0.35);
+      /* The bar itself doesn't intercept clicks — only its buttons do (see
+         below). Without this, empty flex space around the buttons (and the
+         label) would still capture pointer events across the bar's whole
+         width, silently blocking clicks to whatever's underneath it —
+         exactly what broke click-through to the UI editor's own toolbar
+         (including its Layout name/Tag text inputs) when this bar used to
+         span the full width over it. */
+      pointer-events: none;
+      transition: top 0.15s ease, left 0.15s ease, right 0.15s ease, height 0.15s ease, background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
     }
 
-    #sim-tabs button {
+    /* While the UI editor is open, its own toolbar already fills the top
+       strip underneath (see #ui-editor-frame) — this bar can't stay docked
+       there without either covering it (a duplicate bar) or, transparent,
+       still blocking clicks to it. It moves into a *reserved* strip above
+       the editor's own Properties panel instead — not a floating overlay
+       sitting on top of that panel's content, an actual dedicated space:
+       tools/ui-editor.html's #properties starts 40px lower (top:93px, not
+       53px) specifically to leave this exact box empty for it. Width/left
+       match #properties's own 296px/right:0 exactly, so it reads as that
+       panel's header strip rather than a separate floating thing. Keep
+       both files' numbers in sync if either changes. */
+    #device-topbar.compact {
+      top: 53px;
+      left: auto;
+      right: 0;
+      width: 296px;
+      height: 40px;
+      border-radius: 0;
+      border-left: 1px solid var(--eng-border);
+    }
+
+    /* The label only fits comfortably in the full-width Dev-preview bar —
+       the compact strip above the UI editor's Properties panel is too
+       narrow for it alongside all three buttons. */
+    #device-topbar.compact .label {
+      display: none;
+    }
+
+    #device-topbar .label {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--eng-text-faint);
+      padding: 0 10px 0 2px;
+      white-space: nowrap;
+    }
+
+    #device-topbar button {
+      position: relative;
+      overflow: hidden; /* keeps the click-ripple (see .dtb-ripple) contained to the button's own rounded box */
       font-family: inherit;
       font-size: 11px;
       font-weight: 700;
-      color: rgba(255, 255, 255, 0.7);
+      color: var(--eng-text-dim);
       background: transparent;
-      border: none;
-      border-radius: 8px;
-      padding: 5px 10px;
+      border: 1px solid transparent;
+      border-radius: var(--eng-radius-sm);
+      padding: 6.5px 13px;
       cursor: pointer;
+      pointer-events: auto;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, transform 0.08s ease;
     }
 
-    #sim-tabs button:hover {
-      color: #fff;
+    #device-topbar button:hover:not(.active) {
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.07);
+      border-color: var(--eng-border);
     }
 
-    #sim-tabs button.active {
-      background: #ff5252;
-      color: #fff;
+    /* Tactile press feedback — a quick, soft squash on click, independent
+       of the ripple below (which handles the "glow" part of the effect). */
+    #device-topbar button:active {
+      transform: scale(0.93);
+    }
+
+    #device-topbar button.active {
+      background: linear-gradient(180deg, var(--eng-accent-hover), var(--eng-accent));
+      border-color: var(--eng-accent-hover);
+      color: #1a1204;
+      box-shadow: 0 0 0 1px rgba(232, 150, 30, 0.35), 0 2px 10px rgba(232, 150, 30, 0.45), 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+    }
+
+    /* Click ripple — a soft circle that blooms out from the click point and
+       fades, spawned/removed in JS (see spawnRipple). Purely decorative
+       (pointer-events: none), so it never intercepts the next click. */
+    .dtb-ripple {
+      position: absolute;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.55), rgba(255, 255, 255, 0) 70%);
+      transform: scale(0);
+      pointer-events: none;
+      animation: dtb-ripple 0.55s cubic-bezier(0.2, 0.6, 0.4, 1) forwards;
+    }
+
+    @keyframes dtb-ripple {
+      to {
+        transform: scale(1);
+        opacity: 0;
+      }
     }
 
     #ui-editor-frame {
@@ -371,31 +805,47 @@
 
 <body>
   <div id="engine-room">
-    <div id="engine-room-header">
-      <span>⚙ Engine Room</span>
-      <span class="live-dot" title="Live reload active"></span>
+    <div id="engine-room-header" class="eng-panel-header">
+      <span class="live-dot"></span>
+      <span>ION Engine</span>
+      <span class="tag">DEV</span>
     </div>
-    <div id="engine-room-actions">
-      <button id="er-btn-editor" title="Open the UI layout editor">✏️ Editor</button>
-      <button id="er-btn-build" class="primary" title="Run the production build (build.sh)">🛠 Build</button>
-    </div>
-    <button id="er-btn-viewer" title="Orbit-inspect the live gameplay scene">🧭 3D View</button>
-    <div id="engine-room-stats">
-      <span>FPS</span><span class="val" id="er-fps">--</span>
-      <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
-      <span>Triangles</span><span class="val" id="er-triangles">--</span>
-    </div>
-    <div id="engine-room-viewhelper-wrap">
-      <canvas id="er-viewhelper" width="64" height="64" title="Camera orientation — red X, green Y, blue Z"></canvas>
+    <div id="engine-room-body">
+      <div id="engine-room-actions">
+        <button id="er-btn-editor" title="Open the UI layout editor">✏️ Editor</button>
+        <button id="er-btn-build" class="primary" title="Run the production build (build.sh)">🛠 Build</button>
+      </div>
+      <button id="er-btn-viewer" title="Orbit-inspect the live gameplay scene">🧭 3D View</button>
+      <div id="engine-room-stats">
+        <span>FPS</span><span class="val" id="er-fps">--</span>
+        <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
+        <span>Triangles</span><span class="val" id="er-triangles">--</span>
+      </div>
+      <div id="engine-room-viewhelper-wrap">
+        <div id="er-viewhelper-frame" title="Camera orientation — red X, green Y, blue Z">
+          <canvas id="er-viewhelper" width="64" height="64"></canvas>
+        </div>
+      </div>
+      <div id="engine-room-footer">
+        <div class="brand">ION Engine</div>
+        <div id="engine-room-version" title="Local build">v…</div>
+      </div>
     </div>
   </div>
-  <button id="er-exit-3d" title="Exit 3D View">🧭 Exit 3D View</button>
+  <button id="er-exit-3d" title="Exit 3D View">Exit 3D View</button>
   <div id="si-hierarchy"></div>
   <div id="si-inspector"></div>
-  <div id="sim-tabs">
-    <button data-sim="real" class="active">Real</button>
+  <div id="si-gizmo-toolbar">
+    <button data-gizmo="none" title="Select (Q) — click objects without transforming them">🖐</button>
+    <button data-gizmo="translate" class="active" title="Move (W)">↔</button>
+    <button data-gizmo="rotate" title="Rotate (E)">↻</button>
+    <button data-gizmo="scale" title="Scale (R)">⤡</button>
+  </div>
+  <div id="device-topbar">
+    <span class="label">Device Preview</span>
+    <button data-sim="portrait" class="active">Portrait 16:9</button>
     <button data-sim="landscape">Landscape 16:9</button>
-    <button data-sim="portrait">Portrait 16:9</button>
+    <button data-sim="real">Real</button>
   </div>
   <iframe id="ui-editor-frame" src="/ui-editor.html" title="UI Layout Editor" allowtransparency="true"></iframe>
 
@@ -420,9 +870,11 @@
     // survive closing and reopening within the same session.
     const editorFrame = document.getElementById("ui-editor-frame");
     const engineRoom = document.getElementById("engine-room");
+    const deviceTopbar = document.getElementById("device-topbar");
     document.getElementById("er-btn-editor").addEventListener("click", () => {
       editorFrame.style.display = "block";
       engineRoom.style.display = "none"; // its own top-right corner would otherwise sit under/behind the editor overlay
+      deviceTopbar.classList.add("compact"); // moves into the reserved strip above the editor's Properties panel (see #device-topbar.compact's CSS) instead of colliding with its main toolbar
       window.__setUIEditorPaused && window.__setUIEditorPaused(true);
       applyDeviceFrame(); // the editor's own panels now occupy space — recompute so the frame isn't hidden behind them
     });
@@ -430,36 +882,61 @@
       if (e.origin !== window.location.origin || e.data !== "close-ui-editor") return;
       editorFrame.style.display = "none";
       engineRoom.style.display = "";
+      deviceTopbar.classList.remove("compact");
       window.__setUIEditorPaused && window.__setUIEditorPaused(false);
       applyDeviceFrame(); // editor's panels are gone — the full window is available again
     });
 
-    // Device-frame simulator: Real (fills the available area, no letterbox)
-    // or a fixed 16:9 box — landscape or portrait — centered and letterboxed
-    // within it. #device-frame is what the game (canvas + HUD) is actually
+    // Device-frame simulator: a fixed 16:9 box — portrait (the default,
+    // since this is a mobile playable ad) or landscape — or Real (fills
+    // the available area, no letterbox), centered and letterboxed within
+    // it. #device-frame is what the game (canvas + HUD) is actually
     // sized/positioned against, so this affects the *real* running game,
     // not a mockup; its rect is also broadcast to the editor iframe so the
     // overlay you edit against lines up with the exact same box.
     //
-    // "Available area" is the full window normally, but shrinks to exclude
-    // the editor's own toolbar/layers/properties panels while it's open
-    // (values must match tools/ui-editor.html's CSS for those) — otherwise
-    // the simulated screen would sit partly hidden behind them.
+    // "Available area" is the full window minus whatever dev chrome is
+    // currently docked and taking up real space — the Engine Room panel
+    // (flush right, see #engine-room's CSS) normally, or the UI editor's
+    // own toolbar/layers/properties panels while it's open (values must
+    // match tools/ui-editor.html's CSS for those) — otherwise the
+    // simulated screen would sit partly hidden behind them.
     const EDITOR_INSETS = { top: 53, left: 220, right: 296 };
+    const ENGINE_ROOM_WIDTH = 232;
+    // #device-topbar's own height (see its CSS) — also what #si-hierarchy/
+    // #si-inspector/#er-exit-3d are offset below (54px = this + a 10px
+    // margin, hardcoded in their CSS) so the freecam-mode chrome doesn't
+    // sit under this bar either.
+    const TOP_BAR_HEIGHT = 44;
     const frameStage = document.getElementById("frame-stage");
     const deviceFrame = document.getElementById("device-frame");
-    let simMode = "real";
+    const rootStyle = document.documentElement.style;
+    let simMode = "portrait";
+    let freecamActive = false;
+
+    /** Which dev chrome is currently reserving real screen space, as insets from each edge. */
+    function currentInsets() {
+      if (editorFrame.style.display === "block") return EDITOR_INSETS;
+      // #device-topbar itself stays docked in every mode (including
+      // freecam and editor-open — it floats above the editor there, same
+      // as before this became a full bar); only the Engine Room side dock
+      // comes and goes with freecam.
+      return { top: TOP_BAR_HEIGHT, left: 0, right: freecamActive ? 0 : ENGINE_ROOM_WIDTH };
+    }
 
     function applyDeviceFrame() {
-      const editorOpen = editorFrame.style.display === "block";
-      const stage = editorOpen
-        ? {
-            left: EDITOR_INSETS.left,
-            top: EDITOR_INSETS.top,
-            width: Math.max(1, frameStage.clientWidth - EDITOR_INSETS.left - EDITOR_INSETS.right),
-            height: Math.max(1, frameStage.clientHeight - EDITOR_INSETS.top),
-          }
-        : { left: 0, top: 0, width: frameStage.clientWidth, height: frameStage.clientHeight };
+      const insets = currentInsets();
+      const stage = {
+        left: insets.left,
+        top: insets.top,
+        width: Math.max(1, frameStage.clientWidth - insets.left - insets.right),
+        height: Math.max(1, frameStage.clientHeight - insets.top),
+      };
+      // Keeps #device-topbar spanning exactly the *visible* stage above,
+      // not the raw window, so it lines up with the game view instead of
+      // drifting whenever a dock is reserving space on either side.
+      rootStyle.setProperty("--dock-left", insets.left + "px");
+      rootStyle.setProperty("--dock-right", insets.right + "px");
 
       let w = stage.width;
       let h = stage.height;
@@ -498,16 +975,50 @@
       editorFrame.contentWindow.postMessage({ type: "device-frame", rect: { x, y, width, height } }, window.location.origin);
     }
 
-    document.querySelectorAll("#sim-tabs button").forEach((btn) => {
-      btn.addEventListener("click", () => {
+    /** Blooms a soft ripple out from the click point on `btn`, purely decorative, and cleans itself up once the CSS animation finishes. */
+    function spawnRipple(btn, clientX, clientY) {
+      const rect = btn.getBoundingClientRect();
+      const size = Math.max(rect.width, rect.height) * 1.8;
+      const ripple = document.createElement("span");
+      ripple.className = "dtb-ripple";
+      ripple.style.width = ripple.style.height = size + "px";
+      ripple.style.left = clientX - rect.left - size / 2 + "px";
+      ripple.style.top = clientY - rect.top - size / 2 + "px";
+      btn.appendChild(ripple);
+      ripple.addEventListener("animationend", () => ripple.remove());
+    }
+
+    document.querySelectorAll("#device-topbar button").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
         simMode = btn.dataset.sim;
-        document.querySelectorAll("#sim-tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+        document.querySelectorAll("#device-topbar button").forEach((b) => b.classList.toggle("active", b === btn));
         applyDeviceFrame();
+        spawnRipple(btn, e.clientX, e.clientY);
       });
     });
 
     window.addEventListener("resize", applyDeviceFrame);
     applyDeviceFrame();
+
+    // ION Engine: version + short commit hash of local HEAD, from
+    // scripts/dev-build-api.js's GET /version — same dev-only API as the
+    // Build button below. Fetched once on load; a stale hash until the
+    // next full reload is an acceptable tradeoff for a dev panel (nothing
+    // here re-polls a slow git subprocess every few seconds).
+    fetch("http://127.0.0.1:8001/version")
+      .then((res) => res.json())
+      .then((info) => {
+        const el = document.getElementById("engine-room-version");
+        const commit = info.commit || "no-git";
+        el.innerHTML = "v" + info.version + " · " + commit + (info.dirty ? '<span class="dirty">*</span>' : "");
+        el.title = info.branch ? "Branch " + info.branch + (info.dirty ? " — uncommitted local changes" : "") : "";
+      })
+      .catch(() => {
+        // dev-build-api isn't running (npm run dev wasn't used to start this, or it's still booting) — nothing to read version/commit from.
+        const el = document.getElementById("engine-room-version");
+        el.textContent = "version unavailable";
+        el.title = "Build API offline — start with `npm run dev`";
+      });
 
     // Engine Room: Build — POSTs to the local build-trigger API
     // (scripts/dev-build-api.js, started alongside this dev server by
@@ -550,25 +1061,50 @@
     const exitViewerBtn = document.getElementById("er-exit-3d");
     const hierarchyPanel = document.getElementById("si-hierarchy");
     const inspectorPanel = document.getElementById("si-inspector");
+    const gizmoToolbar = document.getElementById("si-gizmo-toolbar");
 
     function setFreecamUI(on) {
+      freecamActive = on;
       engineRoom.style.display = on ? "none" : "";
       exitViewerBtn.classList.toggle("visible", on);
       hierarchyPanel.classList.toggle("visible", on);
       inspectorPanel.classList.toggle("visible", on);
+      gizmoToolbar.classList.toggle("visible", on);
       window.__setFreecamActive && window.__setFreecamActive(on);
+      applyDeviceFrame(); // Engine Room just showed/hid — the game view's available width changed with it
     }
 
     viewerBtn.addEventListener("click", () => setFreecamUI(true));
     exitViewerBtn.addEventListener("click", () => setFreecamUI(false));
 
+    // Gizmo mode (Select/Move/Rotate/Scale) — a thin passthrough to
+    // SceneInspector via main.ts's __setGizmoMode hook (only meaningful
+    // while freecam/3D View is active, same as the panels above). Also
+    // listens for __onGizmoModeChanged so the W/E/R/Q keyboard shortcuts
+    // (handled inside SceneInspector, not here) keep these buttons' active
+    // state in sync instead of only ever reacting to being clicked directly.
+    document.querySelectorAll("#si-gizmo-toolbar button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        window.__setGizmoMode && window.__setGizmoMode(btn.dataset.gizmo);
+        document.querySelectorAll("#si-gizmo-toolbar button").forEach((b) => b.classList.toggle("active", b === btn));
+      });
+    });
+    window.__onGizmoModeChanged = (mode) => {
+      document.querySelectorAll("#si-gizmo-toolbar button").forEach((b) => b.classList.toggle("active", b.dataset.gizmo === mode));
+    };
+
     // Engine Room: live FPS/draw calls/triangles, fed by main.ts's
     // __getEngineStats hook. Polled rather than updated every rAF frame —
-    // a stats readout doesn't need 60Hz DOM writes.
+    // a stats readout doesn't need 60Hz DOM writes. FPS is color-coded
+    // (green/amber/red) the way engine profilers flag frame-budget health
+    // at a glance, rather than making you read the number every time.
+    const fpsEl = document.getElementById("er-fps");
     setInterval(() => {
       if (!window.__getEngineStats) return;
       const stats = window.__getEngineStats();
-      document.getElementById("er-fps").textContent = stats.fps;
+      fpsEl.textContent = stats.fps;
+      fpsEl.classList.toggle("warn", stats.fps < 50 && stats.fps >= 30);
+      fpsEl.classList.toggle("bad", stats.fps < 30);
       document.getElementById("er-drawcalls").textContent = stats.drawCalls;
       document.getElementById("er-triangles").textContent = stats.triangles;
     }, 400);

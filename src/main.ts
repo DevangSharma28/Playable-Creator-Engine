@@ -25,6 +25,15 @@ const canvas = document.getElementById("game") as HTMLCanvasElement;
  * gameplay update() (same reason as __setUIEditorPaused — player/camera
  * would otherwise fight OrbitControls) while it hands the camera to
  * Game.setFreecam(); render() keeps running so the scene stays visible.
+ *
+ * __setGizmoMode: the Engine Room panel's Select/Move/Rotate/Scale toolbar
+ * (only meaningful, and only shown, while freecam/3D View is active) calls
+ * this to switch SceneInspector's transform gizmo.
+ *
+ * __onGizmoModeChanged: the reverse direction — SceneInspector also lets you
+ * switch modes via keyboard (W/E/R/Q), so this is how the Engine Room
+ * panel's toolbar buttons find out and update their own active-highlight
+ * to match, instead of only ever reflecting clicks on themselves.
  */
 let uiEditorPaused = false;
 let freecamActive = false;
@@ -35,6 +44,8 @@ const win = window as unknown as {
   __resizeGameTo?: (width: number, height: number) => void;
   __getEngineStats?: () => { fps: number; drawCalls: number; triangles: number };
   __setFreecamActive?: (active: boolean) => void;
+  __setGizmoMode?: (mode: string) => void;
+  __onGizmoModeChanged?: (mode: string) => void;
 };
 win.__setUIEditorPaused = (paused) => {
   uiEditorPaused = paused;
@@ -51,10 +62,14 @@ win.__getEngineStats = () => ({
   drawCalls: game?.rendererStats.drawCalls ?? 0,
   triangles: game?.rendererStats.triangles ?? 0,
 });
+win.__setGizmoMode = (mode) => {
+  game?.setGizmoMode(mode as Parameters<Game["setGizmoMode"]>[0]);
+};
 
 async function main(): Promise<void> {
   const activeGame = await Game.create(canvas);
   game = activeGame;
+  activeGame.onGizmoModeChange((mode) => win.__onGizmoModeChanged?.(mode));
 
   let lastTime = performance.now();
 

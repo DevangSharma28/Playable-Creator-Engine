@@ -1,14 +1,15 @@
 #!/usr/bin/env node
-// Tiny localhost-only HTTP API the dev page's Engine Room "Build" button
-// talks to, since a browser can't shell out to build.sh on its own. Runs
+// Tiny localhost-only HTTP API the dev page's ION Engine panel talks to,
+// since a browser can't shell out to build.sh (or git) on its own. Runs
 // alongside esbuild's dev server (see scripts/dev.js) — never part of the
 // production build, never listens on anything but 127.0.0.1.
 const http = require("http");
-const { exec } = require("child_process");
+const { exec, execSync } = require("child_process");
 const path = require("path");
 
 const PORT = 8001;
 const ROOT = path.join(__dirname, "..");
+const PACKAGE_VERSION = require(path.join(ROOT, "package.json")).version;
 // esbuild's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
@@ -16,17 +17,38 @@ const ROOT = path.join(__dirname, "..");
 // response and the button just reads "API offline" for no visible reason.
 const ALLOWED_ORIGINS = new Set(["http://localhost:8000", "http://127.0.0.1:8000"]);
 
+/** Best-effort — a fresh clone with no commits yet, or no git on PATH, shouldn't break the panel, just show what it can. */
+function readGitInfo() {
+  const run = (cmd) => execSync(cmd, { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"] }).toString().trim();
+  try {
+    return {
+      commit: run("git rev-parse --short HEAD"),
+      branch: run("git rev-parse --abbrev-ref HEAD"),
+      dirty: run("git status --porcelain").length > 0,
+    };
+  } catch {
+    return { commit: null, branch: null, dirty: false };
+  }
+}
+
 const server = http.createServer((req, res) => {
   const origin = req.headers.origin;
   if (ALLOWED_ORIGINS.has(origin)) {
     res.setHeader("Access-Control-Allow-Origin", origin);
   }
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") {
     res.writeHead(204);
     res.end();
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/version") {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify({ version: PACKAGE_VERSION, ...readGitInfo() }));
     return;
   }
 
@@ -52,5 +74,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (POST /build)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, POST /build)`);
 });

@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { InputHandler } from "./core/InputHandler";
 import { CameraHandler } from "./core/CameraHandler";
 import { ViewHelperWidget } from "./core/ViewHelperWidget";
-import { SceneInspector } from "./core/SceneInspector";
+import { SceneInspector, type GizmoMode } from "./core/SceneInspector";
 import { World } from "./world/World";
 import { Player } from "./entities/Player";
 import { CoinField } from "./entities/CoinField";
@@ -44,6 +44,8 @@ export class Game {
   /** The camera freecam actually renders/orbits through — kept separate from this.camera so the CameraHelper gizmo (drawn by SceneInspector) shows a meaningful frustum for the real gameplay camera instead of coinciding with the view you're looking through. */
   private freecamCamera: THREE.PerspectiveCamera | undefined;
   private sceneInspector: SceneInspector | undefined;
+  /** Set via onGizmoModeChange(); re-attached to each new SceneInspector instance since one is (re)created per freecam session — see setFreecam(). */
+  private gizmoModeChangeCallback: ((mode: GizmoMode) => void) | undefined;
 
   private collected = 0;
   private ended = false;
@@ -164,7 +166,19 @@ export class Game {
       const hierarchyEl = document.getElementById("si-hierarchy");
       const inspectorEl = document.getElementById("si-inspector");
       if (hierarchyEl && inspectorEl) {
-        this.sceneInspector = new SceneInspector(this.scene, this.camera, hierarchyEl, inspectorEl);
+        this.sceneInspector = new SceneInspector({
+          scene: this.scene,
+          gameplayCamera: this.camera,
+          viewCamera: this.freecamCamera,
+          renderer: this.renderer,
+          orbitControls: this.orbitControls,
+          hierarchyEl,
+          inspectorEl,
+        });
+        // A fresh SceneInspector instance is created each time freecam
+        // activates, so re-wire any previously-registered listener rather
+        // than relying on it surviving from a prior session.
+        if (this.gizmoModeChangeCallback) this.sceneInspector.addModeChangeListener(this.gizmoModeChangeCallback);
       }
     } else {
       this.orbitControls?.dispose();
@@ -175,6 +189,17 @@ export class Game {
       this.mainLayer.style.display = "";
       this.cameraHandler.update(this.player.position, 0); // hands the camera back to gameplay control immediately, rather than leaving it wherever freecam last pointed it until the next real update() tick
     }
+  }
+
+  /** Dev-only: Engine Room's Move/Rotate/Scale/Select toolbar — a thin passthrough since the gizmo itself lives inside SceneInspector, only constructed while freecam is active. */
+  setGizmoMode(mode: GizmoMode): void {
+    this.sceneInspector?.setMode(mode);
+  }
+
+  /** Dev-only: lets the Engine Room panel's gizmo-mode buttons stay in sync when the mode changes via keyboard shortcut (W/E/R/Q) instead of a button click. Call once, any time — stored and (re)attached to whichever SceneInspector instance is live, since a new one is created per freecam session. */
+  onGizmoModeChange(cb: (mode: GizmoMode) => void): void {
+    this.gizmoModeChangeCallback = cb;
+    this.sceneInspector?.addModeChangeListener(cb);
   }
 
   /** Advance all systems by one frame. Call once per requestAnimationFrame tick. */

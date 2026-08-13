@@ -76,10 +76,18 @@ export class UILayout {
     // their own CSS and are unaffected either way.
     this.container.style.pointerEvents = "none";
 
+    // Two passes so a "group" element's own node exists before any child
+    // that references it as `parentId` needs to be appended into it —
+    // order in the JSON array isn't guaranteed to put parents first.
     const sorted = [...data.elements].sort((a, b) => a.zIndex - b.zIndex);
+    const nodesById = new Map<string, { wrapper: HTMLElement; content: HTMLElement }>();
     for (const el of sorted) {
-      const { wrapper, content } = this.buildElement(el);
-      this.container.appendChild(wrapper);
+      nodesById.set(el.id, this.buildElement(el));
+    }
+    for (const el of sorted) {
+      const { wrapper, content } = nodesById.get(el.id)!;
+      const parent = el.parentId ? nodesById.get(el.parentId)?.content : undefined;
+      (parent ?? this.container).appendChild(wrapper);
       this.elements.set(el.name, content);
     }
   }
@@ -207,6 +215,24 @@ export class UILayout {
   }
 
   private buildContent(data: UIElementData): HTMLElement {
+    if (data.type === "group") {
+      // A group has no visual content of its own by default — it exists so
+      // nested elements can be positioned/sized relative to *it* (via
+      // parentId) instead of the canvas, and moved/resized together as one
+      // unit. `position: relative` here is what makes that work: it's the
+      // containing block every nested child's own `position: absolute` +
+      // percentage geometry resolves against, exactly like the canvas
+      // itself does at the top level.
+      const group = document.createElement("div");
+      group.style.position = "relative";
+      group.style.boxSizing = "border-box";
+      if (data.backgroundColor) group.style.backgroundColor = data.backgroundColor;
+      const radius = data.borderRadiusPct ?? 0;
+      if (radius) group.style.borderRadius = radius >= 50 ? "9999px" : `${radius}%`;
+      if (data.borderWidthPx) group.style.border = `${data.borderWidthPx}px solid ${data.borderColor ?? "#ffffff"}`;
+      return group;
+    }
+
     if (data.type === "image") {
       const img = document.createElement("img");
       img.src = data.src ?? "";

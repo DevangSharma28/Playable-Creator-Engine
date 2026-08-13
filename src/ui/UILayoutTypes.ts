@@ -21,7 +21,7 @@ export type AnchorPreset =
   | "bottom-center"
   | "bottom-right";
 
-export type UIElementType = "image" | "text" | "rect" | "joystick";
+export type UIElementType = "image" | "text" | "rect" | "joystick" | "group";
 
 export type UIAnimation = "none" | "pulse" | "bob" | "spin" | "fadeIn";
 
@@ -51,6 +51,15 @@ export interface UIElementData {
   type: UIElementType;
   /** Human label — shown in the editor's layer list and used for UILayout.get(name). */
   name: string;
+  /**
+   * id of a "group"-type element this one is nested inside, if any (absent = top-level,
+   * positioned relative to the canvas). Every geometry field below (xPct, anchor, etc.)
+   * is then relative to the *parent group's* box instead of the canvas — moving or
+   * resizing a group therefore moves/scales everything nested inside it, the same way
+   * Unity's RectTransform parenting or a Figma frame works. Set by the editor's
+   * "Group Selected" / "Ungroup" actions, not hand-edited.
+   */
+  parentId?: string;
 
   /** Position of the anchor point, as % of canvas width/height (0-100). Used when xUnit/yUnit is "pct" (the default). */
   xPct: number;
@@ -93,7 +102,7 @@ export interface UIElementData {
   fontWeight?: string;
   textAlign?: "left" | "center" | "right";
 
-  /** "rect" fields */
+  /** "rect" fields — also reused by "group" for an optional visible frame/background around its contents (defaults to fully transparent/borderless, i.e. a purely organizational group). */
   backgroundColor?: string;
   borderRadiusPct?: number;
   borderWidthPx?: number;
