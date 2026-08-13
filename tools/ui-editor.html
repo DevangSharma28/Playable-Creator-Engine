@@ -1,0 +1,2357 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>UI Layout Editor — Cube Roll</title>
+  <style>
+    :root {
+      --bg: #131416;
+      --panel-bg: #1c1e21;
+      --panel-bg-raised: #24262a;
+      --panel-border: #303338;
+      --accent: #ff5252;
+      --accent-dim: #ff52521a;
+      --accent-hover: #ff6b6b;
+      --text: #edeef0;
+      --text-dim: #93969c;
+      --text-faint: #6b6e74;
+      --guide: #4fd1ff;
+      --ok: #4ade80;
+      --radius: 8px;
+      --radius-sm: 5px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 13px;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Embedded (iframe overlay in public/index.html): let the real running
+     game show through everywhere the editor's own panels don't cover, so
+     you're editing directly against the live scene instead of a mockup. */
+    body.embedded,
+    body.embedded #viewport-wrap,
+    body.embedded #canvas {
+      background: transparent;
+    }
+
+    #app {
+      position: relative;
+      height: 100%;
+    }
+
+    /* ---- Toolbar ---- */
+    #toolbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      row-gap: 8px;
+      padding: 10px 14px;
+      background: linear-gradient(180deg, #1e2023, var(--panel-bg));
+      border-bottom: 1px solid var(--panel-border);
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+    }
+
+    /* Hidden standalone (nothing to "go back" to); shown only when embedded
+     — gated by the body.embedded class the boot script adds, not by a JS
+     inline-style toggle, since style.display = "" falls back to *this*
+     rule (none), not to visible. */
+    #btn-close-editor {
+      display: none;
+      background: rgba(255, 82, 82, 0.14) !important;
+      border-color: rgba(255, 82, 82, 0.35) !important;
+      color: #ff9a9a !important;
+    }
+
+    body.embedded #btn-close-editor {
+      display: inline-block;
+    }
+
+    #btn-close-editor:hover {
+      background: rgba(255, 82, 82, 0.24) !important;
+    }
+
+    #toolbar .title {
+      font-weight: 800;
+      margin-right: 12px;
+      white-space: nowrap;
+      font-size: 14px;
+      letter-spacing: -0.01em;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #toolbar .toolbar-label {
+      color: var(--text-dim);
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      margin-left: 2px;
+    }
+
+    #toolbar button,
+    #toolbar select,
+    #toolbar input[type=text] {
+      background: var(--panel-bg-raised);
+      color: var(--text);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      padding: 7px 11px;
+      font-size: 12.5px;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
+    }
+
+    #toolbar input[type=text] {
+      cursor: text;
+    }
+
+    #toolbar input[type=text]:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    #toolbar input[type=text]:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+    }
+
+    #layout-name {
+      width: 116px;
+    }
+
+    #layout-tag {
+      width: 84px;
+    }
+
+    #sync-status {
+      color: var(--ok);
+      font-size: 11.5px;
+      font-weight: 700;
+      white-space: nowrap;
+      display: none;
+    }
+
+    #btn-set-main, #btn-set-endcard {
+      display: none;
+    }
+
+    /* ---- Load-from-project modal ---- */
+    #load-modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: 2000;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #load-modal-backdrop.visible {
+      display: flex;
+    }
+
+    #load-modal {
+      background: var(--panel-bg);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius);
+      width: 380px;
+      max-height: 70vh;
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+    }
+
+    #load-modal h3 {
+      margin: 0 0 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    #load-modal-close {
+      cursor: pointer;
+      color: var(--text-dim);
+      font-size: 15px;
+    }
+
+    #load-modal-close:hover {
+      color: var(--text);
+    }
+
+    #load-modal-list {
+      overflow-y: auto;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 12px;
+      min-height: 40px;
+    }
+
+    .load-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: var(--panel-bg-raised);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      padding: 9px 11px;
+      cursor: pointer;
+      transition: border-color 0.12s ease;
+    }
+
+    .load-item:hover {
+      border-color: var(--accent);
+    }
+
+    .load-item.load-item-active {
+      border-color: color-mix(in srgb, var(--ok) 45%, transparent);
+    }
+
+    .load-item .load-item-name {
+      font-weight: 700;
+      font-size: 12.5px;
+      color: var(--text);
+    }
+
+    .load-item .load-item-meta {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .load-item .load-item-tag {
+      background: var(--accent-dim);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1.5px 8px;
+      border-radius: 999px;
+    }
+
+    .load-item .load-item-tag-active {
+      background: rgba(74, 222, 128, 0.16);
+      color: var(--ok);
+    }
+
+    .load-item .load-item-dims {
+      color: var(--text-faint);
+      font-size: 10.5px;
+    }
+
+    #load-modal-empty {
+      color: var(--text-faint);
+      font-size: 12px;
+      padding: 10px 2px;
+      line-height: 1.6;
+    }
+
+    .load-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    .load-modal-footer button {
+      background: var(--panel-bg-raised);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 7px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+
+    .load-modal-footer button:hover {
+      background: #32353b;
+    }
+
+    #toolbar button:hover:not(:disabled) {
+      background: #2d3035;
+      border-color: #3d4046;
+    }
+
+    #toolbar button:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    #toolbar button:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+
+    #toolbar button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.15) inset;
+    }
+
+    #toolbar button.primary:hover {
+      background: var(--accent-hover);
+    }
+
+    #toolbar button.icon-btn {
+      padding: 7px 10px;
+      font-size: 14px;
+    }
+
+    #toolbar .sep {
+      width: 1px;
+      height: 24px;
+      background: var(--panel-border);
+      margin: 0 6px;
+      flex-shrink: 0;
+    }
+
+    #toolbar .spacer {
+      flex: 1;
+    }
+
+    #toolbar select {
+      padding: 6px 8px;
+      max-width: 168px;
+    }
+
+    /* ---- Layers panel ---- */
+    #layers {
+      position: fixed;
+      left: 0;
+      top: 53px;
+      bottom: 0;
+      width: 220px;
+      z-index: 90;
+      background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+      backdrop-filter: blur(6px);
+      border-right: 1px solid var(--panel-border);
+      box-shadow: 4px 0 16px rgba(0, 0, 0, 0.25);
+      overflow-y: auto;
+      padding: 12px 10px;
+    }
+
+    #layers h3 {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-faint);
+      font-weight: 700;
+      margin: 2px 6px 10px;
+    }
+
+    .layer-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 9px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      margin-bottom: 3px;
+      border: 1px solid transparent;
+      transition: background 0.1s ease;
+    }
+
+    .layer-item:hover {
+      background: var(--panel-bg-raised);
+    }
+
+    .layer-item.selected {
+      background: var(--accent-dim);
+      border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+    }
+
+    .layer-item .icon {
+      width: 16px;
+      text-align: center;
+      opacity: 0.85;
+      flex-shrink: 0;
+      font-size: 13px;
+    }
+
+    .layer-item .name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      outline: none;
+      font-weight: 500;
+    }
+
+    .layer-item .name.editing {
+      background: var(--bg);
+      border-radius: 3px;
+      padding: 1px 4px;
+      white-space: normal;
+    }
+
+    .layer-item.hidden-el {
+      opacity: 0.4;
+    }
+
+    .layer-item .zbtns {
+      display: flex;
+      gap: 1px;
+      opacity: 0.5;
+      flex-shrink: 0;
+    }
+
+    .layer-item .zbtns button {
+      background: none;
+      border: none;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 11px;
+      padding: 3px 5px;
+      border-radius: 4px;
+    }
+
+    .layer-item .zbtns button:hover {
+      color: var(--accent);
+      background: rgba(255, 82, 82, 0.12);
+    }
+
+    #empty-layers {
+      color: var(--text-faint);
+      padding: 14px 6px;
+      line-height: 1.6;
+      font-size: 12.5px;
+    }
+
+    /* ---- Canvas viewport ----
+     Always real px, true 1:1 scale — no zoom. Its box is normally the full
+     window; when embedded and the parent page is running its own
+     device-frame simulator (see public/index.html), left/top/width/height
+     are instead set via JS (applyDeviceFrameToCanvas) to match that same
+     letterboxed box exactly, so what you edit against lines up with what's
+     actually visible through the transparent parts of this page.
+     Standalone (double-clicked, nothing behind it), it's a dark backdrop;
+     embedded (see body.embedded above), it's transparent so the real
+     running game — including its own letterbox bars — shows through. */
+    #viewport-wrap {
+      position: fixed;
+      inset: 0;
+      background: #0a0b0c;
+    }
+
+    #canvas {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      border: 2px solid rgba(180, 185, 195, 0.55);
+      box-shadow: 0 0 0 1px var(--guide), 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    .ui-el {
+      position: absolute;
+      cursor: move;
+    }
+
+    .ui-el.selected {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    .ui-el img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+      pointer-events: none;
+    }
+
+    .ui-el .text-node {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      white-space: pre-wrap;
+      pointer-events: none;
+      overflow: hidden;
+    }
+
+    .ui-el .rect-node {
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+    }
+
+    .ui-el .joystick-base {
+      width: 100%;
+      height: 100%;
+      box-sizing: border-box;
+      position: relative;
+    }
+
+    .ui-el .joystick-knob {
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    .resize-handle {
+      position: absolute;
+      right: -7px;
+      bottom: -7px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2.5px solid #fff;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+      cursor: nwse-resize;
+    }
+
+    .snap-guide {
+      position: absolute;
+      background: var(--guide);
+      pointer-events: none;
+      z-index: 999;
+      display: none;
+      box-shadow: 0 0 6px var(--guide);
+    }
+
+    .snap-guide.v {
+      top: 0;
+      bottom: 0;
+      width: 1px;
+    }
+
+    .snap-guide.h {
+      left: 0;
+      right: 0;
+      height: 1px;
+    }
+
+    /* ---- Properties panel ---- */
+    #properties {
+      position: fixed;
+      right: 0;
+      top: 53px;
+      bottom: 0;
+      width: 296px;
+      z-index: 90;
+      background: color-mix(in srgb, var(--panel-bg) 92%, transparent);
+      backdrop-filter: blur(6px);
+      border-left: 1px solid var(--panel-border);
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.25);
+      overflow-y: auto;
+      padding: 16px;
+    }
+
+    #properties h3 {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-faint);
+      font-weight: 700;
+      margin: 18px 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    #properties h3:first-child {
+      margin-top: 0;
+    }
+
+    .field {
+      margin-bottom: 13px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-bottom: 5px;
+      font-weight: 500;
+    }
+
+    .field input[type=text],
+    .field input[type=number],
+    .field select,
+    .field textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 7px 9px;
+      font-size: 12.5px;
+      transition: border-color 0.12s ease;
+    }
+
+    .field input[type=text]:focus,
+    .field input[type=number]:focus,
+    .field select:focus,
+    .field textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    .field textarea {
+      resize: vertical;
+      min-height: 52px;
+      font-family: inherit;
+    }
+
+    .field-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .field-row .field {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .measure-row {
+      display: flex;
+      gap: 4px;
+    }
+
+    .measure-row input[type=number] {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .unit-toggle {
+      display: flex;
+      flex-shrink: 0;
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+    }
+
+    .unit-btn {
+      background: var(--bg);
+      color: var(--text-dim);
+      border: none;
+      cursor: pointer;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 0 8px;
+      letter-spacing: 0.02em;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .unit-btn+.unit-btn {
+      border-left: 1px solid var(--panel-border);
+    }
+
+    .unit-btn:hover {
+      color: var(--text);
+    }
+
+    .unit-btn.active {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .field input[type=range] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .field input[type=color] {
+      width: 100%;
+      height: 32px;
+      border: none;
+      background: none;
+      padding: 0;
+      border-radius: var(--radius-sm);
+    }
+
+    .field .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .field .checkbox-row input {
+      width: auto;
+      accent-color: var(--accent);
+    }
+
+    .lock-aspect-note {
+      background: var(--panel-bg-raised);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      color: var(--text-dim);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    #no-selection {
+      color: var(--text-dim);
+      line-height: 1.65;
+      padding: 10px 2px;
+      font-size: 12.5px;
+    }
+
+    #no-selection kbd,
+    .shortcuts kbd {
+      background: var(--panel-bg-raised);
+      border: 1px solid var(--panel-border);
+      border-radius: 4px;
+      padding: 1.5px 6px;
+      font-size: 10.5px;
+      font-family: ui-monospace, monospace;
+    }
+
+    .shortcuts {
+      margin-top: 18px;
+      font-size: 11.5px;
+      color: var(--text-dim);
+      line-height: 2.1;
+    }
+
+    .anchor-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 4px;
+    }
+
+    .anchor-grid button {
+      background: var(--bg);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 7px 0;
+      font-size: 14px;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .anchor-grid button:hover {
+      background: var(--panel-bg-raised);
+    }
+
+    .anchor-grid button.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .action-row {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+    .action-row button {
+      flex: 1;
+      background: var(--panel-bg-raised);
+      border: 1px solid var(--panel-border);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 9px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.12s ease;
+    }
+
+    .action-row button:hover {
+      background: #32353b;
+    }
+
+    .delete-btn {
+      width: 100%;
+      margin-top: 8px;
+      background: rgba(255, 82, 82, 0.1);
+      border: 1px solid rgba(255, 82, 82, 0.3);
+      color: #ff9a9a;
+      border-radius: var(--radius-sm);
+      padding: 9px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.12s ease;
+    }
+
+    .delete-btn:hover {
+      background: rgba(255, 82, 82, 0.18);
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app">
+    <div id="toolbar">
+      <span class="title">🎮 UI Layout Editor</span>
+      <button id="btn-add-image" title="Add Image">+ Image</button>
+      <button id="btn-add-text" title="Add Text">+ Text</button>
+      <button id="btn-add-rect" title="Add Rect">+ Rect</button>
+      <button id="btn-add-joystick" title="Add Joystick">+ Joystick</button>
+      <div class="sep"></div>
+      <button id="btn-undo" class="icon-btn" title="Undo (Ctrl+Z)">↶</button>
+      <button id="btn-redo" class="icon-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
+      <button id="btn-duplicate" class="icon-btn" title="Duplicate (Ctrl+D)">⧉</button>
+      <span class="spacer"></span>
+      <span id="editing-label" class="toolbar-label"></span>
+      <input type="text" id="layout-name" placeholder="Layout name"
+        title="Filename this saves as under src/ui/layouts/" />
+      <input type="text" id="layout-tag" placeholder="Tag"
+        title="Free-form label shown in the Load list, e.g. 'endcard', 'hud'" />
+      <div class="sep"></div>
+      <button id="btn-connect"
+        title="Pick your project's src/ui/ folder once — after that, Save/Load work directly against it, no manual file moving">🔗
+        Connect Project</button>
+      <span id="sync-status">🟢 Synced</span>
+      <button id="btn-set-main"
+        title="Write this layout to src/ui/mainLayout.json — gameplay HUD/joystick, shown while playing. Dev server hot-reloads automatically.">⭐
+        Set as Main</button>
+      <button id="btn-set-endcard"
+        title="Write this layout to src/ui/endcardLayout.json — shown once the game ends. Dev server hot-reloads automatically.">🏁
+        Set as Endcard</button>
+      <button id="btn-load">📂 Load</button>
+      <button id="btn-new">New</button>
+      <button id="btn-save" class="primary">💾 Save</button>
+      <div class="sep"></div>
+      <button id="btn-close-editor" title="Close editor, back to game">✕ Close</button>
+      <input type="file" id="file-image-input" accept="image/*" style="display:none" />
+      <input type="file" id="file-load-input" accept="application/json" style="display:none" />
+    </div>
+
+    <div id="load-modal-backdrop">
+      <div id="load-modal">
+        <h3>Load layout <span id="load-modal-close" title="Close">✕</span></h3>
+        <div id="load-modal-list"></div>
+        <div class="load-modal-footer">
+          <button id="btn-load-from-computer">📁 Load from computer…</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="layers">
+      <h3>Layers</h3>
+      <div id="layer-list"></div>
+    </div>
+
+    <div id="viewport-wrap">
+      <div id="canvas">
+        <div class="snap-guide v" id="guide-v"></div>
+        <div class="snap-guide h" id="guide-h"></div>
+      </div>
+    </div>
+
+    <div id="properties">
+      <h3>Properties</h3>
+      <div id="properties-body">
+        <div id="no-selection">
+          Select a layer to edit it, or add a new element from the toolbar.<br /><br />
+          Drag on the canvas to move (snaps to center). Drag the red handle to resize — always from the element's
+          center, never a corner.<br /><br />
+          Check <b>🔒 Lock aspect ratio</b> on a layer (always on for Joystick) to stop it stretching into an ellipse on
+          screen shapes different from this one — or use a <b>PX</b> size instead, which never stretches at
+          all.<br /><br />
+          Click <b>⭐ Set as Main</b> or <b>🏁 Set as Endcard</b> when done — the running game hot-reloads immediately.
+          <div class="shortcuts">
+            <div><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> — undo / redo</div>
+            <div><kbd>Ctrl+D</kbd> — duplicate selected</div>
+            <div><kbd>Delete</kbd> — delete selected</div>
+            <div><kbd>Arrow keys</kbd> — nudge (+<kbd>Shift</kbd> for bigger steps)</div>
+            <div><kbd>Esc</kbd> — deselect</div>
+            <div>Double-click a layer name to rename</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      "use strict";
+
+      /* ------------------------------------------------------------------ */
+      /*  State                                                              */
+      /* ------------------------------------------------------------------ */
+
+      /**
+       * @typedef {{id:string,type:'image'|'text'|'rect'|'joystick',name:string,
+       *   xPct:number,yPct:number,widthPct:number,heightPct:number,anchor:string,
+       *   rotation:number,opacity:number,zIndex:number,visible:boolean,animation:string,
+       *   src?:string,text?:string,fontSizePct?:number,color?:string,fontWeight?:string,textAlign?:string,
+       *   backgroundColor?:string,borderRadiusPct?:number,borderColor?:string,borderWidthPx?:number,
+       *   baseColor?:string,knobColor?:string,knobSizePct?:number}} UIElementData
+       */
+
+      /** Always the canvas's real, live on-screen box size (see applyCanvasSize) — there's no separate "design canvas" anymore, the canvas IS the actual screen (or the parent's simulated device-frame box, when embedded — see applyDeviceFrameToCanvas). */
+      let canvasWidth = window.innerWidth;
+      let canvasHeight = window.innerHeight;
+      /** Always 1 — kept only so the existing %/px geometry math below (shared with the history it evolved from) doesn't need touching. No separate editor zoom: whatever box the canvas currently occupies (full window, or a simulated device frame) is always shown at true 1:1 scale. */
+      const currentZoomScale = 1;
+      /** @type {UIElementData[]} */
+      let elements = [];
+      let selectedId = null;
+      let nextZ = 1;
+
+      let history = [];
+      let future = [];
+      const MAX_HISTORY = 60;
+
+      const canvasEl = document.getElementById("canvas");
+      const layerListEl = document.getElementById("layer-list");
+      const propertiesBodyEl = document.getElementById("properties-body");
+      const guideV = document.getElementById("guide-v");
+      const guideH = document.getElementById("guide-h");
+
+      function uid() {
+        return "el_" + Math.random().toString(36).slice(2, 10);
+      }
+
+      function getSelected() {
+        return elements.find((e) => e.id === selectedId) || null;
+      }
+
+      function isTypingInField() {
+        const el = document.activeElement;
+        if (!el) return false;
+        const tag = el.tagName;
+        return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || el.isContentEditable;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /*  Undo / redo                                                        */
+      /* ------------------------------------------------------------------ */
+
+      function snapshot() {
+        return JSON.stringify({ canvasWidth, canvasHeight, elements, selectedId, nextZ });
+      }
+
+      function pushHistory() {
+        history.push(snapshot());
+        if (history.length > MAX_HISTORY) history.shift();
+        future = [];
+      }
+
+      function restore(json) {
+        const s = JSON.parse(json);
+        canvasWidth = s.canvasWidth;
+        canvasHeight = s.canvasHeight;
+        elements = s.elements;
+        selectedId = s.selectedId;
+        nextZ = s.nextZ;
+      }
+
+      function undo() {
+        if (history.length === 0) return;
+        future.push(snapshot());
+        restore(history.pop());
+        render();
+      }
+
+      function redo() {
+        if (future.length === 0) return;
+        history.push(snapshot());
+        restore(future.pop());
+        render();
+      }
+
+      /* ------------------------------------------------------------------ */
+      /*  Canvas sizing                                                      */
+      /* ------------------------------------------------------------------ */
+
+      /** Keep canvasWidth/canvasHeight (used for % math and px clamp bounds) tracking whatever the canvas's actual on-screen box currently is — the full window normally, or the parent's device-frame rect when embedded and one's been applied (see applyDeviceFrameToCanvas). */
+      function applyCanvasSize() {
+        const rect = canvasEl.getBoundingClientRect();
+        canvasWidth = rect.width;
+        canvasHeight = rect.height;
+      }
+
+      window.addEventListener("resize", () => {
+        applyCanvasSize();
+        renderCanvas();
+      });
+
+      /**
+       * When embedded, public/index.html's device-frame simulator broadcasts
+       * its current frame rect (real viewport px) on every change — Real mode
+       * included, always the full window there. Positioning the canvas to
+       * that exact rect means the elements you place line up with the same
+       * letterboxed box the real game is actually using, with no separate
+       * simulation logic duplicated in here.
+       */
+      let deviceFrameRect = null;
+
+      function applyDeviceFrameToCanvas() {
+        if (deviceFrameRect) {
+          canvasEl.style.left = deviceFrameRect.x + "px";
+          canvasEl.style.top = deviceFrameRect.y + "px";
+          canvasEl.style.width = deviceFrameRect.width + "px";
+          canvasEl.style.height = deviceFrameRect.height + "px";
+        } else {
+          canvasEl.style.left = "0";
+          canvasEl.style.top = "0";
+          canvasEl.style.width = "100%";
+          canvasEl.style.height = "100%";
+        }
+        applyCanvasSize();
+        renderCanvas();
+      }
+
+      window.addEventListener("message", (e) => {
+        if (e.origin !== window.location.origin) return;
+        if (e.data && e.data.type === "device-frame") {
+          deviceFrameRect = e.data.rect;
+          applyDeviceFrameToCanvas();
+        }
+      });
+
+      /* ------------------------------------------------------------------ */
+      /*  Anchor transform & fraction (must match UILayout.ts exactly)       */
+      /* ------------------------------------------------------------------ */
+
+      const ANCHOR_TRANSFORM = {
+        "top-left": "translate(0%, 0%)",
+        "top-center": "translate(-50%, 0%)",
+        "top-right": "translate(-100%, 0%)",
+        "middle-left": "translate(0%, -50%)",
+        "middle-center": "translate(-50%, -50%)",
+        "middle-right": "translate(-100%, -50%)",
+        "bottom-left": "translate(0%, -100%)",
+        "bottom-center": "translate(-50%, -100%)",
+        "bottom-right": "translate(-100%, -100%)",
+      };
+      const ANCHOR_FRAC = {
+        "top-left": { x: 0, y: 0 },
+        "top-center": { x: 0.5, y: 0 },
+        "top-right": { x: 1, y: 0 },
+        "middle-left": { x: 0, y: 0.5 },
+        "middle-center": { x: 0.5, y: 0.5 },
+        "middle-right": { x: 1, y: 0.5 },
+        "bottom-left": { x: 0, y: 1 },
+        "bottom-center": { x: 0.5, y: 1 },
+        "bottom-right": { x: 1, y: 1 },
+      };
+
+      function needsLockedAspect(d) {
+        // Mirrors UILayout.ts's needsLockedAspect() exactly — a joystick is
+        // always locked (a stretched knob/base never makes sense); anything
+        // else opts in via the "Lock aspect ratio" checkbox.
+        return d.type === "joystick" || d.lockAspect === true;
+      }
+      function visualAspectRatio(d) {
+        // The ratio itself is stored independently (see UILayoutTypes.ts's
+        // aspectRatio field) — NOT recomputed from widthPct/heightPct/canvas
+        // dimensions on every render. That would mean switching the canvas
+        // preset (e.g. portrait -> landscape) retroactively reinterprets and
+        // stretches every already-locked element, which is exactly the bug
+        // this decoupling exists to prevent.
+        return d.aspectRatio ?? 1;
+      }
+      /**
+       * Unit-aware geometry, all in *live on-screen px* (the real viewport,
+       * always — this editor has no separate zoom or device simulation).
+       * "%" fields resolve against the live container width/height (rectW/
+       * rectH) — exactly what CSS `%` does. "px" fields are a literal
+       * real-device px value that never depends on the container's shape.
+       * Locked-aspect height is
+       * always derived from width/ratio, regardless of either field's unit.
+       * Funneling drag/resize/snap through these means neither gesture code
+       * nor the properties panel has to special-case which unit is active.
+       */
+      function elemScreenWidth(d, rectW) {
+        return d.widthUnit === "px" ? (d.widthPx || 0) * currentZoomScale : (d.widthPct / 100) * rectW;
+      }
+      function elemScreenHeight(d, rectW, rectH) {
+        if (needsLockedAspect(d)) return elemScreenWidth(d, rectW) / visualAspectRatio(d);
+        return d.heightUnit === "px" ? (d.heightPx || 0) * currentZoomScale : (d.heightPct / 100) * rectH;
+      }
+      // Position PX is an offset from the anchor's OWN point, not always the
+      // container's top-left — the anchor's point is itself ANCHOR_FRAC of the
+      // container, so middle-center + (0,0) sits at the true center on any
+      // screen shape (0 offset from a point that's always 50% across/down);
+      // bottom-left + (32,32) sits 32px in from that corner, same as the real
+      // joystick-base's hardcoded `left: 32px; bottom: 32px`. Mirrors Unity's
+      // anchoredPosition — the offset is always relative to the anchor, never
+      // a fixed page origin. "%" resolves against each axis independently and
+      // is the default; it's unaffected by any of this.
+      //
+      // A positive offset always means "inward, toward center" regardless of
+      // which side the anchor is on — matching CSS's left/right and top/bottom
+      // conventions (bottom: 32px moves an element UP off the bottom edge,
+      // even though `top` and `bottom` count in opposite directions). Since
+      // position here is always driven through left/top, an anchor on the far
+      // edge (right/bottom, frac 1) needs its offset sign flipped to move
+      // inward the same way.
+      function pxSignX(d) {
+        return ANCHOR_FRAC[d.anchor].x === 1 ? -1 : 1;
+      }
+      function pxSignY(d) {
+        return ANCHOR_FRAC[d.anchor].y === 1 ? -1 : 1;
+      }
+      function elemScreenX(d, rectW) {
+        return d.xUnit === "px" ? ANCHOR_FRAC[d.anchor].x * rectW + pxSignX(d) * (d.xPx || 0) * currentZoomScale : (d.xPct / 100) * rectW;
+      }
+      function elemScreenY(d, rectH) {
+        return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + pxSignY(d) * (d.yPx || 0) * currentZoomScale : (d.yPct / 100) * rectH;
+      }
+      function boxCenterScreenX(d, rectW) {
+        return elemScreenX(d, rectW) + elemScreenWidth(d, rectW) * (0.5 - ANCHOR_FRAC[d.anchor].x);
+      }
+      function boxCenterScreenY(d, rectW, rectH) {
+        return elemScreenY(d, rectH) + elemScreenHeight(d, rectW, rectH) * (0.5 - ANCHOR_FRAC[d.anchor].y);
+      }
+      /** Given a desired box-center in live screen px, back out x/y in whichever unit that axis is currently using. */
+      function setXForScreenCenter(d, centerScreenX, rectW) {
+        const targetScreenX = centerScreenX - elemScreenWidth(d, rectW) * (0.5 - ANCHOR_FRAC[d.anchor].x);
+        if (d.xUnit === "px") d.xPx = (pxSignX(d) * (targetScreenX - ANCHOR_FRAC[d.anchor].x * rectW)) / currentZoomScale;
+        else d.xPct = (targetScreenX / rectW) * 100;
+      }
+      function setYForScreenCenter(d, centerScreenY, rectW, rectH) {
+        const targetScreenY = centerScreenY - elemScreenHeight(d, rectW, rectH) * (0.5 - ANCHOR_FRAC[d.anchor].y);
+        if (d.yUnit === "px") d.yPx = (pxSignY(d) * (targetScreenY - ANCHOR_FRAC[d.anchor].y * rectH)) / currentZoomScale;
+        else d.yPct = (targetScreenY / rectH) * 100;
+      }
+      /** Switches an axis's unit while preserving its current on-screen position/size exactly (no visual jump). */
+      function switchUnit(d, axis, newUnit) {
+        const rect = canvasEl.getBoundingClientRect();
+        if (axis === "x") {
+          const screenPx = elemScreenX(d, rect.width);
+          d.xUnit = newUnit;
+          if (newUnit === "px") d.xPx = (pxSignX(d) * (screenPx - ANCHOR_FRAC[d.anchor].x * rect.width)) / currentZoomScale;
+          else d.xPct = (screenPx / rect.width) * 100;
+        } else if (axis === "y") {
+          const screenPx = elemScreenY(d, rect.height);
+          d.yUnit = newUnit;
+          if (newUnit === "px") d.yPx = (pxSignY(d) * (screenPx - ANCHOR_FRAC[d.anchor].y * rect.height)) / currentZoomScale;
+          else d.yPct = (screenPx / rect.height) * 100;
+        } else if (axis === "width") {
+          const screenPx = elemScreenWidth(d, rect.width);
+          d.widthUnit = newUnit;
+          if (newUnit === "px") d.widthPx = screenPx / currentZoomScale;
+          else d.widthPct = (screenPx / rect.width) * 100;
+        } else if (axis === "height") {
+          const screenPx = elemScreenHeight(d, rect.width, rect.height);
+          d.heightUnit = newUnit;
+          if (newUnit === "px") d.heightPx = screenPx / currentZoomScale;
+          else d.heightPct = (screenPx / rect.height) * 100;
+        }
+      }
+
+      /* ------------------------------------------------------------------ */
+      /*  Rendering                                                           */
+      /* ------------------------------------------------------------------ */
+
+      function render() {
+        applyCanvasSize();
+        renderCanvas();
+        renderLayers();
+        renderProperties();
+        updateHistoryButtons();
+      }
+
+      function updateHistoryButtons() {
+        document.getElementById("btn-undo").disabled = history.length === 0;
+        document.getElementById("btn-redo").disabled = future.length === 0;
+        document.getElementById("btn-duplicate").disabled = !selectedId;
+      }
+
+      const TYPE_ICON = { image: "🖼️", text: "🔤", rect: "▭", joystick: "🕹️" };
+
+      function renderCanvas() {
+        // preserve guide lines across innerHTML reset
+        canvasEl.innerHTML = "";
+        canvasEl.appendChild(guideV);
+        canvasEl.appendChild(guideH);
+
+        const sorted = [...elements].sort((a, b) => a.zIndex - b.zIndex);
+        for (const data of sorted) {
+          const node = document.createElement("div");
+          node.className = "ui-el" + (data.id === selectedId ? " selected" : "");
+          node.style.left =
+            data.xUnit === "px"
+              ? "calc(" + ANCHOR_FRAC[data.anchor].x * 100 + "% + " + pxSignX(data) * (data.xPx || 0) * currentZoomScale + "px)"
+              : data.xPct + "%";
+          node.style.top =
+            data.yUnit === "px"
+              ? "calc(" + ANCHOR_FRAC[data.anchor].y * 100 + "% + " + pxSignY(data) * (data.yPx || 0) * currentZoomScale + "px)"
+              : data.yPct + "%";
+          node.style.width = data.widthUnit === "px" ? (data.widthPx || 0) * currentZoomScale + "px" : data.widthPct + "%";
+          if (needsLockedAspect(data)) {
+            node.style.aspectRatio = String(visualAspectRatio(data));
+            node.style.height = "auto";
+          } else if (data.heightUnit === "px") {
+            node.style.height = (data.heightPx || 0) * currentZoomScale + "px";
+          } else {
+            node.style.height = data.heightPct + "%";
+          }
+          node.style.opacity = data.visible === false ? 0.35 : data.opacity;
+          node.style.zIndex = data.zIndex;
+          node.style.transform = ANCHOR_TRANSFORM[data.anchor] + " rotate(" + data.rotation + "deg)";
+          node.dataset.id = data.id;
+
+          if (data.type === "image") {
+            const img = document.createElement("img");
+            img.src = data.src || "";
+            node.appendChild(img);
+          } else if (data.type === "text") {
+            const t = document.createElement("div");
+            t.className = "text-node";
+            t.textContent = data.text || "";
+            t.style.fontSize = (data.fontSizePct || 4) * (parseFloat(canvasEl.style.height) / 100) + "px";
+            t.style.color = data.color || "#ffffff";
+            t.style.fontWeight = data.fontWeight || "700";
+            t.style.textAlign = data.textAlign || "left";
+            t.style.justifyContent = data.textAlign === "center" ? "center" : data.textAlign === "right" ? "flex-end" : "flex-start";
+            node.appendChild(t);
+          } else if (data.type === "rect") {
+            const r = document.createElement("div");
+            r.className = "rect-node";
+            r.style.backgroundColor = data.backgroundColor || "rgba(0,0,0,0.3)";
+            const radius = data.borderRadiusPct || 0;
+            r.style.borderRadius = radius >= 50 ? "9999px" : radius + "%";
+            if (data.borderWidthPx) r.style.border = data.borderWidthPx + "px solid " + (data.borderColor || "#ffffff");
+            node.appendChild(r);
+          } else if (data.type === "joystick") {
+            const base = document.createElement("div");
+            base.className = "joystick-base";
+            base.style.borderRadius = "50%";
+            base.style.backgroundColor = data.baseColor || "rgba(255,255,255,0.22)";
+            base.style.border = "2px solid rgba(255,255,255,0.6)";
+            const knob = document.createElement("div");
+            knob.className = "joystick-knob";
+            const ks = data.knobSizePct != null ? data.knobSizePct : 45;
+            knob.style.width = ks + "%";
+            knob.style.height = ks + "%";
+            knob.style.borderRadius = "50%";
+            knob.style.backgroundColor = data.knobColor || "rgba(255,255,255,0.9)";
+            base.appendChild(knob);
+            node.appendChild(base);
+          }
+
+          if (data.id === selectedId) {
+            const handle = document.createElement("div");
+            handle.className = "resize-handle";
+            handle.addEventListener("pointerdown", (e) => startResize(e, data));
+            node.appendChild(handle);
+          }
+
+          node.addEventListener("pointerdown", (e) => {
+            if (e.target.classList.contains("resize-handle")) return;
+            selectedId = data.id;
+            startDrag(e, data);
+            render();
+          });
+
+          canvasEl.appendChild(node);
+        }
+      }
+
+      function renderLayers() {
+        layerListEl.innerHTML = "";
+        if (elements.length === 0) {
+          layerListEl.innerHTML = '<div id="empty-layers">No layers yet. Add an element from the toolbar above.</div>';
+          return;
+        }
+        const sorted = [...elements].sort((a, b) => b.zIndex - a.zIndex);
+        for (const data of sorted) {
+          const item = document.createElement("div");
+          item.className = "layer-item" + (data.id === selectedId ? " selected" : "") + (data.visible === false ? " hidden-el" : "");
+          item.innerHTML =
+            '<span class="icon">' + (TYPE_ICON[data.type] || "?") + "</span>" +
+            '<span class="name">' + escapeHtml(data.name) + "</span>" +
+            '<span class="zbtns"><button data-act="up" title="Bring forward">▲</button><button data-act="down" title="Send backward">▼</button></span>';
+          item.addEventListener("click", (e) => {
+            if (e.target.dataset.act) return;
+            selectedId = data.id;
+            render();
+          });
+          const nameEl = item.querySelector(".name");
+          nameEl.addEventListener("dblclick", (e) => {
+            e.stopPropagation();
+            startRename(nameEl, data);
+          });
+          item.querySelector('[data-act="up"]').addEventListener("click", (e) => {
+            e.stopPropagation();
+            pushHistory();
+            data.zIndex++;
+            render();
+          });
+          item.querySelector('[data-act="down"]').addEventListener("click", (e) => {
+            e.stopPropagation();
+            pushHistory();
+            data.zIndex--;
+            render();
+          });
+          layerListEl.appendChild(item);
+        }
+      }
+
+      function startRename(nameEl, data) {
+        nameEl.contentEditable = "true";
+        nameEl.classList.add("editing");
+        nameEl.focus();
+        document.execCommand("selectAll", false, null);
+
+        let committed = false;
+        function commit() {
+          if (committed) return;
+          committed = true;
+          const newName = nameEl.textContent.trim() || data.name;
+          if (newName !== data.name) {
+            pushHistory();
+            data.name = newName;
+          }
+          render();
+        }
+        nameEl.addEventListener("blur", commit, { once: true });
+        nameEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            nameEl.blur();
+          } else if (e.key === "Escape") {
+            committed = true;
+            render();
+          }
+        });
+      }
+
+      function renderProperties() {
+        const data = getSelected();
+        if (!data) {
+          propertiesBodyEl.innerHTML =
+            '<div id="no-selection">Select a layer to edit it, or add a new element from the toolbar.<br/><br/>' +
+            "Drag on the canvas to move (snaps to center). Drag the red handle to resize — always from the element's center, never a corner." +
+            '<br/><br/>Check <b>🔒 Lock aspect ratio</b> on a layer (always on for Joystick) to stop it stretching into an ellipse on screen shapes different from this one — or use a <b>PX</b> size instead, which never stretches at all.' +
+            '<br/><br/>Click <b>⭐ Set as Main</b> or <b>🏁 Set as Endcard</b> when done — the running game hot-reloads immediately.' +
+            '<div class="shortcuts">' +
+            "<div><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> — undo / redo</div>" +
+            "<div><kbd>Ctrl+D</kbd> — duplicate selected</div>" +
+            "<div><kbd>Delete</kbd> — delete selected</div>" +
+            "<div><kbd>Arrow keys</kbd> — nudge (+<kbd>Shift</kbd> for bigger steps)</div>" +
+            "<div><kbd>Esc</kbd> — deselect</div>" +
+            "<div>Double-click a layer name to rename</div>" +
+            "</div></div>";
+          return;
+        }
+
+        let html = "";
+        html += '<h3>' + (TYPE_ICON[data.type] || "") + " " + data.type + '</h3>';
+        html += field("Name", input("name", data.name, "text"));
+        html += '<div class="field"><label>Anchor point</label>' + anchorGrid(data.anchor) + "</div>";
+        html += '<div class="field-row">' + measureField("X", "x", data) + measureField("Y", "y", data) + "</div>";
+        const heightField = needsLockedAspect(data)
+          ? '<div class="field"><label>Height</label><div class="lock-aspect-note" style="margin:0;padding:8px 10px;">Auto</div></div>'
+          : measureField("Height", "height", data);
+        html += '<div class="field-row">' + measureField("Width", "width", data) + heightField + "</div>";
+
+        if (data.type === "joystick") {
+          html +=
+            '<div class="field lock-aspect-note">🔒 Always locked to a perfect circle — a stretched joystick never makes sense. ' +
+            "Width above just sets the overall size; the shape stays circular on every screen.</div>";
+        } else {
+          html +=
+            '<div class="field checkbox-row"><input type="checkbox" id="prop-lock-aspect" data-prop="lockAspect" ' +
+            (data.lockAspect ? "checked" : "") +
+            ' /><label for="prop-lock-aspect" style="margin:0;">🔒 Lock aspect ratio (prevents stretching on other screen shapes)</label></div>';
+          if (data.lockAspect) {
+            html +=
+              '<div class="field lock-aspect-note">Shape locked to ' +
+              visualAspectRatio(data).toFixed(2) +
+              ':1 in real screen pixels — Width above still controls overall size, but Height auto-follows Width to keep this ratio on any device.</div>';
+          }
+        }
+
+        html += field("Rotation (°)", input("rotation", data.rotation, "number"));
+        html += field("Opacity", '<input type="range" min="0" max="1" step="0.01" data-prop="opacity" value="' + data.opacity + '" />');
+        html +=
+          '<div class="field"><label>Animation</label><select data-prop="animation">' +
+          ["none", "pulse", "bob", "spin", "fadeIn"].map((a) => '<option value="' + a + '"' + (data.animation === a ? " selected" : "") + ">" + a + "</option>").join("") +
+          "</select></div>";
+        html +=
+          '<div class="field checkbox-row"><input type="checkbox" id="prop-visible" data-prop="visible" ' +
+          (data.visible === false ? "" : "checked") +
+          ' /><label for="prop-visible" style="margin:0;">Visible on game start</label></div>';
+
+        if (data.type === "text") {
+          html += "<h3>Text</h3>";
+          html += field("Text", '<textarea data-prop="text">' + escapeHtml(data.text || "") + "</textarea>");
+          html += field("Font size (% of canvas height)", input("fontSizePct", data.fontSizePct || 4, "number"));
+          html += field("Color", colorField("color", data.color || "#ffffff"));
+          html +=
+            '<div class="field"><label>Align</label><select data-prop="textAlign">' +
+            ["left", "center", "right"].map((a) => '<option value="' + a + '"' + (data.textAlign === a ? " selected" : "") + ">" + a + "</option>").join("") +
+            "</select></div>";
+          html +=
+            '<div class="field"><label>Weight</label><select data-prop="fontWeight">' +
+            ["400", "600", "700", "800"].map((w) => '<option value="' + w + '"' + (data.fontWeight === w ? " selected" : "") + ">" + w + "</option>").join("") +
+            "</select></div>";
+        } else if (data.type === "image") {
+          html += "<h3>Image</h3>";
+          html += field("Replace image", '<input type="file" accept="image/*" data-act="replace-image" />');
+        } else if (data.type === "rect") {
+          html += "<h3>Rect</h3>";
+          html += field("Background color", input("backgroundColor", data.backgroundColor || "rgba(0,0,0,0.3)", "text"));
+          html += field("Border radius % (50+ = pill)", input("borderRadiusPct", data.borderRadiusPct || 0, "number"));
+          html += field("Border width (px)", input("borderWidthPx", data.borderWidthPx || 0, "number"));
+          html += field("Border color", input("borderColor", data.borderColor || "#ffffff", "text"));
+        } else if (data.type === "joystick") {
+          html += "<h3>Joystick</h3>";
+          html += field("Base color", input("baseColor", data.baseColor || "rgba(255,255,255,0.22)", "text"));
+          html += field("Knob color", input("knobColor", data.knobColor || "rgba(255,255,255,0.9)", "text"));
+          html += field("Knob size % (of base diameter)", input("knobSizePct", data.knobSizePct != null ? data.knobSizePct : 45, "number"));
+          html += '<div class="field" style="color:var(--text-dim);font-size:11px;">Name must stay <kbd>joystick</kbd> for Game.ts to find it, unless you also update the lookup in Game.ts.</div>';
+        }
+
+        html += '<div class="action-row"><button id="btn-dup-prop">⧉ Duplicate</button></div>';
+        html += '<button class="delete-btn" id="btn-delete">Delete layer</button>';
+        propertiesBodyEl.innerHTML = html;
+
+        // Push one history snapshot per editing "session" (on focus), not per keystroke.
+        propertiesBodyEl.querySelectorAll("[data-prop]").forEach((el) => {
+          const prop = el.dataset.prop;
+          let sessionStarted = false;
+          const startSession = () => {
+            if (sessionStarted) return;
+            sessionStarted = true;
+            pushHistory();
+            updateHistoryButtons();
+          };
+          if (el.type === "checkbox") {
+            el.addEventListener("change", () => {
+              pushHistory();
+              data[prop] = el.checked;
+              if (prop === "lockAspect" && el.checked) {
+                // Capture whatever shape looks right *right now* (handles
+                // mixed %/px units correctly) as a fixed ratio in real screen
+                // px. Every time the box is (re-)checked, not just the first —
+                // if the user unlocked,
+                // resized freely, then re-locked, they want *that* new shape
+                // frozen, not a stale one from before. Never re-derive this on
+                // every render, though — that would silently reinterpret and
+                // stretch the element on every canvas/device change, the exact
+                // bug this field exists to prevent.
+                const rect = canvasEl.getBoundingClientRect();
+                data.aspectRatio = elemScreenWidth(data, rect.width) / elemScreenHeight(data, rect.width, rect.height);
+              }
+              render();
+            });
+            return;
+          }
+          el.addEventListener("focus", startSession);
+          el.addEventListener("pointerdown", startSession); // covers range sliders & color pickers
+          el.addEventListener("input", () => {
+            const val = el.type === "number" || el.type === "range" ? parseFloat(el.value) : el.value;
+            data[prop] = val;
+            renderCanvas();
+            if (prop === "name") renderLayers();
+          });
+          el.addEventListener("change", () => {
+            renderCanvas();
+            renderLayers();
+          });
+        });
+
+        const replaceInput = propertiesBodyEl.querySelector('[data-act="replace-image"]');
+        if (replaceInput) {
+          replaceInput.addEventListener("change", (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            pushHistory();
+            fileToDataUrl(file).then((src) => {
+              data.src = src;
+              render();
+            });
+          });
+        }
+
+        document.getElementById("btn-delete").addEventListener("click", () => deleteSelected());
+        document.getElementById("btn-dup-prop").addEventListener("click", () => duplicateSelected());
+      }
+
+      function colorField(prop, value) {
+        // Plain text input, not <input type=color>, because our schema allows
+        // rgba()/CSS color strings which the native color picker can't represent.
+        return '<input type="text" data-prop="' + prop + '" value="' + escapeAttr(value) + '" />';
+      }
+
+      function anchorGrid(current) {
+        const presets = [
+          "top-left", "top-center", "top-right",
+          "middle-left", "middle-center", "middle-right",
+          "bottom-left", "bottom-center", "bottom-right",
+        ];
+        const icons = { "top-left": "↖", "top-center": "↑", "top-right": "↗", "middle-left": "←", "middle-center": "●", "middle-right": "→", "bottom-left": "↙", "bottom-center": "↓", "bottom-right": "↘" };
+        return (
+          '<div class="anchor-grid">' +
+          presets
+            .map((p) => '<button data-anchor="' + p + '" class="' + (p === current ? "active" : "") + '">' + icons[p] + "</button>")
+            .join("") +
+          "</div>"
+        );
+      }
+
+      function field(label, inputHtml) {
+        return '<div class="field"><label>' + label + "</label>" + inputHtml + "</div>";
+      }
+      function input(prop, value, type) {
+        return '<input type="' + type + '" data-prop="' + prop + '" value="' + escapeAttr(value) + '" />';
+      }
+
+      const MEASURE_AXES = {
+        x: { pct: "xPct", px: "xPx", unit: "xUnit" },
+        y: { pct: "yPct", px: "yPx", unit: "yUnit" },
+        width: { pct: "widthPct", px: "widthPx", unit: "widthUnit" },
+        height: { pct: "heightPct", px: "heightPx", unit: "heightUnit" },
+      };
+      const IS_POSITION_AXIS = { x: true, y: true, width: false, height: false };
+      /** A number field with a %/PX unit toggle — % behaves as before (stretches with the container), PX is a literal, unscaled value. Defaults to % when unset, so existing layouts render unchanged. */
+      function measureField(label, axis, data) {
+        const spec = MEASURE_AXES[axis];
+        const unit = data[spec.unit] === "px" ? "px" : "pct";
+        const prop = unit === "px" ? spec.px : spec.pct;
+        const value = round(data[prop] || 0);
+        const pxTitle = IS_POSITION_AXIS[axis]
+          ? "Fixed pixel offset from the anchor point itself — 0 means exactly at the anchor (e.g. true screen center for a middle-center anchor), like Unity's anchoredPosition. Pick a corner anchor for a fixed edge margin (e.g. bottom-left + 32,32 ≈ the real joystick's own left:32px;bottom:32px)."
+          : "Fixed pixels — same real size on every device, never stretches (what stops a locked-aspect shape like the joystick from ballooning)";
+        return (
+          '<div class="field measure-field">' +
+          "<label>" + label + "</label>" +
+          '<div class="measure-row">' +
+          '<input type="number" data-prop="' + prop + '" value="' + escapeAttr(value) + '" />' +
+          '<div class="unit-toggle" data-axis="' + axis + '">' +
+          '<button type="button" class="unit-btn' + (unit === "pct" ? " active" : "") + '" data-unit="pct" title="Percent of screen — tracks this axis independently, correct for proportional/centered placement on any screen shape">%</button>' +
+          '<button type="button" class="unit-btn' + (unit === "px" ? " active" : "") + '" data-unit="px" title="' + escapeAttr(pxTitle) + '">PX</button>' +
+          "</div></div></div>"
+        );
+      }
+      function round(n) {
+        return Math.round(n * 100) / 100;
+      }
+      function escapeHtml(s) {
+        return (s || "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+      }
+      function escapeAttr(s) {
+        return String(s).replace(/"/g, "&quot;");
+      }
+
+      // Anchor buttons + measure-field unit toggles live inside properties panel, delegate clicks
+      propertiesBodyEl.addEventListener("click", (e) => {
+        const unitBtn = e.target.closest(".unit-btn");
+        if (unitBtn) {
+          const axis = unitBtn.closest(".unit-toggle").dataset.axis;
+          const newUnit = unitBtn.dataset.unit;
+          const data = getSelected();
+          if (!data) return;
+          pushHistory();
+          switchUnit(data, axis, newUnit);
+          render();
+          return;
+        }
+        const btn = e.target.closest("[data-anchor]");
+        if (!btn) return;
+        const data = getSelected();
+        if (!data) return;
+        pushHistory();
+        data.anchor = btn.dataset.anchor;
+        render();
+      });
+
+      /* ------------------------------------------------------------------ */
+      /*  Drag & resize on canvas (with center snap guides)                  */
+      /* ------------------------------------------------------------------ */
+
+      const SNAP_THRESHOLD_PCT = 1.5;
+
+      function startDrag(e, data) {
+        e.preventDefault();
+        pushHistory();
+        const canvasRect = canvasEl.getBoundingClientRect();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startXPct = data.xPct;
+        const startYPct = data.yPct;
+        const startXPx = data.xPx || 0;
+        const startYPx = data.yPx || 0;
+
+        function onMove(ev) {
+          const dxScreen = ev.clientX - startX;
+          const dyScreen = ev.clientY - startY;
+
+          if (data.xUnit === "px") {
+            data.xPx = clamp(startXPx + (pxSignX(data) * dxScreen) / currentZoomScale, -canvasWidth * 0.5, canvasWidth * 1.5);
+          } else {
+            data.xPct = clamp(startXPct + (dxScreen / canvasRect.width) * 100, -50, 150);
+          }
+          if (data.yUnit === "px") {
+            data.yPx = clamp(startYPx + (pxSignY(data) * dyScreen) / currentZoomScale, -canvasHeight * 0.5, canvasHeight * 1.5);
+          } else {
+            data.yPct = clamp(startYPct + (dyScreen / canvasRect.height) * 100, -50, 150);
+          }
+
+          // Snap the element's visual center to canvas center when close — in
+          // live screen px, so it's correct regardless of unit.
+          let snappedV = false;
+          let snappedH = false;
+          const cx = boxCenterScreenX(data, canvasRect.width);
+          const cy = boxCenterScreenY(data, canvasRect.width, canvasRect.height);
+          const snapX = (SNAP_THRESHOLD_PCT / 100) * canvasRect.width;
+          const snapY = (SNAP_THRESHOLD_PCT / 100) * canvasRect.height;
+          if (Math.abs(cx - canvasRect.width / 2) < snapX) {
+            setXForScreenCenter(data, canvasRect.width / 2, canvasRect.width);
+            snappedV = true;
+          }
+          if (Math.abs(cy - canvasRect.height / 2) < snapY) {
+            setYForScreenCenter(data, canvasRect.height / 2, canvasRect.width, canvasRect.height);
+            snappedH = true;
+          }
+          guideV.style.display = snappedV ? "block" : "none";
+          guideV.style.left = "50%";
+          guideH.style.display = snappedH ? "block" : "none";
+          guideH.style.top = "50%";
+
+          renderCanvas();
+        }
+        function onUp() {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          guideV.style.display = "none";
+          guideH.style.display = "none";
+          render();
+        }
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      }
+
+      function startResize(e, data) {
+        e.preventDefault();
+        e.stopPropagation();
+        pushHistory();
+        const canvasRect = canvasEl.getBoundingClientRect();
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startWidthScreen = elemScreenWidth(data, canvasRect.width);
+        const startHeightScreen = elemScreenHeight(data, canvasRect.width, canvasRect.height);
+        // Capture the box's visual center before resizing, then re-solve x/y
+        // after each size change so the center stays put — like scaling from
+        // the middle in a real design tool, regardless of which anchor point
+        // is used for positioning. All in live screen px so it's correct
+        // whether width/height/x/y are mixing % and px units.
+        const centerScreenX = boxCenterScreenX(data, canvasRect.width);
+        const centerScreenY = boxCenterScreenY(data, canvasRect.width, canvasRect.height);
+        const lockedRatio = needsLockedAspect(data) ? visualAspectRatio(data) : null;
+
+        function writeWidthScreen(px) {
+          if (data.widthUnit === "px") data.widthPx = clamp(px / currentZoomScale, 4, 4000);
+          else data.widthPct = clamp((px / canvasRect.width) * 100, 2, 200);
+        }
+        function writeHeightScreen(px) {
+          if (data.heightUnit === "px") data.heightPx = clamp(px / currentZoomScale, 4, 4000);
+          else data.heightPct = clamp((px / canvasRect.height) * 100, 2, 200);
+        }
+
+        function onMove(ev) {
+          const dxScreen = ev.clientX - startX;
+          const dyScreen = ev.clientY - startY;
+
+          if (lockedRatio) {
+            // Follow whichever axis is being dragged further, so a mostly-
+            // vertical drag still resizes a locked circle/square sensibly.
+            if (Math.abs(dxScreen) >= Math.abs(dyScreen)) {
+              writeWidthScreen(Math.max(4, startWidthScreen + dxScreen));
+            } else {
+              const newHeightScreen = Math.max(4, startHeightScreen + dyScreen);
+              writeWidthScreen(newHeightScreen * lockedRatio);
+            }
+          } else {
+            writeWidthScreen(Math.max(4, startWidthScreen + dxScreen));
+            writeHeightScreen(Math.max(4, startHeightScreen + dyScreen));
+          }
+
+          setXForScreenCenter(data, centerScreenX, canvasRect.width);
+          setYForScreenCenter(data, centerScreenY, canvasRect.width, canvasRect.height);
+
+          renderCanvas();
+        }
+        function onUp() {
+          window.removeEventListener("pointermove", onMove);
+          window.removeEventListener("pointerup", onUp);
+          render();
+        }
+        window.addEventListener("pointermove", onMove);
+        window.addEventListener("pointerup", onUp);
+      }
+
+      function clamp(v, min, max) {
+        return Math.max(min, Math.min(max, v));
+      }
+
+      /* ------------------------------------------------------------------ */
+      /*  Add / delete / duplicate                                           */
+      /* ------------------------------------------------------------------ */
+
+      function baseNewElement(type) {
+        return {
+          id: uid(),
+          type: type,
+          xPct: 50,
+          yPct: 50,
+          anchor: "middle-center",
+          rotation: 0,
+          opacity: 1,
+          zIndex: nextZ++,
+          visible: true,
+          animation: "none",
+          lockAspect: false,
+        };
+      }
+
+      function addElement(data) {
+        pushHistory();
+        elements.push(data);
+        selectedId = data.id;
+        render();
+      }
+
+      function deleteSelected() {
+        const data = getSelected();
+        if (!data) return;
+        pushHistory();
+        elements = elements.filter((e) => e.id !== data.id);
+        selectedId = null;
+        render();
+      }
+
+      function duplicateSelected() {
+        const data = getSelected();
+        if (!data) return;
+        pushHistory();
+        const copy = Object.assign({}, data, {
+          id: uid(),
+          name: data.name + " copy",
+          xPct: clamp(data.xPct + 3, -50, 150),
+          yPct: clamp(data.yPct + 3, -50, 150),
+          zIndex: nextZ++,
+        });
+        elements.push(copy);
+        selectedId = copy.id;
+        render();
+      }
+
+      document.getElementById("btn-undo").addEventListener("click", undo);
+      document.getElementById("btn-redo").addEventListener("click", redo);
+      document.getElementById("btn-duplicate").addEventListener("click", duplicateSelected);
+
+      /* ------------------------------------------------------------------ */
+      /*  Keyboard shortcuts                                                  */
+      /* ------------------------------------------------------------------ */
+
+      window.addEventListener("keydown", (e) => {
+        const mod = e.ctrlKey || e.metaKey;
+
+        // Let native undo/redo work inside text inputs — only intercept
+        // Ctrl+Z/Y/D for the editor's own history when focus isn't in a field.
+        if (mod && !isTypingInField()) {
+          if (e.key.toLowerCase() === "z") {
+            e.preventDefault();
+            if (e.shiftKey) redo();
+            else undo();
+            return;
+          }
+          if (e.key.toLowerCase() === "y") {
+            e.preventDefault();
+            redo();
+            return;
+          }
+          if (e.key.toLowerCase() === "d") {
+            e.preventDefault();
+            duplicateSelected();
+            return;
+          }
+        }
+
+        if (isTypingInField()) return;
+
+        if (e.key === "Delete" || e.key === "Backspace") {
+          if (selectedId) {
+            e.preventDefault();
+            deleteSelected();
+          }
+          return;
+        }
+        if (e.key === "Escape") {
+          selectedId = null;
+          render();
+          return;
+        }
+        const data = getSelected();
+        if (!data) return;
+        const step = e.shiftKey ? 5 : 1;
+        if (e.key === "ArrowLeft") {
+          pushHistory();
+          data.xPct = clamp(data.xPct - step, -50, 150);
+          render();
+        } else if (e.key === "ArrowRight") {
+          pushHistory();
+          data.xPct = clamp(data.xPct + step, -50, 150);
+          render();
+        } else if (e.key === "ArrowUp") {
+          pushHistory();
+          data.yPct = clamp(data.yPct - step, -50, 150);
+          render();
+        } else if (e.key === "ArrowDown") {
+          pushHistory();
+          data.yPct = clamp(data.yPct + step, -50, 150);
+          render();
+        }
+      });
+
+      /* ------------------------------------------------------------------ */
+      /*  Toolbar actions                                                     */
+      /* ------------------------------------------------------------------ */
+
+      function fileToDataUrl(file) {
+        return new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+      }
+
+      document.getElementById("btn-add-image").addEventListener("click", () => {
+        document.getElementById("file-image-input").click();
+      });
+
+      document.getElementById("file-image-input").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const src = await fileToDataUrl(file);
+        const img = new Image();
+        img.onerror = () => {
+          alert("Couldn't read that image file — try a different PNG/JPG.");
+        };
+        img.onload = () => {
+          const aspect = img.naturalWidth / img.naturalHeight;
+          const widthPct = 30;
+          const heightPct = widthPct / aspect / (canvasWidth / canvasHeight);
+          addElement(
+            Object.assign(baseNewElement("image"), {
+              name: file.name.replace(/\.[a-z0-9]+$/i, ""),
+              widthPct: widthPct,
+              heightPct: heightPct,
+              src: src,
+            })
+          );
+        };
+        img.src = src;
+        e.target.value = "";
+      });
+
+      document.getElementById("btn-add-text").addEventListener("click", () => {
+        addElement(
+          Object.assign(baseNewElement("text"), {
+            name: "New Text",
+            widthPct: 40,
+            heightPct: 10,
+            text: "New Text",
+            fontSizePct: 4,
+            color: "#ffffff",
+            fontWeight: "700",
+            textAlign: "center",
+          })
+        );
+      });
+
+      document.getElementById("btn-add-rect").addEventListener("click", () => {
+        addElement(
+          Object.assign(baseNewElement("rect"), {
+            name: "New Rect",
+            widthPct: 40,
+            heightPct: 12,
+            backgroundColor: "rgba(0,0,0,0.4)",
+            borderRadiusPct: 12,
+            borderWidthPx: 0,
+            borderColor: "#ffffff",
+          })
+        );
+      });
+
+      document.getElementById("btn-add-joystick").addEventListener("click", () => {
+        addElement(
+          Object.assign(baseNewElement("joystick"), {
+            name: "joystick", // Game.ts looks up the joystick by exactly this name — keep it, or update mainUI.getJoystick("joystick") in Game.ts if you rename it
+            anchor: "middle-center",
+            xPct: 21.75,
+            yPct: 87.75,
+            widthPct: 27.5,
+            heightPct: 15.5,
+            aspectRatio: 1,
+            baseColor: "rgba(255,255,255,0.22)",
+            knobColor: "rgba(255,255,255,0.9)",
+            knobSizePct: 45,
+          })
+        );
+      });
+
+      document.getElementById("btn-new").addEventListener("click", () => {
+        if (elements.length > 0 && !confirm("Clear all layers and start a new layout? This can't be undone.")) return;
+        elements = [];
+        selectedId = null;
+        nextZ = 1;
+        history = [];
+        future = [];
+        currentFileHandle = null;
+        currentFileKind = null;
+        document.getElementById("layout-name").value = "";
+        document.getElementById("layout-tag").value = "";
+        updateEditingLabel();
+        render();
+      });
+
+      function currentLayoutData() {
+        return {
+          version: 1,
+          canvasWidth: canvasWidth,
+          canvasHeight: canvasHeight,
+          elements: elements.map((e) => Object.assign({}, e)),
+        };
+      }
+
+      function sanitizeFilename(name) {
+        const cleaned = (name || "").trim().replace(/[^a-z0-9-_]+/gi, "-").replace(/^-+|-+$/g, "");
+        return cleaned || "untitled";
+      }
+
+      function downloadLayoutJson() {
+        const name = document.getElementById("layout-name").value.trim();
+        const blob = new Blob([JSON.stringify(currentLayoutData(), null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = sanitizeFilename(name || "layout") + ".json";
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+
+      /**
+       * Applies parsed layout data to editor state (elements/history). Doesn't
+       * touch canvasWidth/canvasHeight — those always track the real live
+       * viewport (see applyCanvasSize), not whatever a loaded file's metadata
+       * happened to record; and doesn't touch file-tracking state.
+       */
+      function applyLoadedData(data) {
+        elements = (data.elements || []).map((el) =>
+          Object.assign({ id: uid(), visible: true, animation: "none", lockAspect: false }, el)
+        );
+        nextZ = elements.reduce((max, el) => Math.max(max, el.zIndex + 1), 1);
+        selectedId = null;
+        history = [];
+        future = [];
+        document.getElementById("layout-tag").value = data.tag || "";
+        render();
+      }
+
+      /** Loads a layout from raw JSON text with no bound file handle (native file picker) — next Save creates a new project file. */
+      function loadFromText(text, fileNameHint) {
+        try {
+          const data = JSON.parse(text);
+          applyLoadedData(data);
+          document.getElementById("layout-name").value = data.name || (fileNameHint || "").replace(/\.json$/, "");
+          currentFileHandle = null;
+          currentFileKind = null;
+          updateEditingLabel();
+          return true;
+        } catch (err) {
+          alert("Couldn't parse that file as a UI layout JSON: " + err.message);
+          return false;
+        }
+      }
+
+      document.getElementById("btn-save").addEventListener("click", () => {
+        if (projectRootHandle && layoutsDirHandle) {
+          saveToProject().catch((err) => alert("Save failed: " + err.message));
+        } else {
+          downloadLayoutJson();
+        }
+      });
+
+      document.getElementById("btn-load").addEventListener("click", () => {
+        if (layoutsDirHandle) {
+          openLoadModal();
+        } else {
+          document.getElementById("file-load-input").click();
+        }
+      });
+
+      document.getElementById("file-load-input").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const text = await file.text();
+        loadFromText(text, file.name);
+        e.target.value = "";
+      });
+
+      /* ------------------------------------------------------------------ */
+      /*  Project sync (File System Access API — Chrome/Edge only)           */
+      /* ------------------------------------------------------------------ */
+
+      const FS_SUPPORTED = typeof window.showDirectoryPicker === "function";
+      let projectRootHandle = null;
+      let layoutsDirHandle = null;
+      let statusResetTimer = null;
+      /** The real, writable handle Save should overwrite — null means "no project file bound yet, Save creates one." */
+      let currentFileHandle = null;
+      /** 'main' (src/ui/mainLayout.json — gameplay HUD/joystick) | 'endcard' (src/ui/endcardLayout.json) | 'layout' (a saved variant under layouts/) | null (unsaved/imported). */
+      let currentFileKind = null;
+      const ACTIVE_KINDS = {
+        main: { filename: "mainLayout.json", label: "mainLayout.json ★ main" },
+        endcard: { filename: "endcardLayout.json", label: "endcardLayout.json ★ endcard" },
+      };
+
+      function updateEditingLabel() {
+        const el = document.getElementById("editing-label");
+        const nameInput = document.getElementById("layout-name");
+        const tagInput = document.getElementById("layout-tag");
+        const activeInfo = ACTIVE_KINDS[currentFileKind];
+
+        nameInput.disabled = !!activeInfo;
+        tagInput.disabled = !!activeInfo;
+        nameInput.title = activeInfo
+          ? "Name/tag don't apply here — Save overwrites " + activeInfo.filename + " directly while it's loaded. Load a layout (or click New) to Save As instead."
+          : "Filename this saves as under src/ui/layouts/";
+
+        if (activeInfo) {
+          el.textContent = "Editing: " + activeInfo.label;
+        } else if (currentFileKind === "layout" && currentFileHandle) {
+          el.textContent = "Editing: " + currentFileHandle.name;
+        } else {
+          el.textContent = "New layout (unsaved)";
+        }
+      }
+
+      const IDB_NAME = "ui-editor-fs";
+      const IDB_STORE = "handles";
+      function idbOpen() {
+        return new Promise((resolve, reject) => {
+          const req = indexedDB.open(IDB_NAME, 1);
+          req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+      async function idbSet(key, value) {
+        const db = await idbOpen();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, "readwrite");
+          tx.objectStore(IDB_STORE).put(value, key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        });
+      }
+      async function idbGet(key) {
+        const db = await idbOpen();
+        return new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, "readonly");
+          const req = tx.objectStore(IDB_STORE).get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        });
+      }
+
+      function flashStatus(msg) {
+        const el = document.getElementById("sync-status");
+        el.textContent = msg;
+        clearTimeout(statusResetTimer);
+        statusResetTimer = setTimeout(() => {
+          el.textContent = "🟢 Synced";
+        }, 2400);
+      }
+
+      async function afterConnect(rootHandle) {
+        projectRootHandle = rootHandle;
+        layoutsDirHandle = await rootHandle.getDirectoryHandle("layouts", { create: true });
+        idbSet("projectRoot", rootHandle).catch(() => { });
+        document.getElementById("btn-connect").style.display = "none";
+        document.getElementById("sync-status").style.display = "";
+        document.getElementById("btn-set-main").style.display = "";
+        document.getElementById("btn-set-endcard").style.display = "";
+
+        // Nothing loaded yet (fresh boot) — pull in whatever's actually live
+        // right now (mainLayout.json, the more commonly edited of the two),
+        // so opening the editor shows you what you're really looking at
+        // instead of a blank canvas.
+        if (elements.length === 0) {
+          try {
+            const activeHandle = await rootHandle.getFileHandle(ACTIVE_KINDS.main.filename);
+            const file = await activeHandle.getFile();
+            const data = JSON.parse(await file.text());
+            applyLoadedData(data);
+            document.getElementById("layout-name").value = data.name || "";
+            currentFileHandle = activeHandle;
+            currentFileKind = "main";
+            updateEditingLabel();
+          } catch (e) {
+            // Fresh project, no main layout yet — nothing to preload.
+          }
+        }
+      }
+
+      async function connectProject() {
+        if (!FS_SUPPORTED) {
+          alert("This browser can't sync directly to your project (needs Chrome or Edge). Use Save/Load JSON instead — save the file, then move it into src/ui/ by hand.");
+          return;
+        }
+        try {
+          const stored = await idbGet("projectRoot").catch(() => null);
+          if (stored) {
+            const perm = await stored.requestPermission({ mode: "readwrite" });
+            if (perm === "granted") {
+              await afterConnect(stored);
+              return;
+            }
+          }
+          // `id` lets Chrome remember this specific picker's last-used folder across
+          // visits; `startIn` opens right at the previously connected folder (even
+          // if its permission lapsed) so re-picking is a couple clicks, not a
+          // full re-navigation. Browsers still require this one explicit click —
+          // there's no API to grant filesystem access without a user gesture.
+          const pickerOpts = { mode: "readwrite", id: "playable-ui-project" };
+          if (stored) pickerOpts.startIn = stored;
+          const picked = await window.showDirectoryPicker(pickerOpts);
+          await afterConnect(picked);
+        } catch (err) {
+          if (err.name !== "AbortError") alert("Couldn't connect: " + err.message);
+        }
+      }
+
+      async function tryAutoReconnect() {
+        if (!FS_SUPPORTED) return;
+        const stored = await idbGet("projectRoot").catch(() => null);
+        if (!stored) return;
+        const perm = await stored.queryPermission({ mode: "readwrite" }).catch(() => "denied");
+        if (perm === "granted") {
+          await afterConnect(stored).catch(() => { });
+        } else {
+          document.getElementById("btn-connect").textContent = "🔗 Reconnect Project";
+        }
+      }
+
+      /**
+       * Save always writes back to whatever file is currently loaded:
+       * - loaded mainLayout.json or endcardLayout.json -> overwrite it directly
+       * - loaded a layouts/*.json and the name field is unchanged -> overwrite that same file
+       * - name changed, or nothing loaded yet -> "Save As": create a new file under
+       *   layouts/ and bind to it, so the *next* Save overwrites that one instead
+       *   of spawning another copy.
+       */
+      async function saveToProject() {
+        const activeInfo = ACTIVE_KINDS[currentFileKind];
+        if (activeInfo && currentFileHandle) {
+          const writable = await currentFileHandle.createWritable();
+          await writable.write(JSON.stringify(currentLayoutData(), null, 2));
+          await writable.close();
+          flashStatus("💾 Saved " + activeInfo.filename + " — game hot-reloads");
+          updateEditingLabel();
+          return;
+        }
+
+        const nameInput = document.getElementById("layout-name");
+        const tagInput = document.getElementById("layout-tag");
+        const name = nameInput.value.trim() || "untitled";
+        const tag = tagInput.value.trim();
+        const filename = sanitizeFilename(name) + ".json";
+        const data = Object.assign(currentLayoutData(), { name: name, tag: tag });
+
+        const sameFile = currentFileKind === "layout" && currentFileHandle && currentFileHandle.name === filename;
+        const fileHandle = sameFile ? currentFileHandle : await layoutsDirHandle.getFileHandle(filename, { create: true });
+
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(data, null, 2));
+        await writable.close();
+
+        currentFileHandle = fileHandle;
+        currentFileKind = "layout";
+        updateEditingLabel();
+        flashStatus((sameFile ? "💾 Saved " : "💾 Saved as ") + "layouts/" + filename);
+      }
+
+      /** Writes the current layout to mainLayout.json or endcardLayout.json and binds to it, so the next Save overwrites it directly. */
+      async function setActiveKind(kind) {
+        if (!projectRootHandle) return;
+        const info = ACTIVE_KINDS[kind];
+        const fileHandle = await projectRootHandle.getFileHandle(info.filename, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(JSON.stringify(currentLayoutData(), null, 2));
+        await writable.close();
+        currentFileHandle = fileHandle;
+        currentFileKind = kind;
+        updateEditingLabel();
+        flashStatus((kind === "main" ? "⭐" : "🏁") + " " + info.filename + " — game hot-reloads");
+      }
+
+      document.getElementById("btn-connect").addEventListener("click", connectProject);
+      document.getElementById("btn-set-main").addEventListener("click", () => {
+        setActiveKind("main").catch((err) => alert("Couldn't set as main: " + err.message));
+      });
+      document.getElementById("btn-set-endcard").addEventListener("click", () => {
+        setActiveKind("endcard").catch((err) => alert("Couldn't set as endcard: " + err.message));
+      });
+
+      /* ------------------------------------------------------------------ */
+      /*  Load modal — lists only this project's layouts/*.json, with tags   */
+      /* ------------------------------------------------------------------ */
+
+      async function openLoadModal() {
+        const backdrop = document.getElementById("load-modal-backdrop");
+        const list = document.getElementById("load-modal-list");
+        list.innerHTML = '<div id="load-modal-empty">Loading…</div>';
+        backdrop.classList.add("visible");
+
+        const entries = [];
+
+        if (projectRootHandle) {
+          for (const kind of ["main", "endcard"]) {
+            const info = ACTIVE_KINDS[kind];
+            try {
+              const activeHandle = await projectRootHandle.getFileHandle(info.filename);
+              const file = await activeHandle.getFile();
+              const json = JSON.parse(await file.text());
+              entries.push({
+                name: info.filename,
+                handle: activeHandle,
+                kind: kind,
+                label: info.filename,
+                w: json.canvasWidth,
+                h: json.canvasHeight,
+              });
+            } catch (e) {
+              // That one doesn't exist yet (fresh project) — just skip it.
+            }
+          }
+        }
+
+        for await (const [name, handle] of layoutsDirHandle.entries()) {
+          if (handle.kind !== "file" || !name.endsWith(".json")) continue;
+          try {
+            const file = await handle.getFile();
+            const json = JSON.parse(await file.text());
+            entries.push({
+              name: name,
+              handle: handle,
+              kind: "layout",
+              tag: json.tag || "",
+              label: json.name || name.replace(/\.json$/, ""),
+              w: json.canvasWidth,
+              h: json.canvasHeight,
+            });
+          } catch (e) {
+            entries.push({ name: name, handle: handle, kind: "layout", tag: "", label: name.replace(/\.json$/, ""), broken: true });
+          }
+        }
+
+        if (entries.length === 0) {
+          list.innerHTML = '<div id="load-modal-empty">No saved layouts yet in src/ui/layouts/. Save one first (type a name above, hit Save), or load a file from your computer below.</div>';
+          return;
+        }
+
+        list.innerHTML = "";
+        for (const entry of entries) {
+          const isActive = entry.kind === "main" || entry.kind === "endcard";
+          const item = document.createElement("div");
+          item.className = "load-item" + (isActive ? " load-item-active" : "");
+          item.innerHTML =
+            '<div class="load-item-name">' + escapeHtml(entry.label) + "</div>" +
+            '<div class="load-item-meta">' +
+            (isActive
+              ? '<span class="load-item-tag load-item-tag-active">' + (entry.kind === "main" ? "★ main" : "🏁 endcard") + "</span>"
+              : entry.tag
+                ? '<span class="load-item-tag">' + escapeHtml(entry.tag) + "</span>"
+                : "") +
+            (entry.w ? '<span class="load-item-dims">' + entry.w + "×" + entry.h + "</span>" : "") +
+            (entry.broken ? '<span class="load-item-dims">⚠ unreadable</span>' : "") +
+            "</div>";
+          item.addEventListener("click", async () => {
+            if (entry.broken) return;
+            const file = await entry.handle.getFile();
+            try {
+              const data = JSON.parse(await file.text());
+              applyLoadedData(data);
+              document.getElementById("layout-name").value = data.name || entry.name.replace(/\.json$/, "");
+              currentFileHandle = entry.handle;
+              currentFileKind = entry.kind;
+              updateEditingLabel();
+            } catch (err) {
+              alert("Couldn't parse " + entry.name + ": " + err.message);
+            }
+            closeLoadModal();
+          });
+          list.appendChild(item);
+        }
+      }
+
+      function closeLoadModal() {
+        document.getElementById("load-modal-backdrop").classList.remove("visible");
+      }
+
+      document.getElementById("load-modal-close").addEventListener("click", closeLoadModal);
+      document.getElementById("btn-load-from-computer").addEventListener("click", () => {
+        closeLoadModal();
+        document.getElementById("file-load-input").click();
+      });
+      document.getElementById("load-modal-backdrop").addEventListener("click", (e) => {
+        if (e.target.id === "load-modal-backdrop") closeLoadModal();
+      });
+
+      if (!FS_SUPPORTED) {
+        document.getElementById("btn-connect").title = "Needs Chrome or Edge — not supported in this browser.";
+        document.getElementById("btn-connect").disabled = true;
+      }
+
+      /* ------------------------------------------------------------------ */
+      /*  Embedding — when opened inside public/index.html's overlay iframe  */
+      /*  rather than standalone, go transparent so the real running game    */
+      /*  shows through, and offer a way back to it.                         */
+      /* ------------------------------------------------------------------ */
+
+      const embedded = window.parent !== window;
+      if (embedded) {
+        document.body.classList.add("embedded"); // CSS shows #btn-close-editor for this class (see its rule above)
+        document.getElementById("btn-close-editor").addEventListener("click", () => {
+          window.parent.postMessage("close-ui-editor", window.location.origin);
+        });
+      }
+
+      /* ------------------------------------------------------------------ */
+      /*  Boot                                                                */
+      /* ------------------------------------------------------------------ */
+
+      render();
+      updateEditingLabel();
+      tryAutoReconnect();
+    })();
+  </script>
+</body>
+
+</html>

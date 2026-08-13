@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Cube Roll — Playable Ad</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      background: #8ed1ef;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    #game {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Everything on top of the 3D scene — HUD, joystick, end card — is
+       placed and styled entirely in tools/ui-editor.html and shipped as
+       src/ui/mainLayout.json + src/ui/endcardLayout.json, rendered here by
+       UILayout.ts. There is no hardcoded game UI in this file. */
+    #custom-ui-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    #endcard-layer {
+      position: fixed;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="game"></canvas>
+  <div id="custom-ui-layer"></div>
+  <div id="endcard-layer"></div>
+
+  <script>
+    /*BUNDLE_PLACEHOLDER*/
+  </script>
+</body>
+
+</html>

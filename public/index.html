@@ -1,0 +1,578 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Cube Roll — DEV PREVIEW</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+      background: #000;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    /* Fills the real browser window. #device-frame is positioned inside
+       via explicit JS-computed left/top (see applyDeviceFrame) rather than
+       flex-centering, because the target area to center *within* isn't
+       always the full window — while the editor's open, its panels take
+       up real space (see EDITOR_INSETS), and the frame centers in
+       whatever's left so the simulated screen is never hidden behind them.
+       Background shows as the letterbox bars whenever the frame doesn't
+       fill the whole available area. */
+    #frame-stage {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+    }
+
+    /* The actual "device screen" — full window (or full available area,
+       see above) in Real mode, a letterboxed 16:9/9:16 box otherwise.
+       Sized/positioned via JS; everything game-related lives inside it and
+       is positioned relative to *this*, not the real window, so it's
+       correct in every mode without any special-casing. */
+    #device-frame {
+      /* border-box, scoped to just this element (not a global reset) —
+         the border must render *inside* the JS-computed width/height, or
+         it pushes the frame a few px past the stage it was just fit to
+         avoid (e.g. into the editor's side panels). */
+      box-sizing: border-box;
+      position: absolute;
+      overflow: hidden;
+      background: #8ed1ef;
+      border: 2px solid rgba(180, 185, 195, 0.55);
+      box-shadow: 0 0 0 1px #4fd1ff, 0 20px 60px rgba(0, 0, 0, 0.5);
+      transition: left 0.15s ease, top 0.15s ease, width 0.15s ease, height 0.15s ease;
+    }
+
+    #game {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    /* Everything on top of the 3D scene — HUD, joystick, end card — is
+       placed and styled entirely in tools/ui-editor.html and shipped as
+       src/ui/mainLayout.json + src/ui/endcardLayout.json, rendered here by
+       UILayout.ts. There is no hardcoded game UI in this file. */
+    #custom-ui-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      pointer-events: none;
+    }
+
+    #endcard-layer {
+      position: absolute;
+      inset: 0;
+      z-index: 20;
+      pointer-events: none;
+    }
+
+    /* Engine Room: dev-only control panel. Editor/Build live here now
+       (Build button doesn't exist without scripts/dev-build-api.js running
+       alongside the dev server — see scripts/dev.js); stats + the view
+       helper gizmo are fed live by Game.ts/main.ts (see the bottom
+       script). Nothing here exists in the production build. */
+    #engine-room {
+      position: fixed;
+      top: 8px;
+      right: 10px;
+      z-index: 70;
+      width: 172px;
+      background: rgba(15, 17, 20, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      padding: 9px;
+      font-family: inherit;
+      font-size: 11px;
+      color: #fff;
+      pointer-events: auto;
+      backdrop-filter: blur(6px);
+    }
+
+    #engine-room-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      margin-bottom: 8px;
+    }
+
+    #engine-room-header .live-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #4ade80;
+      box-shadow: 0 0 4px #4ade80;
+      flex-shrink: 0;
+    }
+
+    #engine-room-actions {
+      display: flex;
+      gap: 5px;
+      margin-bottom: 8px;
+    }
+
+    #engine-room-actions button {
+      flex: 1;
+      font-family: inherit;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #fff;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      padding: 6px 4px;
+      border-radius: 7px;
+      cursor: pointer;
+    }
+
+    #engine-room-actions button:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.16);
+    }
+
+    #engine-room-actions button:disabled {
+      opacity: 0.5;
+      cursor: default;
+    }
+
+    #engine-room-actions button.primary {
+      background: #ff5252;
+      border-color: #ff5252;
+    }
+
+    #engine-room-actions button.primary:hover:not(:disabled) {
+      background: #ff6b6b;
+    }
+
+    #er-btn-viewer {
+      display: block;
+      width: 100%;
+      font-family: inherit;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #06202b;
+      background: #7cd6f7;
+      border: 1px solid #7cd6f7;
+      padding: 6px 4px;
+      border-radius: 7px;
+      cursor: pointer;
+      margin-bottom: 8px;
+    }
+
+    #er-btn-viewer:hover {
+      background: #9de3fa;
+    }
+
+    /* Exit-3D-View: the only thing shown top-right while freecam is active
+       (#engine-room itself hides — see script section). Deliberately a
+       different look from the rest of the dev chrome so it reads as "you
+       are in a special mode," not just another panel button. */
+    #er-exit-3d {
+      display: none;
+      position: fixed;
+      top: 8px;
+      right: 10px;
+      z-index: 71;
+      font-family: inherit;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #ffe066;
+      background: #0b1f5c;
+      border: 1.5px solid #ffe066;
+      border-radius: 10px;
+      padding: 8px 14px;
+      cursor: pointer;
+      pointer-events: auto;
+    }
+
+    #er-exit-3d.visible {
+      display: block;
+    }
+
+    #er-exit-3d:hover {
+      background: #142c78;
+    }
+
+    /* Scene hierarchy + inspector: dev-only, only meaningful while freecam
+       is active (see script section) — same visual language as the Engine
+       Room panel, just repositioned so they don't collide with it (which
+       is hidden anyway while these show). */
+    #si-hierarchy,
+    #si-inspector {
+      display: none;
+      position: fixed;
+      z-index: 70;
+      background: rgba(15, 17, 20, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 10px;
+      font-size: 11px;
+      color: #fff;
+      pointer-events: auto;
+      backdrop-filter: blur(6px);
+    }
+
+    #si-hierarchy.visible,
+    #si-inspector.visible {
+      display: block;
+    }
+
+    #si-hierarchy {
+      top: 8px;
+      left: 10px;
+      width: 210px;
+      max-height: 78vh;
+      overflow-y: auto;
+      padding: 6px;
+    }
+
+    .si-row {
+      padding: 3px 6px;
+      border-radius: 5px;
+      cursor: pointer;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .si-row:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .si-row.selected {
+      background: #ffe066;
+      color: #0b1f5c;
+      font-weight: 700;
+    }
+
+    #si-inspector {
+      top: 54px;
+      right: 10px;
+      width: 190px;
+      padding: 9px;
+    }
+
+    .si-insp-empty {
+      color: rgba(255, 255, 255, 0.55);
+      font-style: italic;
+    }
+
+    .si-insp-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 2px 0;
+    }
+
+    .si-insp-row span {
+      color: rgba(255, 255, 255, 0.6);
+    }
+
+    .si-insp-row b {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .si-insp-sub {
+      margin-top: 6px;
+      padding-top: 5px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      font-weight: 700;
+      color: #ffe066;
+    }
+
+    #engine-room-stats {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 3px 8px;
+      color: rgba(255, 255, 255, 0.7);
+      font-variant-numeric: tabular-nums;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 8px;
+    }
+
+    #engine-room-stats span.val {
+      color: #fff;
+      font-weight: 700;
+      text-align: right;
+    }
+
+    #engine-room-viewhelper-wrap {
+      display: flex;
+      justify-content: center;
+      margin-top: 7px;
+      border-top: 1px solid rgba(255, 255, 255, 0.12);
+      padding-top: 7px;
+    }
+
+    #er-viewhelper {
+      width: 64px;
+      height: 64px;
+    }
+
+    /* Device-frame simulator: switches the "screen" between the real
+       window and a letterboxed 16:9 box (landscape or portrait). Fixed to
+       the real window, not the frame — dev chrome, always reachable
+       regardless of how small the simulated frame is. */
+    #sim-tabs {
+      position: fixed;
+      top: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 60;
+      display: flex;
+      background: rgba(0, 0, 0, 0.55);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 10px;
+      padding: 2px;
+      pointer-events: auto;
+    }
+
+    #sim-tabs button {
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(255, 255, 255, 0.7);
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      padding: 5px 10px;
+      cursor: pointer;
+    }
+
+    #sim-tabs button:hover {
+      color: #fff;
+    }
+
+    #sim-tabs button.active {
+      background: #ff5252;
+      color: #fff;
+    }
+
+    #ui-editor-frame {
+      display: none;
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border: none;
+      z-index: 50;
+      background: transparent;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="engine-room">
+    <div id="engine-room-header">
+      <span>⚙ Engine Room</span>
+      <span class="live-dot" title="Live reload active"></span>
+    </div>
+    <div id="engine-room-actions">
+      <button id="er-btn-editor" title="Open the UI layout editor">✏️ Editor</button>
+      <button id="er-btn-build" class="primary" title="Run the production build (build.sh)">🛠 Build</button>
+    </div>
+    <button id="er-btn-viewer" title="Orbit-inspect the live gameplay scene">🧭 3D View</button>
+    <div id="engine-room-stats">
+      <span>FPS</span><span class="val" id="er-fps">--</span>
+      <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
+      <span>Triangles</span><span class="val" id="er-triangles">--</span>
+    </div>
+    <div id="engine-room-viewhelper-wrap">
+      <canvas id="er-viewhelper" width="64" height="64" title="Camera orientation — red X, green Y, blue Z"></canvas>
+    </div>
+  </div>
+  <button id="er-exit-3d" title="Exit 3D View">🧭 Exit 3D View</button>
+  <div id="si-hierarchy"></div>
+  <div id="si-inspector"></div>
+  <div id="sim-tabs">
+    <button data-sim="real" class="active">Real</button>
+    <button data-sim="landscape">Landscape 16:9</button>
+    <button data-sim="portrait">Portrait 16:9</button>
+  </div>
+  <iframe id="ui-editor-frame" src="/ui-editor.html" title="UI Layout Editor" allowtransparency="true"></iframe>
+
+  <div id="frame-stage">
+    <div id="device-frame">
+      <canvas id="game"></canvas>
+      <div id="custom-ui-layer"></div>
+      <div id="endcard-layer"></div>
+    </div>
+  </div>
+
+  <script src="bundle.js"></script>
+  <script>
+    // esbuild live-reload client (dev only — not present in the production build)
+    new EventSource("/esbuild").addEventListener("change", () => location.reload());
+
+    // Edit UI: toggles the same-origin editor iframe over the running game
+    // and pauses gameplay (see main.ts) while it's open, so drag gestures
+    // in the editor don't fight the joystick and the 15s auto-endcard
+    // timer doesn't fire mid-edit. The iframe itself is transparent and
+    // stays mounted (not reloaded) across toggles, so in-progress edits
+    // survive closing and reopening within the same session.
+    const editorFrame = document.getElementById("ui-editor-frame");
+    const engineRoom = document.getElementById("engine-room");
+    document.getElementById("er-btn-editor").addEventListener("click", () => {
+      editorFrame.style.display = "block";
+      engineRoom.style.display = "none"; // its own top-right corner would otherwise sit under/behind the editor overlay
+      window.__setUIEditorPaused && window.__setUIEditorPaused(true);
+      applyDeviceFrame(); // the editor's own panels now occupy space — recompute so the frame isn't hidden behind them
+    });
+    window.addEventListener("message", (e) => {
+      if (e.origin !== window.location.origin || e.data !== "close-ui-editor") return;
+      editorFrame.style.display = "none";
+      engineRoom.style.display = "";
+      window.__setUIEditorPaused && window.__setUIEditorPaused(false);
+      applyDeviceFrame(); // editor's panels are gone — the full window is available again
+    });
+
+    // Device-frame simulator: Real (fills the available area, no letterbox)
+    // or a fixed 16:9 box — landscape or portrait — centered and letterboxed
+    // within it. #device-frame is what the game (canvas + HUD) is actually
+    // sized/positioned against, so this affects the *real* running game,
+    // not a mockup; its rect is also broadcast to the editor iframe so the
+    // overlay you edit against lines up with the exact same box.
+    //
+    // "Available area" is the full window normally, but shrinks to exclude
+    // the editor's own toolbar/layers/properties panels while it's open
+    // (values must match tools/ui-editor.html's CSS for those) — otherwise
+    // the simulated screen would sit partly hidden behind them.
+    const EDITOR_INSETS = { top: 53, left: 220, right: 296 };
+    const frameStage = document.getElementById("frame-stage");
+    const deviceFrame = document.getElementById("device-frame");
+    let simMode = "real";
+
+    function applyDeviceFrame() {
+      const editorOpen = editorFrame.style.display === "block";
+      const stage = editorOpen
+        ? {
+            left: EDITOR_INSETS.left,
+            top: EDITOR_INSETS.top,
+            width: Math.max(1, frameStage.clientWidth - EDITOR_INSETS.left - EDITOR_INSETS.right),
+            height: Math.max(1, frameStage.clientHeight - EDITOR_INSETS.top),
+          }
+        : { left: 0, top: 0, width: frameStage.clientWidth, height: frameStage.clientHeight };
+
+      let w = stage.width;
+      let h = stage.height;
+      if (simMode !== "real") {
+        const ratio = simMode === "landscape" ? 16 / 9 : 9 / 16;
+        if (stage.width / stage.height > ratio) {
+          h = stage.height;
+          w = h * ratio;
+        } else {
+          w = stage.width;
+          h = w / ratio;
+        }
+      }
+
+      // frame-stage has no offset of its own (position:fixed;inset:0), so
+      // these are already viewport-relative — same coordinate space the
+      // editor needs.
+      const left = stage.left + (stage.width - w) / 2;
+      const top = stage.top + (stage.height - h) / 2;
+
+      deviceFrame.style.left = left + "px";
+      deviceFrame.style.top = top + "px";
+      deviceFrame.style.width = w + "px";
+      deviceFrame.style.height = h + "px";
+      window.__resizeGameTo && window.__resizeGameTo(w, h);
+      broadcastDeviceFrame(left, top, w, h);
+    }
+
+    // Takes the values applyDeviceFrame just computed and assigned, rather
+    // than re-measuring #device-frame via getBoundingClientRect(): that
+    // measurement runs synchronously, before the CSS transition on
+    // left/top/width/height has animated anywhere — it would report the
+    // *previous* box, not the new target, and the editor would silently
+    // keep tracking a stale rect on every mode/resize change.
+    function broadcastDeviceFrame(x, y, width, height) {
+      editorFrame.contentWindow.postMessage({ type: "device-frame", rect: { x, y, width, height } }, window.location.origin);
+    }
+
+    document.querySelectorAll("#sim-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        simMode = btn.dataset.sim;
+        document.querySelectorAll("#sim-tabs button").forEach((b) => b.classList.toggle("active", b === btn));
+        applyDeviceFrame();
+      });
+    });
+
+    window.addEventListener("resize", applyDeviceFrame);
+    applyDeviceFrame();
+
+    // Engine Room: Build — POSTs to the local build-trigger API
+    // (scripts/dev-build-api.js, started alongside this dev server by
+    // scripts/dev.js) which runs the real build.sh and reports back.
+    // Room for more buttons here later — same pattern.
+    const BUILD_API = "http://127.0.0.1:8001/build";
+    const buildBtn = document.getElementById("er-btn-build");
+    buildBtn.addEventListener("click", async () => {
+      const originalText = buildBtn.textContent;
+      buildBtn.disabled = true;
+      buildBtn.textContent = "Building…";
+      try {
+        const res = await fetch(BUILD_API, { method: "POST" });
+        const data = await res.json();
+        if (data.ok) {
+          buildBtn.textContent = "✅ Built";
+        } else {
+          buildBtn.textContent = "❌ Failed";
+          console.error("Build failed:", data.error, "\n" + data.stderr);
+        }
+      } catch (err) {
+        buildBtn.textContent = "❌ API offline";
+        console.error("Build API unreachable — is `npm run dev` still running?", err);
+      }
+      setTimeout(() => {
+        buildBtn.disabled = false;
+        buildBtn.textContent = originalText;
+      }, 2200);
+    });
+
+    // Engine Room: 3D View — toggles freecam (OrbitControls) over the live
+    // gameplay scene via main.ts's __setFreecamActive hook, which also
+    // pauses update() so the player/camera don't fight the orbit drag.
+    // While active, #engine-room hides entirely (its own #er-btn-viewer is
+    // unreachable then anyway) and is replaced by just #er-exit-3d, plus
+    // the scene hierarchy/inspector panels light up. The editor can't be
+    // open when this fires — #er-btn-viewer lives inside #engine-room,
+    // which the editor-open handler above already hides.
+    const viewerBtn = document.getElementById("er-btn-viewer");
+    const exitViewerBtn = document.getElementById("er-exit-3d");
+    const hierarchyPanel = document.getElementById("si-hierarchy");
+    const inspectorPanel = document.getElementById("si-inspector");
+
+    function setFreecamUI(on) {
+      engineRoom.style.display = on ? "none" : "";
+      exitViewerBtn.classList.toggle("visible", on);
+      hierarchyPanel.classList.toggle("visible", on);
+      inspectorPanel.classList.toggle("visible", on);
+      window.__setFreecamActive && window.__setFreecamActive(on);
+    }
+
+    viewerBtn.addEventListener("click", () => setFreecamUI(true));
+    exitViewerBtn.addEventListener("click", () => setFreecamUI(false));
+
+    // Engine Room: live FPS/draw calls/triangles, fed by main.ts's
+    // __getEngineStats hook. Polled rather than updated every rAF frame —
+    // a stats readout doesn't need 60Hz DOM writes.
+    setInterval(() => {
+      if (!window.__getEngineStats) return;
+      const stats = window.__getEngineStats();
+      document.getElementById("er-fps").textContent = stats.fps;
+      document.getElementById("er-drawcalls").textContent = stats.drawCalls;
+      document.getElementById("er-triangles").textContent = stats.triangles;
+    }, 400);
+  </script>
+</body>
+
+</html>
