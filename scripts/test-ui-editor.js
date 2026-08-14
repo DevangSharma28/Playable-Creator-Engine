@@ -86,13 +86,15 @@ async function run() {
   console.log("PASS: properties panel reflects selected element");
 
   // --- Test 4: editing a property field updates the model + re-renders ---
-  const xField = doc.querySelector('[data-prop="xPct"]');
+  // New elements default to PX position (see baseNewElement) — the active
+  // field is xPx, not xPct, until the %/PX toggle is switched by hand.
+  const xField = doc.querySelector('[data-prop="xPx"]');
   xField.value = "25";
   xField.dispatchEvent(new window.Event("input", { bubbles: true }));
   await wait(10);
   const movedEl = doc.querySelector("#canvas .ui-el");
-  assert(movedEl.style.left === "25%", `expected left:25%% after edit, got ${movedEl.style.left}`);
-  console.log("PASS: editing X% updates canvas position");
+  assert(movedEl.style.left === "calc(50% + 25px)", `expected left:calc(50% + 25px) after edit, got ${movedEl.style.left}`);
+  console.log("PASS: editing X (PX) updates canvas position");
 
   // --- Test 5: anchor grid changes anchor + transform ---
   const anchorBtn = doc.querySelector('[data-anchor="top-left"]');

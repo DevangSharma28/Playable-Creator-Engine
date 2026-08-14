@@ -492,6 +492,20 @@
       opacity: 0.42;
     }
 
+    /* Drag-to-reparent (see buildLayerRow) — a group row lit up while a
+       dragged row is over it, accepting the drop. */
+    .layer-item.drop-target {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+      background: var(--accent-dim);
+    }
+
+    /* Whole panel lights up while dragging over empty space / a non-group
+       row — dropping there sends the element back to the root canvas. */
+    #layers.drop-target-root {
+      box-shadow: inset 0 0 0 2px var(--accent);
+    }
+
     .layer-item .vis-btn {
       background: none;
       border: none;
@@ -628,6 +642,23 @@
       box-sizing: border-box;
     }
 
+    /* Without this, a group's content box has no explicit size — a
+       position:relative block with no in-flow content (its children are
+       all position:absolute, which don't contribute to auto height) — so
+       it collapses to ~0 height while width happens to fill by default
+       block behavior. Children nested inside then position/size themselves
+       against that broken 0-height box instead of the group's real box,
+       which is what every editor calculation (containerRectFor, the center
+       crosshair, drag/resize/group/ungroup math) assumes they're relative
+       to. UILayout.ts's runtime renderer already sets this on every content
+       node generically; the editor's canvas needs the same for its group
+       content box specifically, since (unlike image/text/rect/joystick
+       above) it has no other CSS rule giving it a size. */
+    .ui-el .group-node {
+      width: 100%;
+      height: 100%;
+    }
+
     .ui-el .joystick-base {
       width: 100%;
       height: 100%;
@@ -674,6 +705,34 @@
 
     .snap-guide.h {
       height: 1px;
+    }
+
+    /* Selected group's own center crosshair (see renderCanvas) — the
+       group's box outline already comes from .ui-el.selected below; this
+       adds the two lines through its exact center so you can see where
+       "middle-center" lands for anything you place/anchor inside it,
+       without having to drag something there first to find out. */
+    .group-center-line {
+      position: absolute;
+      background: var(--guide);
+      opacity: 0.5;
+      pointer-events: none;
+    }
+
+    .group-center-line.v {
+      left: 50%;
+      top: 0;
+      width: 1px;
+      height: 100%;
+      transform: translateX(-50%);
+    }
+
+    .group-center-line.h {
+      top: 50%;
+      left: 0;
+      height: 1px;
+      width: 100%;
+      transform: translateY(-50%);
     }
 
     /* ---- Properties panel ---- */
@@ -733,6 +792,14 @@
       margin-bottom: 5px;
       font-weight: 600;
       letter-spacing: 0.01em;
+    }
+
+    /* Render order — the light-green color is purely a visual cue tying it
+       to the "R" in "R Order", no functional meaning (unlike Z Order's
+       plain label, which sits right next to it for the touch-priority
+       counterpart). */
+    .field label.r-order-label {
+      color: #8ef2a8;
     }
 
     .field input[type=text],
@@ -981,7 +1048,7 @@
       <div class="sep"></div>
       <span class="group-label">Project</span>
       <button id="btn-connect"
-        title="Pick your project's src/ui/ folder once — after that, Save/Load work directly against it, no manual file moving">🔗
+        title="Pick your project folder once — either the project root or src/ui itself both work, it finds src/ui automatically. After that, Save/Load work directly against it, no manual file moving.">🔗
         Connect</button>
       <span id="sync-status">🟢 Synced</span>
       <button id="btn-set-main"
@@ -1078,6 +1145,10 @@
       /** Almost everything (drag, resize, the Properties panel) still works off a single selection; multi-select exists specifically to feed Group Selected/Delete/Duplicate. */
       let selectedIds = new Set();
       let nextZ = 1;
+      /** Seeds each newly-placed element's renderOrder (see UIElementData's doc comment) — starts at 0, +0.1 per element, same "every new thing lands on top" idea as nextZ but a float so inserting between two existing elements later never forces renumbering everything above it. */
+      let nextRenderOrder = 0;
+      /** id of the layer row currently being dragged in the Layers panel (native HTML5 drag-and-drop), or null between drags — see buildLayerRow's dragstart/dragend and reparentElementTo. */
+      let draggedLayerId = null;
 
       let history = [];
       let future = [];
@@ -1430,7 +1501,10 @@
             node.style.height = data.heightPct + "%";
           }
           node.style.opacity = data.visible === false ? 0.35 : data.opacity;
-          node.style.zIndex = data.zIndex;
+          // renderOrder is the real visual-stacking value (see its doc
+          // comment in UILayoutTypes.ts) — falls back to zIndex for
+          // elements saved before renderOrder existed.
+          node.style.zIndex = data.renderOrder ?? data.zIndex;
           node.style.transform = ANCHOR_TRANSFORM[data.anchor] + " rotate(" + data.rotation + "deg)";
           node.dataset.id = data.id;
 
@@ -1482,17 +1556,43 @@
             if (data.borderWidthPx) g.style.border = data.borderWidthPx + "px solid " + (data.borderColor || "#ffffff");
             node.appendChild(g);
             groupContentById.set(data.id, g);
+
+            // Center crosshair, selected group only — see .group-center-line.
+            // Appended to `node` (the group's own positioned box), not `g`
+            // (its content box, which children nest into), so it always
+            // reads as "this group's center" and never gets mistaken for
+            // one of its children.
+            if (selectedIds.size === 1 && selectedIds.has(data.id)) {
+              const vLine = document.createElement("div");
+              vLine.className = "group-center-line v";
+              const hLine = document.createElement("div");
+              hLine.className = "group-center-line h";
+              node.appendChild(vLine);
+              node.appendChild(hLine);
+            }
           }
 
           if (selectedIds.size === 1 && selectedIds.has(data.id)) {
             const handle = document.createElement("div");
             handle.className = "resize-handle";
-            handle.addEventListener("pointerdown", (e) => startResize(e, data));
+            handle.addEventListener("pointerdown", (e) => {
+              e.stopPropagation(); // otherwise this bubbles up through every ancestor group's own node and fires their pointerdown handler below too — resizing a nested element would drag its parent group at the same time
+              startResize(e, data);
+            });
             node.appendChild(handle);
           }
 
+          // stopPropagation is the load-bearing part here: a group's
+          // children live as real DOM descendants of its own node (so
+          // their %/px geometry resolves against it — see the group branch
+          // above and containerRectFor). Without stopping it, a pointerdown
+          // on a child bubbles up through every ancestor group's own node,
+          // each of which has this exact same listener — so clicking/
+          // dragging a child also selects and drags its parent (and
+          // grandparent, for nested groups) at the same time.
           node.addEventListener("pointerdown", (e) => {
             if (e.target.classList.contains("resize-handle")) return;
+            e.stopPropagation();
             if (e.ctrlKey || e.metaKey || e.shiftKey) {
               toggleSelect(data.id);
               render();
@@ -1506,7 +1606,12 @@
           nodesById.set(data.id, node);
         }
 
-        for (const data of sorted) {
+        // Append order uses zOrder, not zIndex/array order — mirrors
+        // UILayout.ts's runtime behavior exactly (same doc comment there)
+        // so what you see in the editor for overlapping interactive
+        // elements matches what actually receives touches in the real game.
+        const appendOrder = [...elements].sort((a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0));
+        for (const data of appendOrder) {
           const node = nodesById.get(data.id);
           const parentContent = data.parentId ? groupContentById.get(data.parentId) : undefined;
           (parentContent || canvasEl).appendChild(node);
@@ -1583,6 +1688,47 @@
           data.zIndex--;
           render();
         });
+
+        // Drag-to-reparent: every row is draggable (as the thing being
+        // moved); only group rows accept a drop (only groups can hold
+        // children — see reparentElementTo). Dropping on empty Layers-panel
+        // space instead of a row moves the element back to the root canvas
+        // (see the #layers-level dragover/drop listeners set up alongside
+        // reparentElementTo).
+        item.draggable = true;
+        item.addEventListener("dragstart", (e) => {
+          if (nameEl.classList.contains("editing")) {
+            e.preventDefault(); // mid-rename (contentEditable) — let native text selection/drag happen instead of hijacking it as a row drag
+            return;
+          }
+          e.stopPropagation();
+          draggedLayerId = data.id;
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", data.id); // Firefox refuses to start a drag without data set
+        });
+        item.addEventListener("dragend", () => {
+          draggedLayerId = null;
+          item.classList.remove("drop-target");
+        });
+        if (data.type === "group") {
+          item.addEventListener("dragover", (e) => {
+            if (!draggedLayerId || draggedLayerId === data.id) return;
+            e.preventDefault();
+            e.stopPropagation(); // don't also trigger the root drop zone underneath
+            e.dataTransfer.dropEffect = "move";
+            item.classList.add("drop-target");
+          });
+          item.addEventListener("dragleave", () => item.classList.remove("drop-target"));
+          item.addEventListener("drop", (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            item.classList.remove("drop-target");
+            if (!draggedLayerId) return;
+            const dragged = elements.find((el) => el.id === draggedLayerId);
+            draggedLayerId = null;
+            if (dragged) reparentElementTo(dragged, data.id);
+          });
+        }
         return item;
       }
 
@@ -1644,6 +1790,13 @@
         let html = "";
         html += '<h3>' + (TYPE_ICON[data.type] || "") + " " + data.type + '</h3>';
         html += field("Name", input("name", data.name, "text"));
+        html +=
+          '<div class="field-row">' +
+          '<div class="field"><label class="r-order-label">R Order (render order)</label>' +
+          '<input type="number" step="0.1" data-prop="renderOrder" value="' + escapeAttr(data.renderOrder ?? data.zIndex ?? 0) + '" /></div>' +
+          '<div class="field"><label>Z Order (touch priority)</label>' +
+          '<input type="number" step="1" data-prop="zOrder" value="' + escapeAttr(data.zOrder ?? 0) + '" /></div>' +
+          "</div>";
         html += '<div class="field"><label>Anchor point</label>' + anchorGrid(data.anchor) + "</div>";
         html += '<div class="field-row">' + measureField("X", "x", data) + measureField("Y", "y", data) + "</div>";
         const heightField = needsLockedAspect(data)
@@ -2023,19 +2176,59 @@
       /*  Add / delete / duplicate                                           */
       /* ------------------------------------------------------------------ */
 
+      /**
+       * Every new element defaults to PX for both position and size — a
+       * literal, unscaled value that reads the same on any device instead
+       * of stretching/repositioning with the container (see measureField's
+       * %/PX toggle). xPx/yPx: 0 with anchor middle-center still centers it
+       * exactly (0 offset from a point that's always the true center), so
+       * the default drop position is unchanged from the old %-based
+       * default. xPct/yPct/widthPct/heightPct are still seeded with a
+       * reasonable equivalent (not left undefined) purely so switching an
+       * axis back to % via the toggle starts from something sane instead of
+       * NaN — same "don't lose the other unit's value" convention switchUnit
+       * already follows when you flip a single axis by hand.
+       */
+      /** Advances nextRenderOrder by 0.1 and returns the value *before* the bump — mirrors `nextZ++`'s post-increment shape. Rounds to 1 decimal so repeated float addition (0.1 + 0.1 + 0.1 = 0.30000000000000004) never leaks into the saved JSON or the properties field. */
+      function takeNextRenderOrder() {
+        const value = nextRenderOrder;
+        nextRenderOrder = Math.round((nextRenderOrder + 0.1) * 10) / 10;
+        return value;
+      }
+
       function baseNewElement(type) {
         return {
           id: uid(),
           type: type,
+          anchor: "middle-center",
+          xUnit: "px",
+          yUnit: "px",
+          widthUnit: "px",
+          heightUnit: "px",
+          xPx: 0,
+          yPx: 0,
           xPct: 50,
           yPct: 50,
-          anchor: "middle-center",
           rotation: 0,
           opacity: 1,
           zIndex: nextZ++,
+          renderOrder: takeNextRenderOrder(),
+          zOrder: 0,
           visible: true,
           animation: "none",
           lockAspect: false,
+        };
+      }
+
+      /** Size fields for a freshly-added element: widthPx/heightPx as given (the active PX values), plus a %-equivalent seeded from the current canvas so the % toggle isn't blank if switched to later. */
+      function pxSizeFields(widthPx, heightPx) {
+        return {
+          widthUnit: "px",
+          heightUnit: "px",
+          widthPx: widthPx,
+          heightPx: heightPx,
+          widthPct: clamp((widthPx / canvasWidth) * 100, 2, 200),
+          heightPct: clamp((heightPx / canvasHeight) * 100, 2, 200),
         };
       }
 
@@ -2082,7 +2275,7 @@
 
         const idMap = new Map(); // original id -> duplicate's new id
         const copies = toDuplicate.map((d) => {
-          const copy = Object.assign({}, d, { id: uid(), zIndex: nextZ++ });
+          const copy = Object.assign({}, d, { id: uid(), zIndex: nextZ++, renderOrder: takeNextRenderOrder() });
           idMap.set(d.id, copy.id);
           return copy;
         });
@@ -2091,10 +2284,12 @@
             // Nested inside another duplicated element — re-point at *its* new copy, keep the same relative position.
             copy.parentId = idMap.get(copy.parentId);
           } else {
-            // Top of this duplication batch (whether it has no parent, or its parent wasn't part of the selection) — nudge so the copy reads as a distinct new layer, matching single-element duplicate's existing behavior.
+            // Top of this duplication batch (whether it has no parent, or its parent wasn't part of the selection) — nudge so the copy reads as a distinct new layer, matching single-element duplicate's existing behavior. Unit-aware like every other geometry write (see setXForScreenCenter etc.) — a bare `copy.xPct +=` would silently no-op once PX is the active axis, which it now is by default (see baseNewElement).
             copy.name = copy.name + " copy";
-            copy.xPct = clamp((copy.xPct ?? 50) + 3, -50, 150);
-            copy.yPct = clamp((copy.yPct ?? 50) + 3, -50, 150);
+            if (copy.xUnit === "px") copy.xPx = (copy.xPx || 0) + 12 * pxSignX(copy);
+            else copy.xPct = clamp((copy.xPct ?? 50) + 3, -50, 150);
+            if (copy.yUnit === "px") copy.yPx = (copy.yPx || 0) + 12 * pxSignY(copy);
+            else copy.yPct = clamp((copy.yPct ?? 50) + 3, -50, 150);
           }
         }
         elements.push(...copies);
@@ -2149,16 +2344,35 @@
         const group = Object.assign(baseNewElement("group"), {
           name: "Group",
           anchor: "top-left",
-          xPct: clamp((minX / oldRect.width) * 100, -50, 150),
-          yPct: clamp((minY / oldRect.height) * 100, -50, 150),
-          widthPct: clamp((groupW / oldRect.width) * 100, 2, 200),
-          heightPct: clamp((groupH / oldRect.height) * 100, 2, 200),
-          backgroundColor: "rgba(232,150,30,0.06)",
-          borderRadiusPct: 4,
-          borderWidthPx: 1,
-          borderColor: "rgba(232,150,30,0.35)",
+          // Fully transparent by default — this data (backgroundColor/
+          // borderWidthPx/borderColor) is what actually ships and renders
+          // in the real game too (see UILayout.ts's group builder), not
+          // just the editor canvas, so a visible default tint here used to
+          // mean every group showed up as a faint box in the shipped game.
+          // The editor's own selection outline (.ui-el.selected, plus the
+          // center crosshair — see renderCanvas) is a separate,
+          // editor-only, non-data-driven highlight that already only shows
+          // while a group is the one selected in the hierarchy; a group
+          // itself stays invisible always, in-game and in the editor,
+          // unless you deliberately give it a background as a real design
+          // choice (a panel-style container, say).
+          backgroundColor: "transparent",
+          borderRadiusPct: 0,
+          borderWidthPx: 0,
+          borderColor: "transparent",
           parentId: commonParentId || undefined,
         });
+        // Unit-aware (see writeWidthForContainer/writeHeightForContainer) —
+        // respects whichever unit baseNewElement defaulted the group to
+        // (PX) instead of hardcoding %. anchor is "top-left" here (frac
+        // 0,0, no sign flip — see pxSignX/Y), so xPx/xPct are the box's
+        // top-left corner directly, same minX/minY this used before.
+        writeWidthForContainer(group, groupW, oldRect.width);
+        writeHeightForContainer(group, groupH, oldRect.height);
+        if (group.xUnit === "px") group.xPx = minX;
+        else group.xPct = clamp((minX / oldRect.width) * 100, -50, 150);
+        if (group.yUnit === "px") group.yPx = minY;
+        else group.yPct = clamp((minY / oldRect.height) * 100, -50, 150);
         elements.push(group);
 
         for (const d of targets) {
@@ -2215,6 +2429,77 @@
         selectedIds = newSelection;
         render();
       }
+
+      /**
+       * Moves a single element (dragged from the Layers panel) into a new
+       * parent — a group's id, or null/undefined for the root canvas —
+       * preserving its exact on-screen position/size across the move, the
+       * same coordinate-space conversion ungroupSelected() already does
+       * between two live containers (their current getBoundingClientRect(),
+       * not their %/px data, since that's what's actually true on screen
+       * right now regardless of either container's own nesting depth).
+       * Descendants of `data` aren't touched individually — they stay
+       * positioned relative to `data`'s own box, which keeps its on-screen
+       * size, so they move along with it for free.
+       */
+      function reparentElementTo(data, newParentId) {
+        const targetId = newParentId || undefined;
+        if ((data.parentId || undefined) === targetId) return; // already there
+
+        if (targetId) {
+          if (data.id === targetId) return; // can't parent into itself
+          const target = elements.find((e) => e.id === targetId);
+          if (!target || target.type !== "group") return; // only groups accept children (per the Layers panel's drag-to-group contract)
+          const descendants = new Set();
+          collectDescendantIds(data.id, descendants);
+          if (descendants.has(targetId)) return; // can't parent into your own descendant — would create a cycle
+        }
+
+        pushHistory();
+
+        const oldParentRect = data.parentId ? elementRect(data.parentId) : canvasEl.getBoundingClientRect();
+        const newParentRect = targetId ? elementRect(targetId) : canvasEl.getBoundingClientRect();
+        const offsetX = oldParentRect.left - newParentRect.left;
+        const offsetY = oldParentRect.top - newParentRect.top;
+
+        const cx = boxCenterScreenX(data, oldParentRect.width);
+        const cy = boxCenterScreenY(data, oldParentRect.width, oldParentRect.height);
+        const w = elemScreenWidth(data, oldParentRect.width);
+        const h = elemScreenHeight(data, oldParentRect.width, oldParentRect.height);
+
+        writeWidthForContainer(data, w, newParentRect.width);
+        if (!needsLockedAspect(data)) writeHeightForContainer(data, h, newParentRect.height);
+
+        data.parentId = targetId;
+        setXForScreenCenter(data, offsetX + cx, newParentRect.width);
+        setYForScreenCenter(data, offsetY + cy, newParentRect.width, newParentRect.height);
+
+        selectedIds = new Set([data.id]);
+        render();
+      }
+
+      // Root drop zone: dropping on empty space in the Layers panel (not on
+      // a row — group rows' own drop handler in buildLayerRow calls
+      // stopPropagation(), so this only ever fires for drops that missed
+      // every row) moves the dragged element back out to the canvas root.
+      const layersEl = document.getElementById("layers");
+      layersEl.addEventListener("dragover", (e) => {
+        if (!draggedLayerId) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        layersEl.classList.add("drop-target-root");
+      });
+      layersEl.addEventListener("dragleave", (e) => {
+        if (e.target === layersEl) layersEl.classList.remove("drop-target-root");
+      });
+      layersEl.addEventListener("drop", (e) => {
+        e.preventDefault();
+        layersEl.classList.remove("drop-target-root");
+        if (!draggedLayerId) return;
+        const dragged = elements.find((el) => el.id === draggedLayerId);
+        draggedLayerId = null;
+        if (dragged) reparentElementTo(dragged, null);
+      });
 
       document.getElementById("btn-undo").addEventListener("click", undo);
       document.getElementById("btn-redo").addEventListener("click", redo);
@@ -2273,21 +2558,31 @@
         const data = getSelected();
         if (!data) return;
         const step = e.shiftKey ? 5 : 1;
-        if (e.key === "ArrowLeft") {
+        // Unit-aware, same as drag/resize (see startDrag) — a plain
+        // `data.xPct +=` here would silently no-op once an axis is switched
+        // to PX (its on-screen position is driven by xPx/yPx instead, see
+        // buildElement in UILayout.ts), leaving arrow nudging dead for any
+        // element using the "never stretches" PX option the Properties
+        // panel recommends.
+        if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
           pushHistory();
-          data.xPct = clamp(data.xPct - step, -50, 150);
+          const dir = e.key === "ArrowLeft" ? -1 : 1;
+          if (data.xUnit === "px") {
+            const containerRect = containerRectFor(data);
+            data.xPx = clamp((data.xPx || 0) + dir * step * pxSignX(data), -containerRect.width * 0.5, containerRect.width * 1.5);
+          } else {
+            data.xPct = clamp(data.xPct + dir * step, -50, 150);
+          }
           render();
-        } else if (e.key === "ArrowRight") {
+        } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
           pushHistory();
-          data.xPct = clamp(data.xPct + step, -50, 150);
-          render();
-        } else if (e.key === "ArrowUp") {
-          pushHistory();
-          data.yPct = clamp(data.yPct - step, -50, 150);
-          render();
-        } else if (e.key === "ArrowDown") {
-          pushHistory();
-          data.yPct = clamp(data.yPct + step, -50, 150);
+          const dir = e.key === "ArrowUp" ? -1 : 1;
+          if (data.yUnit === "px") {
+            const containerRect = containerRectFor(data);
+            data.yPx = clamp((data.yPx || 0) + dir * step * pxSignY(data), -containerRect.height * 0.5, containerRect.height * 1.5);
+          } else {
+            data.yPct = clamp(data.yPct + dir * step, -50, 150);
+          }
           render();
         }
       });
@@ -2318,14 +2613,12 @@
           alert("Couldn't read that image file — try a different PNG/JPG.");
         };
         img.onload = () => {
-          const aspect = img.naturalWidth / img.naturalHeight;
-          const widthPct = 30;
-          const heightPct = widthPct / aspect / (canvasWidth / canvasHeight);
+          // Exact 1:1 — a 101x101 source image becomes a 101x101 PX
+          // element, not a % of the canvas (which used to make the same
+          // image render at a different on-screen size on every device).
           addElement(
-            Object.assign(baseNewElement("image"), {
+            Object.assign(baseNewElement("image"), pxSizeFields(img.naturalWidth, img.naturalHeight), {
               name: file.name.replace(/\.[a-z0-9]+$/i, ""),
-              widthPct: widthPct,
-              heightPct: heightPct,
               src: src,
             })
           );
@@ -2336,10 +2629,8 @@
 
       document.getElementById("btn-add-text").addEventListener("click", () => {
         addElement(
-          Object.assign(baseNewElement("text"), {
+          Object.assign(baseNewElement("text"), pxSizeFields(280, 60), {
             name: "New Text",
-            widthPct: 40,
-            heightPct: 10,
             text: "New Text",
             fontSizePct: 4,
             color: "#ffffff",
@@ -2351,10 +2642,8 @@
 
       document.getElementById("btn-add-rect").addEventListener("click", () => {
         addElement(
-          Object.assign(baseNewElement("rect"), {
+          Object.assign(baseNewElement("rect"), pxSizeFields(280, 84), {
             name: "New Rect",
-            widthPct: 40,
-            heightPct: 12,
             backgroundColor: "rgba(0,0,0,0.4)",
             borderRadiusPct: 12,
             borderWidthPx: 0,
@@ -2365,13 +2654,19 @@
 
       document.getElementById("btn-add-joystick").addEventListener("click", () => {
         addElement(
-          Object.assign(baseNewElement("joystick"), {
+          // bottom-left anchor + a fixed PX inset (Unity-style anchoredPosition)
+          // instead of a raw % position — pins it a fixed distance from the
+          // corner on every device shape, which is what a thumb-stick actually
+          // wants; a literal PX offset from screen center (which is what "PX
+          // position, middle-center anchor" would mean) wouldn't move it
+          // anywhere near the corner at all.
+          Object.assign(baseNewElement("joystick"), pxSizeFields(140, 140), {
             name: "joystick", // Game.ts looks up the joystick by exactly this name — keep it, or update mainUI.getJoystick("joystick") in Game.ts if you rename it
-            anchor: "middle-center",
-            xPct: 21.75,
-            yPct: 87.75,
-            widthPct: 27.5,
-            heightPct: 15.5,
+            anchor: "bottom-left",
+            xPx: 40,
+            yPx: 40,
+            xPct: 10,
+            yPct: 90,
             aspectRatio: 1,
             baseColor: "rgba(255,255,255,0.22)",
             knobColor: "rgba(255,255,255,0.9)",
@@ -2382,14 +2677,14 @@
 
       document.getElementById("btn-add-group").addEventListener("click", () => {
         addElement(
-          Object.assign(baseNewElement("group"), {
+          // Transparent by default — see groupSelected's matching comment;
+          // this data ships and renders in the real game too, not just here.
+          Object.assign(baseNewElement("group"), pxSizeFields(280, 140), {
             name: "Group",
-            widthPct: 40,
-            heightPct: 20,
-            backgroundColor: "rgba(232,150,30,0.06)",
-            borderRadiusPct: 4,
-            borderWidthPx: 1,
-            borderColor: "rgba(232,150,30,0.35)",
+            backgroundColor: "transparent",
+            borderRadiusPct: 0,
+            borderWidthPx: 0,
+            borderColor: "transparent",
           })
         );
       });
@@ -2469,7 +2764,9 @@
       }
 
       document.getElementById("btn-save").addEventListener("click", () => {
-        if (projectRootHandle && layoutsDirHandle) {
+        if (localApiAvailable) {
+          saveViaLocalApi().catch((err) => alert("Save failed: " + err.message));
+        } else if (projectRootHandle && layoutsDirHandle) {
           saveToProject().catch((err) => alert("Save failed: " + err.message));
         } else {
           downloadLayoutJson();
@@ -2477,7 +2774,7 @@
       });
 
       document.getElementById("btn-load").addEventListener("click", () => {
-        if (layoutsDirHandle) {
+        if (localApiAvailable || layoutsDirHandle) {
           openLoadModal();
         } else {
           document.getElementById("file-load-input").click();
@@ -2493,14 +2790,34 @@
       });
 
       /* ------------------------------------------------------------------ */
-      /*  Project sync (File System Access API — Chrome/Edge only)           */
+      /*  Project sync — local dev-server API first (see scripts/            */
+      /*  dev-build-api.js's /save-layout, /load-layout, /list-layouts),     */
+      /*  File System Access API (Chrome/Edge only) as a fallback for when   */
+      /*  the dev server isn't reachable (e.g. this file opened standalone). */
       /* ------------------------------------------------------------------ */
+
+      /**
+       * scripts/dev-build-api.js, started alongside `npm run dev` (see
+       * scripts/dev.js) — same origin/port the Engine Room's Build button
+       * already talks to. Preferred over the File System Access API below
+       * whenever it's reachable: it already has real fs access rooted at
+       * the actual project directory, so there's no folder-picker step,
+       * nothing to accidentally point at the wrong directory (the bug this
+       * replaces — picking the project root instead of src/ui/ used to
+       * silently write mainLayout.json somewhere the running game never
+       * reads, with no error), and it works in every browser, not just
+       * Chrome/Edge.
+       */
+      const LOCAL_API = "http://127.0.0.1:8001";
+      let localApiAvailable = false;
+      /** Bound layouts/*.json filename when saving via the local API (kind === "layout") — its equivalent of currentFileHandle.name on the File System Access path, since there's no real handle object here. */
+      let localLayoutFilename = null;
 
       const FS_SUPPORTED = typeof window.showDirectoryPicker === "function";
       let projectRootHandle = null;
       let layoutsDirHandle = null;
       let statusResetTimer = null;
-      /** The real, writable handle Save should overwrite — null means "no project file bound yet, Save creates one." */
+      /** The real, writable handle Save should overwrite — null means "no project file bound yet, Save creates one." Only used on the File System Access fallback path — see localLayoutFilename for the local-API equivalent. */
       let currentFileHandle = null;
       /** 'main' (src/ui/mainLayout.json — gameplay HUD/joystick) | 'endcard' (src/ui/endcardLayout.json) | 'layout' (a saved variant under layouts/) | null (unsaved/imported). */
       let currentFileKind = null;
@@ -2523,8 +2840,8 @@
 
         if (activeInfo) {
           el.textContent = "Editing: " + activeInfo.label;
-        } else if (currentFileKind === "layout" && currentFileHandle) {
-          el.textContent = "Editing: " + currentFileHandle.name;
+        } else if (currentFileKind === "layout" && (currentFileHandle || localLayoutFilename)) {
+          el.textContent = "Editing: " + (currentFileHandle ? currentFileHandle.name : localLayoutFilename);
         } else {
           el.textContent = "New layout (unsaved)";
         }
@@ -2568,12 +2885,142 @@
         }, 2400);
       }
 
-      async function afterConnect(rootHandle) {
-        projectRootHandle = rootHandle;
-        layoutsDirHandle = await rootHandle.getDirectoryHandle("layouts", { create: true });
-        idbSet("projectRoot", rootHandle).catch(() => { });
+      /** Is scripts/dev-build-api.js reachable right now? Determines whether project sync uses it (see initProjectSync) or falls back to File System Access. */
+      async function detectLocalApi() {
+        try {
+          const res = await fetch(LOCAL_API + "/version");
+          return res.ok;
+        } catch (e) {
+          return false; // dev-build-api.js isn't running, or this isn't being served by npm run dev at all (e.g. tools/ui-editor.html opened as a file:// double-click) — fall back to File System Access below
+        }
+      }
+
+      async function postSaveLayout(payload) {
+        const res = await fetch(LOCAL_API + "/save-layout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = await res.json().catch(() => ({ ok: false, error: "Bad response from dev server" }));
+        if (!result.ok) throw new Error(result.error || "Save failed");
+        return result;
+      }
+
+      /** Save, via the local API — mirrors saveToProject()'s File System Access logic exactly (same "overwrite what's loaded, else Save As under layouts/" rule), just without a real file handle to hold onto between calls (see localLayoutFilename). */
+      async function saveViaLocalApi() {
+        const activeInfo = ACTIVE_KINDS[currentFileKind];
+        if (activeInfo) {
+          await postSaveLayout({ kind: currentFileKind, data: currentLayoutData() });
+          flashStatus("💾 Saved " + activeInfo.filename + " — game hot-reloads");
+          updateEditingLabel();
+          return;
+        }
+
+        const nameInput = document.getElementById("layout-name");
+        const tagInput = document.getElementById("layout-tag");
+        const name = nameInput.value.trim() || "untitled";
+        const tag = tagInput.value.trim();
+        const filename = sanitizeFilename(name) + ".json";
+        const data = Object.assign(currentLayoutData(), { name: name, tag: tag });
+
+        const sameFile = currentFileKind === "layout" && localLayoutFilename === filename;
+        await postSaveLayout({ kind: "layout", filename: filename, data: data });
+
+        localLayoutFilename = filename;
+        currentFileHandle = null;
+        currentFileKind = "layout";
+        updateEditingLabel();
+        flashStatus((sameFile ? "💾 Saved " : "💾 Saved as ") + "layouts/" + filename);
+      }
+
+      /**
+       * Sets up whichever project-sync path is actually available, called
+       * once at boot (see Boot section at the bottom) — local API first,
+       * File System Access as the fallback. Local API needs no user
+       * gesture and no folder to get right, so it preloads mainLayout.json
+       * immediately; the FS Access fallback (tryAutoReconnect) still needs
+       * a prior Connect in this browser profile before it can do the same.
+       */
+      async function initProjectSync() {
+        localApiAvailable = await detectLocalApi();
+        if (!localApiAvailable) {
+          tryAutoReconnect();
+          return;
+        }
+
+        document.getElementById("btn-connect").style.display = "none"; // not needed — the dev server already knows exactly where the project is, no folder to pick
+        const syncStatusEl = document.getElementById("sync-status");
+        syncStatusEl.style.display = "";
+        syncStatusEl.title = "Saving directly via the local dev server (scripts/dev-build-api.js) — no folder picker, always the real project.";
+        document.getElementById("btn-set-main").style.display = "";
+        document.getElementById("btn-set-endcard").style.display = "";
+
+        if (elements.length === 0) {
+          try {
+            const res = await fetch(LOCAL_API + "/load-layout?kind=main");
+            if (res.ok) {
+              const data = await res.json();
+              applyLoadedData(data);
+              document.getElementById("layout-name").value = data.name || "";
+              currentFileKind = "main";
+              updateEditingLabel();
+            }
+          } catch (e) {
+            // Fresh project, no main layout yet — nothing to preload.
+          }
+        }
+      }
+
+      /**
+       * Whichever folder got picked in the browser's directory dialog —
+       * Connect's tooltip asks for the project's src/ui/ folder specifically,
+       * but that's an easy folder to mis-navigate to (one level too high,
+       * at the project root, is the natural first click). Before this,
+       * whatever was picked was trusted blindly: pick the project root by
+       * mistake and Save/Set-as-Main would write a mainLayout.json straight
+       * into the project root, no error, no warning — a file the dev
+       * server's bundler never reads, so every future save *looks*
+       * successful (🟢 Synced, no errors) while the running game never
+       * changes. This resolves the real src/ui/ folder regardless of which
+       * of the two you picked, so a wrong pick self-corrects instead of
+       * silently writing to a dead spot.
+       */
+      async function resolveUiDir(pickedHandle) {
+        // Already src/ui (or any folder that already has a layout in it,
+        // e.g. reconnecting) — use it as-is, same as before this existed.
+        try {
+          await pickedHandle.getFileHandle(ACTIVE_KINDS.main.filename);
+          return pickedHandle;
+        } catch (e) {
+          // Not found here — could still be a fresh, empty src/ui with no
+          // layout saved yet. Keep looking below before falling back to it.
+        }
+        // Picked the project root instead — descend into src/ui.
+        try {
+          const srcDir = await pickedHandle.getDirectoryHandle("src");
+          return await srcDir.getDirectoryHandle("ui");
+        } catch (e) {
+          // No src/ui under here either — assume the picked folder really
+          // is an empty/fresh src/ui, matching the original trust-it behavior.
+          return pickedHandle;
+        }
+      }
+
+      async function afterConnect(pickedHandle) {
+        projectRootHandle = await resolveUiDir(pickedHandle);
+        layoutsDirHandle = await projectRootHandle.getDirectoryHandle("layouts", { create: true });
+        // Store what was actually picked, not the resolved folder —
+        // resolveUiDir re-derives the real target from it on every
+        // reconnect, so this stays correct even if src/ui didn't exist yet
+        // (or had no layout saved yet) the first time you connected.
+        idbSet("projectRoot", pickedHandle).catch(() => { });
         document.getElementById("btn-connect").style.display = "none";
-        document.getElementById("sync-status").style.display = "";
+        const syncStatusEl = document.getElementById("sync-status");
+        syncStatusEl.style.display = "";
+        // A quick way to catch a still-wrong folder before saving into it —
+        // if changes ever stop showing up in the game again, hovering
+        // 🟢 Synced is the first thing to check.
+        syncStatusEl.title = 'Writing layouts to the "' + projectRootHandle.name + '" folder — if game changes ever stop showing up after Save, re-Connect and confirm this is your project\'s src/ui folder.';
         document.getElementById("btn-set-main").style.display = "";
         document.getElementById("btn-set-endcard").style.display = "";
 
@@ -2583,7 +3030,7 @@
         // instead of a blank canvas.
         if (elements.length === 0) {
           try {
-            const activeHandle = await rootHandle.getFileHandle(ACTIVE_KINDS.main.filename);
+            const activeHandle = await projectRootHandle.getFileHandle(ACTIVE_KINDS.main.filename);
             const file = await activeHandle.getFile();
             const data = JSON.parse(await file.text());
             applyLoadedData(data);
@@ -2676,15 +3123,21 @@
         flashStatus((sameFile ? "💾 Saved " : "💾 Saved as ") + "layouts/" + filename);
       }
 
-      /** Writes the current layout to mainLayout.json or endcardLayout.json and binds to it, so the next Save overwrites it directly. */
+      /** Writes the current layout to mainLayout.json or endcardLayout.json and binds to it, so the next Save overwrites it directly. Local API first (see saveViaLocalApi's doc comment for why), File System Access as the fallback. */
       async function setActiveKind(kind) {
-        if (!projectRootHandle) return;
         const info = ACTIVE_KINDS[kind];
-        const fileHandle = await projectRootHandle.getFileHandle(info.filename, { create: true });
-        const writable = await fileHandle.createWritable();
-        await writable.write(JSON.stringify(currentLayoutData(), null, 2));
-        await writable.close();
-        currentFileHandle = fileHandle;
+        if (localApiAvailable) {
+          await postSaveLayout({ kind: kind, data: currentLayoutData() });
+          currentFileHandle = null;
+          localLayoutFilename = null;
+        } else {
+          if (!projectRootHandle) return;
+          const fileHandle = await projectRootHandle.getFileHandle(info.filename, { create: true });
+          const writable = await fileHandle.createWritable();
+          await writable.write(JSON.stringify(currentLayoutData(), null, 2));
+          await writable.close();
+          currentFileHandle = fileHandle;
+        }
         currentFileKind = kind;
         updateEditingLabel();
         flashStatus((kind === "main" ? "⭐" : "🏁") + " " + info.filename + " — game hot-reloads");
@@ -2710,43 +3163,57 @@
 
         const entries = [];
 
-        if (projectRootHandle) {
-          for (const kind of ["main", "endcard"]) {
-            const info = ACTIVE_KINDS[kind];
+        if (localApiAvailable) {
+          try {
+            const res = await fetch(LOCAL_API + "/list-layouts");
+            const data = await res.json();
+            if (data.main) entries.push({ name: data.main.filename, kind: "main", label: data.main.filename, w: data.main.w, h: data.main.h });
+            if (data.endcard) entries.push({ name: data.endcard.filename, kind: "endcard", label: data.endcard.filename, w: data.endcard.w, h: data.endcard.h });
+            for (const l of data.layouts || []) {
+              entries.push({ name: l.filename, kind: "layout", tag: l.tag || "", label: l.name || l.filename.replace(/\.json$/, ""), w: l.w, h: l.h, broken: l.broken });
+            }
+          } catch (e) {
+            // Dev server hiccup mid-list — fall through to whatever we got (likely none), same as a fresh project.
+          }
+        } else {
+          if (projectRootHandle) {
+            for (const kind of ["main", "endcard"]) {
+              const info = ACTIVE_KINDS[kind];
+              try {
+                const activeHandle = await projectRootHandle.getFileHandle(info.filename);
+                const file = await activeHandle.getFile();
+                const json = JSON.parse(await file.text());
+                entries.push({
+                  name: info.filename,
+                  handle: activeHandle,
+                  kind: kind,
+                  label: info.filename,
+                  w: json.canvasWidth,
+                  h: json.canvasHeight,
+                });
+              } catch (e) {
+                // That one doesn't exist yet (fresh project) — just skip it.
+              }
+            }
+          }
+
+          for await (const [name, handle] of layoutsDirHandle.entries()) {
+            if (handle.kind !== "file" || !name.endsWith(".json")) continue;
             try {
-              const activeHandle = await projectRootHandle.getFileHandle(info.filename);
-              const file = await activeHandle.getFile();
+              const file = await handle.getFile();
               const json = JSON.parse(await file.text());
               entries.push({
-                name: info.filename,
-                handle: activeHandle,
-                kind: kind,
-                label: info.filename,
+                name: name,
+                handle: handle,
+                kind: "layout",
+                tag: json.tag || "",
+                label: json.name || name.replace(/\.json$/, ""),
                 w: json.canvasWidth,
                 h: json.canvasHeight,
               });
             } catch (e) {
-              // That one doesn't exist yet (fresh project) — just skip it.
+              entries.push({ name: name, handle: handle, kind: "layout", tag: "", label: name.replace(/\.json$/, ""), broken: true });
             }
-          }
-        }
-
-        for await (const [name, handle] of layoutsDirHandle.entries()) {
-          if (handle.kind !== "file" || !name.endsWith(".json")) continue;
-          try {
-            const file = await handle.getFile();
-            const json = JSON.parse(await file.text());
-            entries.push({
-              name: name,
-              handle: handle,
-              kind: "layout",
-              tag: json.tag || "",
-              label: json.name || name.replace(/\.json$/, ""),
-              w: json.canvasWidth,
-              h: json.canvasHeight,
-            });
-          } catch (e) {
-            entries.push({ name: name, handle: handle, kind: "layout", tag: "", label: name.replace(/\.json$/, ""), broken: true });
           }
         }
 
@@ -2773,16 +3240,29 @@
             "</div>";
           item.addEventListener("click", async () => {
             if (entry.broken) return;
-            const file = await entry.handle.getFile();
             try {
-              const data = JSON.parse(await file.text());
+              let data;
+              if (localApiAvailable) {
+                const query = "kind=" + entry.kind + (entry.kind === "layout" ? "&filename=" + encodeURIComponent(entry.name) : "");
+                const res = await fetch(LOCAL_API + "/load-layout?" + query);
+                if (!res.ok) throw new Error("Not found on the dev server");
+                data = await res.json();
+              } else {
+                const file = await entry.handle.getFile();
+                data = JSON.parse(await file.text());
+              }
               applyLoadedData(data);
               document.getElementById("layout-name").value = data.name || entry.name.replace(/\.json$/, "");
-              currentFileHandle = entry.handle;
+              if (localApiAvailable) {
+                currentFileHandle = null;
+                localLayoutFilename = entry.kind === "layout" ? entry.name : null;
+              } else {
+                currentFileHandle = entry.handle;
+              }
               currentFileKind = entry.kind;
               updateEditingLabel();
             } catch (err) {
-              alert("Couldn't parse " + entry.name + ": " + err.message);
+              alert("Couldn't load " + entry.name + ": " + err.message);
             }
             closeLoadModal();
           });
@@ -2828,7 +3308,7 @@
 
       render();
       updateEditingLabel();
-      tryAutoReconnect();
+      initProjectSync();
     })();
   </script>
 </body>

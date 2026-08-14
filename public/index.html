@@ -857,10 +857,36 @@
     </div>
   </div>
 
-  <script src="bundle.js"></script>
+  <script id="bundle-script" src="bundle.js"></script>
   <script>
-    // esbuild live-reload client (dev only — not present in the production build)
-    new EventSource("/esbuild").addEventListener("change", () => location.reload());
+    // esbuild live-reload client (dev only — not present in the production
+    // build) — swaps in the freshly-rebuilt bundle.js in place rather than
+    // location.reload()'ing the whole page. A full reload used to wipe out
+    // the UI editor overlay's entire in-memory session (undo history,
+    // unsaved edits, which project folder it's connected to) every single
+    // time you hit Save, since the editor iframe is part of *this*
+    // document — a real navigation tears it down and reboots it from
+    // scratch along with everything else. Re-running just the bundle
+    // script leaves this document (and the iframe inside it) completely
+    // untouched. main.ts's own __disposeGame/__gameInstanceGeneration hooks
+    // (see its doc comment) handle cleanly retiring the old running Game
+    // instance so the two bundle executions never render into the canvas
+    // at the same time.
+    new EventSource("/esbuild").addEventListener("change", () => {
+      const old = document.getElementById("bundle-script");
+      const script = document.createElement("script");
+      script.id = "bundle-script";
+      script.src = "bundle.js?t=" + Date.now(); // cache-bust — same path esbuild just rewrote, but the browser doesn't know that without a new URL
+      script.onload = () => {
+        // The fresh bundle execution boots with freecam off by default (see
+        // main.ts) since it has no way to know this page's own freecamActive
+        // was already true — hand it back if 3D View was active going into
+        // this reload, so it doesn't silently drop out from under you.
+        if (freecamActive) window.__setFreecamActive?.(true);
+      };
+      old?.remove();
+      document.body.appendChild(script);
+    });
 
     // Edit UI: toggles the same-origin editor iframe over the running game
     // and pauses gameplay (see main.ts) while it's open, so drag gestures

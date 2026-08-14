@@ -83,6 +83,28 @@ export interface UIElementData {
   rotation: number; // degrees
   opacity: number; // 0-1
   zIndex: number;
+  /**
+   * Visual stacking order — the actual CSS z-index applied at render (see
+   * UILayout.ts's buildElement). A float, not an int: the editor seeds it
+   * at 0 for the first element placed and +0.1 for each one after (see
+   * tools/ui-editor.html's nextRenderOrder), so inserting between two
+   * existing elements never forces renumbering everything above it, the
+   * way a plain integer counter would. Falls back to zIndex when absent,
+   * for layouts saved before this field existed. zIndex itself keeps its
+   * other job — list/array order (layers panel, two-pass DOM build,
+   * group-selection bounding-box math) — independent of this.
+   */
+  renderOrder?: number;
+  /**
+   * Touch/pointer hit-priority — independent of renderOrder. CSS z-index
+   * governs both paint order *and* which element wins a click where two
+   * overlap; this is the tie-breaker specifically for elements that share
+   * the same renderOrder, controlling DOM append order (see UILayout.ts's
+   * constructor) rather than the z-index itself, since decoupling touch
+   * routing from paint order entirely isn't possible with native browser
+   * hit-testing. Defaults to 0.
+   */
+  zOrder?: number;
   /** Hidden at game start when false; toggle at runtime via UILayout.show()/hide(). */
   visible?: boolean;
   animation?: UIAnimation;

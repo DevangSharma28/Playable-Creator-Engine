@@ -49,6 +49,8 @@ export class Game {
 
   private collected = 0;
   private ended = false;
+  /** Wall-clock-free playtime accumulator driving the 15s auto-endcard — only advances inside update(), so it (like everything else in update()) naturally stops while the UI editor or freecam is open instead of firing behind them on real elapsed time. */
+  private playTimeMs = 0;
   /** True once something has called resizeTo() explicitly (the dev-only device-frame simulator) — while true, the window's own resize event no longer drives sizing, so the simulator stays in control until it hands back (by calling resizeTo() with the real window size again). Production never sets this; the window listener below is the only thing that ever runs there. */
   private manualSize = false;
 
@@ -101,11 +103,13 @@ export class Game {
     const viewHelperCanvas = document.getElementById("er-viewhelper") as HTMLCanvasElement | null;
     this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
 
-    window.addEventListener("resize", () => {
-      if (!this.manualSize) this.handleResize();
-    });
-    window.setTimeout(() => this.showEndCard(false), AUTO_END_MS);
+    window.addEventListener("resize", this.onWindowResize);
   }
+
+  /** Stored so dispose() can remove exactly this listener — an inline arrow passed straight to addEventListener can never be removed later. */
+  private readonly onWindowResize = (): void => {
+    if (!this.manualSize) this.handleResize();
+  };
 
   static async create(canvas: HTMLCanvasElement): Promise<Game> {
     const loader = new AssetLoader();
@@ -206,6 +210,11 @@ export class Game {
   update(dt: number, elapsed: number): void {
     if (!this.ended) {
       this.player.update(dt, elapsed, this.input.axis);
+
+      this.playTimeMs += dt * 1000;
+      if (this.playTimeMs >= AUTO_END_MS) {
+        this.showEndCard(false);
+      }
     }
 
     this.coinField.update(dt, elapsed, this.player.position, () => {
@@ -230,6 +239,25 @@ export class Game {
   /** Dev-only: live renderer counters for the Engine Room stats readout. Reading renderer.info.render is cheap (Three.js already tallies it every frame) — no separate tracking needed. */
   get rendererStats(): { drawCalls: number; triangles: number } {
     return { drawCalls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles };
+  }
+
+  /**
+   * Dev-only: tears this instance down when a fresh bundle is about to
+   * take over the same #game canvas in place (see main.ts's __disposeGame
+   * hook) — the dev preview swaps in a newly-rebuilt bundle after every
+   * source/layout save instead of doing a full page navigation, so the UI
+   * editor overlay's own in-memory session (undo history, unsaved edits,
+   * Connect state) survives a Save. Without this, every save would leak a
+   * WebGL context (browsers cap how many a page can hold open at once) plus
+   * a full set of window-level input listeners, since nothing else ever
+   * releases the old instance once a new one starts rendering into the same
+   * canvas. Never called in production — nothing there ever replaces the
+   * bundle without a real navigation.
+   */
+  dispose(): void {
+    window.removeEventListener("resize", this.onWindowResize);
+    this.input.dispose();
+    this.renderer.dispose();
   }
 
   private showEndCard(won: boolean): void {

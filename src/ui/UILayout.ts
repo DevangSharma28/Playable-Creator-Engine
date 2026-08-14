@@ -84,7 +84,14 @@ export class UILayout {
     for (const el of sorted) {
       nodesById.set(el.id, this.buildElement(el));
     }
-    for (const el of sorted) {
+    // Append order uses zOrder, not zIndex/array order — it's the DOM-order
+    // tie-breaker for touch/pointer hit-priority among elements that share
+    // the same renderOrder (see UIElementData.zOrder's doc comment). Visual
+    // stacking itself is unaffected either way: it's driven by the CSS
+    // z-index buildElement already set from renderOrder, independent of
+    // where in the DOM each node actually landed.
+    const appendOrder = [...data.elements].sort((a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0));
+    for (const el of appendOrder) {
       const { wrapper, content } = nodesById.get(el.id)!;
       const parent = el.parentId ? nodesById.get(el.parentId)?.content : undefined;
       (parent ?? this.container).appendChild(wrapper);
@@ -198,7 +205,9 @@ export class UILayout {
       wrapper.style.height = `${data.heightPct}%`;
     }
     wrapper.style.opacity = `${data.opacity}`;
-    wrapper.style.zIndex = `${data.zIndex}`;
+    // renderOrder is the real visual-stacking value; fall back to zIndex for
+    // layouts saved before renderOrder existed (see its doc comment).
+    wrapper.style.zIndex = `${data.renderOrder ?? data.zIndex}`;
     wrapper.style.transform = `${ANCHOR_TRANSFORM[data.anchor]} rotate(${data.rotation}deg)`;
     wrapper.style.pointerEvents = "none";
 
