@@ -1,18 +1,18 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { InputHandler } from "./core/InputHandler";
-import { CameraHandler } from "./core/CameraHandler";
-import { ViewHelperWidget } from "./core/ViewHelperWidget";
-import { SceneInspector, type GizmoMode } from "./core/SceneInspector";
+import { DynamicJoystick } from "../engine/core/DynamicJoystick";
+import { CameraHandler } from "../engine/core/CameraHandler";
+import { ViewHelperWidget } from "../engine/core/ViewHelperWidget";
+import { SceneInspector, type GizmoMode } from "../engine/core/SceneInspector";
 import { World } from "./world/World";
 import { Player } from "./entities/Player";
 import { CoinField } from "./entities/CoinField";
 import { HUD } from "./ui/HUD";
-import { UILayout } from "./ui/UILayout";
-import type { UILayoutData } from "./ui/UILayoutTypes";
+import { UILayout } from "../engine/ui/UILayout";
+import type { UILayoutData } from "../engine/ui/UILayoutTypes";
 import mainLayoutRaw from "./ui/mainLayout.json";
 import endcardLayoutRaw from "./ui/endcardLayout.json";
-import { AssetLoader } from "./AssetLoader";
+import { AssetLoader } from "../engine/AssetLoader";
 import { manifest, libGlb } from "./assets";
 
 const mainLayoutData = mainLayoutRaw as UILayoutData;
@@ -30,7 +30,7 @@ export class Game {
   private readonly world: World;
   private readonly player: Player;
   private readonly coinField: CoinField;
-  private readonly input: InputHandler;
+  private readonly input: DynamicJoystick;
   private readonly cameraHandler: CameraHandler;
   private readonly hud: HUD;
   private readonly mainUI: UILayout;
@@ -78,6 +78,8 @@ export class Game {
     this.mainUI = new UILayout(this.mainLayer, mainLayoutData);
     this.endcardUI = new UILayout(endcardLayer, endcardLayoutData);
 
+    // HUD wires up its own editor-assigned fields (e.g. moneyIcon) in its
+    // own constructor — see src/game/ui/HUD.ts and src/engine/Bindings.ts.
     this.hud = new HUD(this.mainUI, this.endcardUI);
     this.hud.setScore(0, this.coinField.total);
     this.hud.onCtaClick(() => {
@@ -87,16 +89,17 @@ export class Game {
     });
 
     // The joystick is a real, editable layout element (type: "joystick",
-    // named "joystick") — not hardcoded HTML — so InputHandler wires
-    // directly to whatever tools/ui-editor.html placed. It has to exist:
+    // named "joystick") — not hardcoded HTML — so DynamicJoystick reuses
+    // whatever base/knob tools/ui-editor.html placed (color, size) for its
+    // visuals, it just controls *where*/*when* they appear itself instead
+    // of leaving them pinned at their designed spot. It has to exist:
     // there's no fallback control scheme, so fail loudly rather than ship
     // a game nothing can move.
     const joystick = this.mainUI.getJoystick("joystick");
     if (!joystick) {
       throw new Error('Game: mainLayout.json is missing a "joystick" element — add one in the UI editor (Properties panel names it "joystick" by default) and Set Active.');
     }
-    this.mainUI.setInteractive("joystick");
-    this.input = new InputHandler(joystick.base, joystick.knob, 45, () => this.hud.hideDragHint());
+    this.input = new DynamicJoystick(this.mainLayer, joystick.base, joystick.knob, 45, () => this.hud.hideDragHint());
 
     this.cameraHandler = new CameraHandler(this.camera, CAMERA_OFFSET);
 

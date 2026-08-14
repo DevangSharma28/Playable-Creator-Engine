@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Entity } from "./Entity";
+import type { Entity } from "../../engine/entities/Entity";
 
 const geometry = new THREE.CylinderGeometry(0.32, 0.32, 0.1, 20);
 const material = new THREE.MeshStandardMaterial({

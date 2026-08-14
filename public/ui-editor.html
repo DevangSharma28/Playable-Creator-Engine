@@ -411,7 +411,7 @@
       position: fixed;
       left: 0;
       top: 53px;
-      bottom: 0;
+      bottom: 50%;
       width: 220px;
       z-index: 90;
       background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
@@ -420,6 +420,251 @@
       box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
       overflow-y: auto;
       padding: 12px 10px;
+    }
+
+    /* ---- Scripts panel — read-only browser for engine/game .ts classes
+       and their public fields, fed by scripts/dev-build-api.js's
+       /list-scripts + /script-info (dev-server-only, same as Save/Load —
+       see FS_SUPPORTED/localApiAvailable below). Docked directly under
+       Layers, same left column, same width — the two split the space
+       50/50 rather than one crowding out the other. */
+    /* Flex column, not a single scrolling block like #layers — the header
+       (title + Debug button + count) stays fixed in place as a flex item
+       at its natural height; only #script-list below it scrolls. Without
+       this, scrolling a long script list also scrolled the Debug button
+       out of view along with it. */
+    #scripts {
+      position: fixed;
+      left: 0;
+      top: 50%;
+      bottom: 0;
+      width: 220px;
+      z-index: 90;
+      background: color-mix(in srgb, var(--panel-bg) 94%, transparent);
+      backdrop-filter: blur(8px);
+      border-right: 1px solid var(--panel-border);
+      border-top: 1px solid var(--panel-border);
+      box-shadow: 4px 0 20px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+    }
+
+    #scripts .panel-header {
+      flex-shrink: 0;
+      padding: 12px 10px 9px;
+      margin: 0;
+    }
+
+    #script-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 10px 12px;
+    }
+
+    .script-group-label {
+      font-size: 9.5px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-faint);
+      margin: 10px 6px 5px;
+    }
+
+    .script-group-label:first-child {
+      margin-top: 2px;
+    }
+
+    .script-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      margin-bottom: 1px;
+      border-left: 2px solid transparent;
+      font-size: 12px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: background 0.1s ease, border-color 0.1s ease;
+    }
+
+    .script-item:hover {
+      background: var(--panel-bg-raised);
+    }
+
+    .script-item.selected {
+      background: var(--accent-dim);
+      border-left-color: var(--accent);
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    #script-empty {
+      color: var(--text-faint);
+      padding: 10px 6px;
+      line-height: 1.6;
+      font-size: 11.5px;
+    }
+
+    /* ---- Script properties (shown in the Properties panel when a script,
+       not a layout element, is selected — see renderScriptProperties).
+       Stacked, not a tight left/right flex row — the narrow ~220px column
+       here can't fit "fieldName: SomeLongType" and a status pill on one
+       line without wrapping into each other; simple text on its own line
+       underneath, plus a highlight tint on the whole row, reads cleanly at
+       any content length instead of fighting for horizontal space. */
+    .script-field-row {
+      padding: 7px 9px;
+      background: var(--panel-bg-input);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 6px;
+    }
+
+    .script-field-name {
+      color: var(--text);
+      font-weight: 600;
+      font-family: var(--mono);
+      font-size: 11px;
+      overflow-wrap: break-word;
+    }
+
+    .script-field-type {
+      color: var(--text-faint);
+      font-size: 10px;
+      margin-left: 4px;
+    }
+
+    .script-field-status {
+      margin-top: 4px;
+      font-size: 10.5px;
+      color: var(--text-faint);
+    }
+
+    .script-field-row.assigned-yes .script-field-status {
+      color: var(--ok);
+    }
+
+    /* Debug toggle — Scripts panel header. Light red always, same family
+       as .delete-btn, so it reads as "careful, this shows internals" at a
+       glance; .active (debug mode on) just deepens the same color rather
+       than switching to a different one. */
+    #btn-script-debug {
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      color: #ff9a9a;
+      background: var(--danger-dim);
+      border: 1px solid rgba(255, 82, 82, 0.3);
+      border-radius: 999px;
+      padding: 2.5px 9px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    #btn-script-debug:hover {
+      background: rgba(255, 82, 82, 0.24);
+    }
+
+    #btn-script-debug.active {
+      background: var(--danger);
+      border-color: var(--danger);
+      color: #1a0505;
+    }
+
+    /* Private/protected fields, shown only while Debug is active — same
+       row shape as a normal (public) field, distinguished by a light red
+       tint instead of the plain panel background. Always read-only, same
+       as every field row here (this whole panel has no inputs at all), so
+       no separate "can't edit this" affordance is needed beyond the color
+       itself marking it as internal. */
+    .script-field-row.private-field {
+      border-color: rgba(255, 82, 82, 0.35);
+      background: var(--danger-dim);
+    }
+
+    .script-field-row.private-field .script-field-status {
+      color: #ff9a9a;
+    }
+
+    /* Assignable fields — drop targets for a designed UI element (see
+       isAssignableField/wireAssignableFieldRows/startPicking). Accent/
+       orange, same "this is interactive" language the rest of the app
+       already uses for draggable/droppable things, kept deliberately
+       distinct from Debug's red (private, hands-off) — orange here means
+       "you can put something here", not "careful". */
+    .script-field-row.assignable {
+      border-color: rgba(232, 150, 30, 0.35);
+    }
+
+    .script-field-row.assignable.unbound {
+      border-style: dashed;
+    }
+
+    .script-field-row.assignable.bound {
+      background: var(--accent-dim);
+    }
+
+    .script-field-row.assignable .script-field-status {
+      color: var(--accent);
+    }
+
+    .script-field-row.assignable.drag-over {
+      border-color: var(--accent);
+      background: var(--accent-dim);
+      box-shadow: 0 0 0 1px var(--accent) inset;
+    }
+
+    /* Plain inline text links — Clear / ⊙ Pick — instead of separate
+       boxed buttons competing for space next to the status text on the
+       same narrow line. */
+    .script-field-link {
+      color: inherit;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      cursor: pointer;
+    }
+
+    .script-field-link:hover {
+      color: var(--accent-hover);
+    }
+
+    .script-field-link.danger:hover {
+      color: #ff9a9a;
+    }
+
+    /* Picking-mode banner — one flowing line of plain text (wraps
+       naturally at this column's width, nothing fighting for horizontal
+       space) on a highlight tint, with Cancel as an inline text link
+       rather than a separate button box. */
+    #picking-banner {
+      background: var(--accent-dim);
+      border: 1px solid rgba(232, 150, 30, 0.4);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      margin-bottom: 12px;
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    /* Picking mode — every layer row in the Layers panel becomes an
+       obvious pick target (see finishPicking/buildLayerRow's click
+       handler branch) instead of behaving like a normal select-this-layer
+       click, so it needs its own unmistakable affordance rather than
+       looking identical to browsing. */
+    body.picking-mode .layer-item {
+      cursor: copy;
+      outline: 1px dashed rgba(232, 150, 30, 0.4);
+      outline-offset: -1px;
+    }
+
+    body.picking-mode .layer-item:hover {
+      background: var(--accent-dim);
+      outline-color: var(--accent);
     }
 
     #layers h3 {
@@ -795,11 +1040,15 @@
     }
 
     /* Render order — the light-green color is purely a visual cue tying it
-       to the "R" in "R Order", no functional meaning (unlike Z Order's
-       plain label, which sits right next to it for the touch-priority
-       counterpart). */
+       to the "R" in "R Order", no functional meaning. Z Order gets the same
+       treatment in light blue, right next to it, for the touch-priority
+       counterpart. */
     .field label.r-order-label {
       color: #8ef2a8;
+    }
+
+    .field label.z-order-label {
+      color: #7dd3fc;
     }
 
     .field input[type=text],
@@ -915,6 +1164,107 @@
       accent-color: var(--accent);
     }
 
+    /* Toggle button — replaces a plain checkbox for on/off fields (Lock
+       aspect ratio, Visible). Outlined at the default border color when
+       off; fills fully solid when on, rather than a small tick mark, so
+       the state reads at a glance without needing to spot a tiny check
+       icon. */
+    .toggle-btn {
+      position: relative;
+      display: block;
+      width: 100%;
+      text-align: left;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-dim);
+      background: var(--panel-bg-input);
+      border: 1px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+
+    .toggle-btn:hover {
+      border-color: #3a3e45;
+      color: var(--text);
+    }
+
+    .toggle-btn.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #1a1204;
+      font-weight: 700;
+    }
+
+    /* Status dot, top-right corner — red = off/false, green = on/true, at
+       a glance without reading the button label. */
+    .toggle-btn::after {
+      content: "";
+      position: absolute;
+      top: 6px;
+      right: 8px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--danger);
+      box-shadow: 0 0 4px rgba(220, 60, 60, 0.6);
+    }
+
+    .toggle-btn.active::after {
+      background: #3ecf6c;
+      box-shadow: 0 0 4px rgba(62, 207, 108, 0.6);
+    }
+
+    /* Color field — a native swatch (opens the OS color panel) paired with
+       the existing text input, which stays the source of truth for
+       rgba()/named CSS colors the swatch alone can't represent (it only
+       ever holds #rrggbb, no alpha). Picking a color in the swatch writes
+       straight into the text field. */
+    .color-field-row {
+      display: flex;
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    .color-field-row input[type=color].color-swatch {
+      flex-shrink: 0;
+      width: 32px;
+      height: 32px;
+      padding: 0;
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-sm);
+      background: none;
+      cursor: pointer;
+    }
+
+    .color-field-row input[type=text] {
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* Opacity — live 0-1 readout next to the slider, since a bare <input
+       type=range> shows no value at all on its own. */
+    .opacity-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .opacity-row input[type=range] {
+      flex: 1;
+    }
+
+    .opacity-value {
+      flex-shrink: 0;
+      width: 34px;
+      text-align: right;
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
     .lock-aspect-note {
       background: var(--panel-bg-raised);
       border: 1px solid var(--panel-border);
@@ -1003,6 +1353,12 @@
       background: #32353b;
     }
 
+    .action-row button.center-btn {
+      padding: 5px;
+      font-weight: 500;
+      font-size: 11px;
+    }
+
     .delete-btn {
       width: 100%;
       margin-top: 8px;
@@ -1042,20 +1398,20 @@
       <span class="spacer"></span>
       <span id="editing-label" class="toolbar-label"></span>
       <input type="text" id="layout-name" placeholder="Layout name"
-        title="Filename this saves as under src/ui/layouts/" />
+        title="Filename this saves as under src/game/ui/layouts/" />
       <input type="text" id="layout-tag" placeholder="Tag"
         title="Free-form label shown in the Load list, e.g. 'endcard', 'hud'" />
       <div class="sep"></div>
       <span class="group-label">Project</span>
       <button id="btn-connect"
-        title="Pick your project folder once — either the project root or src/ui itself both work, it finds src/ui automatically. After that, Save/Load work directly against it, no manual file moving.">🔗
+        title="Pick your project folder once — either the project root or src/game/ui itself both work, it finds src/game/ui automatically. After that, Save/Load work directly against it, no manual file moving.">🔗
         Connect</button>
       <span id="sync-status">🟢 Synced</span>
       <button id="btn-set-main"
-        title="Write this layout to src/ui/mainLayout.json — gameplay HUD/joystick, shown while playing. Dev server hot-reloads automatically.">⭐
+        title="Write this layout to src/game/ui/mainLayout.json — gameplay HUD/joystick, shown while playing. Dev server hot-reloads automatically.">⭐
         Main</button>
       <button id="btn-set-endcard"
-        title="Write this layout to src/ui/endcardLayout.json — shown once the game ends. Dev server hot-reloads automatically.">🏁
+        title="Write this layout to src/game/ui/endcardLayout.json — shown once the game ends. Dev server hot-reloads automatically.">🏁
         Endcard</button>
       <button id="btn-load">📂 Load</button>
       <button id="btn-new">New</button>
@@ -1079,6 +1435,13 @@
     <div id="layers">
       <div class="panel-header">🗂 Layers<span class="count" id="layer-count">0</span></div>
       <div id="layer-list"></div>
+    </div>
+
+    <div id="scripts">
+      <div class="panel-header">🧩 Scripts<button id="btn-script-debug" title="Show only private fields — read-only, same as public ones, just a different set">🐞 Debug</button><span class="count" id="script-count">0</span></div>
+      <div id="script-list">
+        <div id="script-empty">Needs the local dev server (npm run dev) — same as Save/Load.</div>
+      </div>
     </div>
 
     <div id="viewport-wrap">
@@ -1149,6 +1512,19 @@
       let nextRenderOrder = 0;
       /** id of the layer row currently being dragged in the Layers panel (native HTML5 drag-and-drop), or null between drags — see buildLayerRow's dragstart/dragend and reparentElementTo. */
       let draggedLayerId = null;
+
+      /** { engine: string[], game: string[] } of .ts file paths, or null before the Scripts panel has loaded (or on a browser/session with no local dev server — see loadScriptsList). */
+      let scriptsList = null;
+      /** { category, path } of the script currently shown in the Properties panel, or null — mutually exclusive with a layout-element selection (see render()'s "element selection always wins" rule). */
+      let selectedScriptRef = null;
+      /** Cache of already-fetched /script-info responses, keyed by "category/path" — the Scripts panel is read-only and the underlying files don't change while the editor's open, so there's no reason to re-fetch on every click. */
+      const scriptInfoCache = new Map();
+      /** Global toggle (not per-script) — false shows a class's public fields (the normal view), true switches to *only* its private/protected ones, read-only either way. See #btn-script-debug. */
+      let scriptDebugMode = false;
+      /** [{category, path, className, fieldName, uiElementName}] — the field <-> UI-element drag-and-drop assignments (see loadBindingsList, GET /list-bindings). Consumed at runtime by src/engine/Bindings.ts's applyBindings(). */
+      let bindingsList = [];
+      /** { className, fieldName, ref: {category, path} } while "⊙ Pick" is armed and waiting for a layer click, or null — a click-based alternative to dragging onto a field row (see startPicking/buildLayerRow's click handler), since native HTML5 drag-and-drop between two far-apart panels isn't reliable in every browser/input-device combination. */
+      let pickingFieldRef = null;
 
       let history = [];
       let future = [];
@@ -1431,10 +1807,28 @@
       /* ------------------------------------------------------------------ */
 
       function render() {
+        // A real element selection always wins over a script selection —
+        // enforced centrally here (rather than at every place selectedIds
+        // gets set) so clicking anything on the canvas/Layers panel always
+        // correctly switches the Properties panel back, with no risk of
+        // some selection path forgetting to clear selectedScriptRef itself.
+        if (selectedIds.size > 0) {
+          selectedScriptRef = null;
+          // Selecting anything via a path that isn't buildLayerRow's own
+          // click handler (e.g. clicking an element directly on the
+          // canvas) bypasses finishPicking entirely — clear this here too
+          // so picking-mode never gets stuck armed with its banner gone
+          // but body.picking-mode still affecting the Layers panel.
+          if (pickingFieldRef) {
+            pickingFieldRef = null;
+            document.body.classList.remove("picking-mode");
+          }
+        }
         applyCanvasSize();
         renderCanvas();
         renderLayers();
         renderProperties();
+        renderScriptList();
         updateHistoryButtons();
       }
 
@@ -1661,6 +2055,10 @@
           '<span class="zbtns"><button data-act="up" title="Bring forward">▲</button><button data-act="down" title="Send backward">▼</button></span>';
         item.addEventListener("click", (e) => {
           if (e.target.dataset.act) return;
+          if (pickingFieldRef) {
+            finishPicking(data.name);
+            return;
+          }
           if (e.ctrlKey || e.metaKey || e.shiftKey) toggleSelect(data.id);
           else selectedIds = new Set([data.id]);
           render();
@@ -1761,7 +2159,295 @@
         });
       }
 
+      /* ------------------------------------------------------------------ */
+      /*  Scripts panel — read-only browser for engine/game .ts classes and  */
+      /*  their public fields (see scripts/dev-build-api.js's /list-scripts, */
+      /*  /script-info; dev-server-only, same requirement as Save/Load).     */
+      /* ------------------------------------------------------------------ */
+
+      /** Fetches the engine/game .ts file list once, at boot, if the local dev server is reachable (see initProjectSync) — the panel stays showing its "needs the dev server" placeholder otherwise. */
+      async function loadScriptsList() {
+        try {
+          const res = await fetch(LOCAL_API + "/list-scripts");
+          scriptsList = await res.json();
+        } catch (e) {
+          scriptsList = null;
+        }
+        renderScriptList();
+      }
+
+      async function loadBindingsList() {
+        try {
+          const res = await fetch(LOCAL_API + "/list-bindings");
+          const data = await res.json();
+          bindingsList = data.bindings || [];
+        } catch (e) {
+          bindingsList = [];
+        }
+        if (selectedScriptRef) renderScriptProperties();
+      }
+
+      function bindingFor(className, fieldName) {
+        return bindingsList.find((b) => b.className === className && b.fieldName === fieldName);
+      }
+
+      /** Field is a drag-and-drop assignment target only if it could plausibly hold a designed UI element — HTMLElement-typed, public (private fields never show outside Debug mode, where assignment doesn't apply anyway — see renderScriptProperties). */
+      function isAssignableField(field) {
+        return field.visibility === "public" && typeof field.type === "string" && field.type.includes("HTMLElement");
+      }
+
+      async function saveBinding(category, path, className, fieldName, uiElementName) {
+        try {
+          const res = await fetch(LOCAL_API + "/save-binding", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category, path, className, fieldName, uiElementName }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Save failed");
+          bindingsList = data.bindings;
+          flashStatus("🔗 " + className + "." + fieldName + " → " + uiElementName);
+        } catch (err) {
+          alert("Couldn't save that assignment: " + err.message);
+        }
+        renderScriptProperties();
+      }
+
+      async function removeBinding(className, fieldName) {
+        try {
+          const res = await fetch(LOCAL_API + "/remove-binding", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ className, fieldName }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.error || "Remove failed");
+          bindingsList = data.bindings;
+        } catch (err) {
+          alert("Couldn't remove that assignment: " + err.message);
+        }
+        renderScriptProperties();
+      }
+
+      function renderScriptList() {
+        const countEl = document.getElementById("script-count");
+        const listEl = document.getElementById("script-list");
+        const totalCount = scriptsList ? scriptsList.engine.length + scriptsList.game.length : 0;
+        if (countEl) countEl.textContent = String(totalCount);
+
+        if (!scriptsList) {
+          listEl.innerHTML = '<div id="script-empty">Needs the local dev server (npm run dev) — same as Save/Load.</div>';
+          return;
+        }
+        if (totalCount === 0) {
+          listEl.innerHTML = '<div id="script-empty">No .ts files found under src/engine/ or src/game/.</div>';
+          return;
+        }
+
+        listEl.innerHTML = "";
+        for (const category of ["engine", "game"]) {
+          const files = scriptsList[category];
+          if (!files || files.length === 0) continue;
+          const label = document.createElement("div");
+          label.className = "script-group-label";
+          label.textContent = category === "engine" ? "⚙️ Engine" : "🎮 Game";
+          listEl.appendChild(label);
+          for (const filePath of files) {
+            const item = document.createElement("div");
+            const isSelected = selectedScriptRef && selectedScriptRef.category === category && selectedScriptRef.path === filePath;
+            item.className = "script-item" + (isSelected ? " selected" : "");
+            item.textContent = filePath;
+            item.title = "src/" + category + "/" + filePath;
+            item.addEventListener("click", () => selectScript(category, filePath));
+            listEl.appendChild(item);
+          }
+        }
+      }
+
+      /** Selecting a script always deselects any layout element (see render()'s "element selection always wins" rule, which is the reverse direction) — the two panels show one or the other, never both at once. */
+      function selectScript(category, filePath) {
+        selectedIds = new Set();
+        selectedScriptRef = { category, path: filePath };
+        pickingFieldRef = null; // switching scripts mid-pick would leave picking-mode stuck armed for a field that's no longer even showing
+        document.body.classList.remove("picking-mode");
+        render();
+      }
+
+      async function renderScriptProperties() {
+        const ref = selectedScriptRef;
+        const cacheKey = ref.category + "/" + ref.path;
+
+        if (!scriptInfoCache.has(ref.category + "/" + ref.path)) {
+          propertiesBodyEl.innerHTML = '<div id="no-selection">Loading ' + escapeHtml(ref.path) + "…</div>";
+          try {
+            const res = await fetch(LOCAL_API + "/script-info?category=" + encodeURIComponent(ref.category) + "&path=" + encodeURIComponent(ref.path));
+            const data = await res.json();
+            scriptInfoCache.set(cacheKey, data.ok ? data : { ok: false, error: data.error || "Couldn't read that file" });
+          } catch (e) {
+            scriptInfoCache.set(cacheKey, { ok: false, error: "Local dev server unreachable" });
+          }
+          // Selection may have moved on while the fetch was in flight (click another script, or a layout element) — don't stomp whatever's showing now with a stale response.
+          if (selectedScriptRef !== ref) return;
+        }
+
+        const info = scriptInfoCache.get(cacheKey);
+        let html = '<h3>🧩 ' + escapeHtml(ref.path) + "</h3>";
+
+        if (pickingFieldRef) {
+          html +=
+            '<div id="picking-banner">⊙ Picking for <b>' +
+            escapeHtml(pickingFieldRef.className) + "." + escapeHtml(pickingFieldRef.fieldName) +
+            "</b> — click any layer above to assign it, or " +
+            '<span id="btn-cancel-picking" class="script-field-link danger">cancel</span> (Esc).</div>';
+        }
+
+        if (!info.ok) {
+          html += '<div id="no-selection">Couldn\'t load this script: ' + escapeHtml(info.error) + "</div>";
+          propertiesBodyEl.innerHTML = html;
+          return;
+        }
+
+        if (info.classes.length === 0) {
+          html += '<div id="no-selection">No class declarations found in this file.</div>';
+        }
+
+        // Debug OFF (default): public fields, the normal view. Debug ON:
+        // *only* private/protected ones — a mode switch, not an addition —
+        // still entirely read-only (this whole panel has no inputs), just
+        // a different, light-red-marked set of fields.
+        for (const cls of info.classes) {
+          const shownFields = cls.fields.filter((f) => (scriptDebugMode ? f.visibility !== "public" : f.visibility === "public"));
+          html += '<div class="script-group-label" style="margin-top:16px;">class ' + escapeHtml(cls.name) + "</div>";
+          if (shownFields.length === 0) {
+            html +=
+              '<div id="no-selection">' +
+              (scriptDebugMode ? "No private/protected fields on this class." : "No public fields — everything on this class is private, or exposed only through methods/getters.") +
+              "</div>";
+            continue;
+          }
+          for (const field of shownFields) {
+            const nameLine =
+              '<div class="script-field-name">' + escapeHtml(field.name) +
+              (field.type ? '<span class="script-field-type">: ' + escapeHtml(field.type) + "</span>" : "") +
+              "</div>";
+
+            if (!scriptDebugMode && isAssignableField(field)) {
+              const bound = bindingFor(cls.name, field.name);
+              html +=
+                '<div class="script-field-row assignable' + (bound ? " bound" : " unbound") + '" data-bind-class="' + escapeAttr(cls.name) + '" data-bind-field="' + escapeAttr(field.name) + '">' +
+                nameLine +
+                '<div class="script-field-status">' +
+                (bound
+                  ? "🔗 " + escapeHtml(bound.uiElementName) + ' — <span class="script-field-link danger" data-act="clear-binding">clear</span>'
+                  : 'Drop a layer here, or <span class="script-field-link" data-act="pick-binding">⊙ Pick</span>') +
+                "</div></div>";
+              continue;
+            }
+
+            html +=
+              '<div class="script-field-row' + (scriptDebugMode ? " private-field" : " assigned-" + (field.assigned ? "yes" : "no")) + '">' +
+              nameLine +
+              '<div class="script-field-status">' +
+              (scriptDebugMode ? escapeHtml(field.visibility) : field.assigned ? "Assigned" : "Empty") +
+              "</div></div>";
+          }
+        }
+
+        html +=
+          '<div class="lock-aspect-note" style="margin-top:14px;">' +
+          (scriptDebugMode
+            ? "🐞 Debug mode — private/protected fields, read-only. Click Debug again for public fields."
+            : "Fields shaded orange accept a designed element — drag a layer onto one, or click its ⊙ Pick button then click a layer. See src/engine/Bindings.ts. Everything else here is read-only.") +
+          "</div>";
+        propertiesBodyEl.innerHTML = html;
+        wireAssignableFieldRows(ref);
+        const cancelBtn = document.getElementById("btn-cancel-picking");
+        if (cancelBtn) cancelBtn.addEventListener("click", cancelPicking);
+      }
+
+      /** Drag-and-drop + clear wiring for the assignable field rows renderScriptProperties just built — reuses the exact same draggedLayerId the Layers panel's own rows set on dragstart (see buildLayerRow), so dragging a layer onto a field works the same gesture as dragging one onto a group. */
+      function wireAssignableFieldRows(ref) {
+        propertiesBodyEl.querySelectorAll(".script-field-row.assignable").forEach((row) => {
+          const className = row.dataset.bindClass;
+          const fieldName = row.dataset.bindField;
+
+          row.addEventListener("dragover", (e) => {
+            if (!draggedLayerId) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "copy";
+            row.classList.add("drag-over");
+          });
+          row.addEventListener("dragleave", () => row.classList.remove("drag-over"));
+          row.addEventListener("drop", (e) => {
+            e.preventDefault();
+            row.classList.remove("drag-over");
+            if (!draggedLayerId) return;
+            const dragged = elements.find((el) => el.id === draggedLayerId);
+            draggedLayerId = null;
+            if (!dragged) return;
+            saveBinding(ref.category, ref.path, className, fieldName, dragged.name);
+          });
+
+          const clearBtn = row.querySelector('[data-act="clear-binding"]');
+          if (clearBtn) {
+            clearBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              removeBinding(className, fieldName);
+            });
+          }
+
+          const pickBtn = row.querySelector('[data-act="pick-binding"]');
+          if (pickBtn) {
+            pickBtn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              startPicking(className, fieldName, ref);
+            });
+          }
+        });
+      }
+
+      /**
+       * Click-based alternative to dragging a layer onto a field row —
+       * native HTML5 drag-and-drop between two panels this far apart isn't
+       * reliable in every browser/input setup, so this gives the same
+       * outcome (assign a designed element to a field) through two plain
+       * clicks instead: ⊙ Pick, then click any layer. Same idea as
+       * Unity's Inspector, which offers both a drag target *and* a little
+       * circle-picker icon on every object reference field for exactly
+       * this reason.
+       */
+      function startPicking(className, fieldName, ref) {
+        pickingFieldRef = { className, fieldName, ref };
+        document.body.classList.add("picking-mode");
+        renderScriptProperties();
+      }
+
+      function cancelPicking() {
+        if (!pickingFieldRef) return;
+        pickingFieldRef = null;
+        document.body.classList.remove("picking-mode");
+        if (selectedScriptRef) renderScriptProperties();
+      }
+
+      function finishPicking(uiElementName) {
+        const picking = pickingFieldRef;
+        pickingFieldRef = null;
+        document.body.classList.remove("picking-mode");
+        saveBinding(picking.ref.category, picking.ref.path, picking.className, picking.fieldName, uiElementName);
+      }
+
+      document.getElementById("btn-script-debug").addEventListener("click", () => {
+        scriptDebugMode = !scriptDebugMode;
+        document.getElementById("btn-script-debug").classList.toggle("active", scriptDebugMode);
+        if (selectedScriptRef) renderScriptProperties();
+      });
+
       function renderProperties() {
+        if (selectedScriptRef) {
+          renderScriptProperties();
+          return;
+        }
+
         if (selectedIds.size > 1) {
           renderMultiSelectProperties();
           return;
@@ -1794,11 +2480,12 @@
           '<div class="field-row">' +
           '<div class="field"><label class="r-order-label">R Order (render order)</label>' +
           '<input type="number" step="0.1" data-prop="renderOrder" value="' + escapeAttr(data.renderOrder ?? data.zIndex ?? 0) + '" /></div>' +
-          '<div class="field"><label>Z Order (touch priority)</label>' +
+          '<div class="field"><label class="z-order-label">Z Order (touch priority)</label>' +
           '<input type="number" step="1" data-prop="zOrder" value="' + escapeAttr(data.zOrder ?? 0) + '" /></div>' +
           "</div>";
         html += '<div class="field"><label>Anchor point</label>' + anchorGrid(data.anchor) + "</div>";
         html += '<div class="field-row">' + measureField("X", "x", data) + measureField("Y", "y", data) + "</div>";
+        html += '<div class="action-row"><button type="button" class="center-btn" data-act="center-pos">⊙ Center (0, 0)</button></div>';
         const heightField = needsLockedAspect(data)
           ? '<div class="field"><label>Height</label><div class="lock-aspect-note" style="margin:0;padding:8px 10px;">Auto</div></div>'
           : measureField("Height", "height", data);
@@ -1810,9 +2497,7 @@
             "Width above just sets the overall size; the shape stays circular on every screen.</div>";
         } else {
           html +=
-            '<div class="field checkbox-row"><input type="checkbox" id="prop-lock-aspect" data-prop="lockAspect" ' +
-            (data.lockAspect ? "checked" : "") +
-            ' /><label for="prop-lock-aspect" style="margin:0;">🔒 Lock aspect ratio (prevents stretching on other screen shapes)</label></div>';
+            '<div class="field"><button type="button" class="toggle-btn' + (data.lockAspect ? " active" : "") + '" data-toggle="lockAspect">🔒 Lock aspect ratio (prevents stretching on other screen shapes)</button></div>';
           if (data.lockAspect) {
             html +=
               '<div class="field lock-aspect-note">Shape locked to ' +
@@ -1822,15 +2507,16 @@
         }
 
         html += field("Rotation (°)", input("rotation", data.rotation, "number"));
-        html += field("Opacity", '<input type="range" min="0" max="1" step="0.01" data-prop="opacity" value="' + data.opacity + '" />');
+        html += field(
+          "Opacity",
+          '<div class="opacity-row"><input type="range" min="0" max="1" step="0.01" data-prop="opacity" value="' + data.opacity + '" />' +
+            '<span class="opacity-value" data-for="opacity">' + Number(data.opacity).toFixed(2) + "</span></div>"
+        );
         html +=
           '<div class="field"><label>Animation</label><select data-prop="animation">' +
           ["none", "pulse", "bob", "spin", "fadeIn"].map((a) => '<option value="' + a + '"' + (data.animation === a ? " selected" : "") + ">" + a + "</option>").join("") +
           "</select></div>";
-        html +=
-          '<div class="field checkbox-row"><input type="checkbox" id="prop-visible" data-prop="visible" ' +
-          (data.visible === false ? "" : "checked") +
-          ' /><label for="prop-visible" style="margin:0;">Visible on game start</label></div>';
+        html += '<div class="field"><button type="button" class="toggle-btn' + (data.visible === false ? "" : " active") + '" data-toggle="visible">Visible on game start</button></div>';
 
         if (data.type === "text") {
           html += "<h3>Text</h3>";
@@ -1838,9 +2524,11 @@
           html += field("Font size (% of canvas height)", input("fontSizePct", data.fontSizePct || 4, "number"));
           html += field("Color", colorField("color", data.color || "#ffffff"));
           html +=
-            '<div class="field"><label>Align</label><select data-prop="textAlign">' +
-            ["left", "center", "right"].map((a) => '<option value="' + a + '"' + (data.textAlign === a ? " selected" : "") + ">" + a + "</option>").join("") +
-            "</select></div>";
+            '<div class="field"><label>Align</label><div class="unit-toggle" data-align-group="1">' +
+            [["left", "⬅ Left"], ["center", "↔ Center"], ["right", "➡ Right"]]
+              .map(([v, label]) => '<button type="button" class="unit-btn' + (data.textAlign === v || (!data.textAlign && v === "left") ? " active" : "") + '" data-align="' + v + '" style="flex:1;">' + label + "</button>")
+              .join("") +
+            "</div></div>";
           html +=
             '<div class="field"><label>Weight</label><select data-prop="fontWeight">' +
             ["400", "600", "700", "800"].map((w) => '<option value="' + w + '"' + (data.fontWeight === w ? " selected" : "") + ">" + w + "</option>").join("") +
@@ -1850,22 +2538,22 @@
           html += field("Replace image", '<input type="file" accept="image/*" data-act="replace-image" />');
         } else if (data.type === "rect") {
           html += "<h3>Rect</h3>";
-          html += field("Background color", input("backgroundColor", data.backgroundColor || "rgba(0,0,0,0.3)", "text"));
+          html += field("Background color", colorField("backgroundColor", data.backgroundColor || "rgba(0,0,0,0.3)"));
           html += field("Border radius % (50+ = pill)", input("borderRadiusPct", data.borderRadiusPct || 0, "number"));
           html += field("Border width (px)", input("borderWidthPx", data.borderWidthPx || 0, "number"));
-          html += field("Border color", input("borderColor", data.borderColor || "#ffffff", "text"));
+          html += field("Border color", colorField("borderColor", data.borderColor || "#ffffff"));
         } else if (data.type === "joystick") {
           html += "<h3>Joystick</h3>";
-          html += field("Base color", input("baseColor", data.baseColor || "rgba(255,255,255,0.22)", "text"));
-          html += field("Knob color", input("knobColor", data.knobColor || "rgba(255,255,255,0.9)", "text"));
+          html += field("Base color", colorField("baseColor", data.baseColor || "rgba(255,255,255,0.22)"));
+          html += field("Knob color", colorField("knobColor", data.knobColor || "rgba(255,255,255,0.9)"));
           html += field("Knob size % (of base diameter)", input("knobSizePct", data.knobSizePct != null ? data.knobSizePct : 45, "number"));
           html += '<div class="field" style="color:var(--text-dim);font-size:11px;">Name must stay <kbd>joystick</kbd> for Game.ts to find it, unless you also update the lookup in Game.ts.</div>';
         } else if (data.type === "group") {
           html += "<h3>Group</h3>";
-          html += field("Background color", input("backgroundColor", data.backgroundColor || "transparent", "text"));
+          html += field("Background color", colorField("backgroundColor", data.backgroundColor || "transparent"));
           html += field("Border radius % (50+ = pill)", input("borderRadiusPct", data.borderRadiusPct || 0, "number"));
           html += field("Border width (px)", input("borderWidthPx", data.borderWidthPx || 0, "number"));
-          html += field("Border color", input("borderColor", data.borderColor || "#ffffff", "text"));
+          html += field("Border color", colorField("borderColor", data.borderColor || "#ffffff"));
           const childCount = elements.filter((e) => e.parentId === data.id).length;
           html +=
             '<div class="field" style="color:var(--text-dim);font-size:11px;">Contains ' +
@@ -1924,6 +2612,33 @@
             renderCanvas();
             renderLayers();
           });
+          // Opacity's live 0-1 readout — the generic 'input' handler above
+          // already writes data.opacity, this just keeps the number next
+          // to the slider in sync with it on every drag tick.
+          if (prop === "opacity") {
+            const valueEl = el.parentElement.querySelector(".opacity-value");
+            if (valueEl) el.addEventListener("input", () => (valueEl.textContent = parseFloat(el.value).toFixed(2)));
+          }
+        });
+
+        // Color swatch -> paired text field. The swatch itself has no
+        // data-prop (it's not a source of truth, the text field is), so it
+        // sits outside the generic loop above and just forwards into
+        // whichever text input shares its data-for.
+        propertiesBodyEl.querySelectorAll(".color-swatch").forEach((swatch) => {
+          let sessionStarted = false;
+          swatch.addEventListener("pointerdown", () => {
+            if (sessionStarted) return;
+            sessionStarted = true;
+            pushHistory();
+            updateHistoryButtons();
+          });
+          swatch.addEventListener("input", () => {
+            const textInput = propertiesBodyEl.querySelector('[data-prop="' + swatch.dataset.for + '"]');
+            if (!textInput) return;
+            textInput.value = swatch.value;
+            textInput.dispatchEvent(new Event("input", { bubbles: true }));
+          });
         });
 
         const replaceInput = propertiesBodyEl.querySelector('[data-act="replace-image"]');
@@ -1966,10 +2681,34 @@
         if (ungroupBtn) ungroupBtn.addEventListener("click", ungroupSelected);
       }
 
+      /**
+       * A native color-panel swatch paired with the existing text input —
+       * the text input stays the real source of truth (data-prop, same as
+       * before) since our schema allows rgba()/named CSS colors a native
+       * <input type=color> can't represent on its own (#rrggbb only, no
+       * alpha). Picking a color in the swatch (wired in the
+       * .color-swatch querySelectorAll loop below) writes straight into
+       * the paired text field.
+       */
       function colorField(prop, value) {
-        // Plain text input, not <input type=color>, because our schema allows
-        // rgba()/CSS color strings which the native color picker can't represent.
-        return '<input type="text" data-prop="' + prop + '" value="' + escapeAttr(value) + '" />';
+        return (
+          '<div class="color-field-row">' +
+          '<input type="color" class="color-swatch" data-for="' + prop + '" value="' + toHexForColorInput(value) + '" title="Pick a color" />' +
+          '<input type="text" data-prop="' + prop + '" value="' + escapeAttr(value) + '" />' +
+          "</div>"
+        );
+      }
+
+      /** Best-effort #rrggbb for the native color swatch's value — it rejects anything else outright (falls back to black), so an unparseable rgba()/named/"transparent" value needs a sane default rather than a blank picker. */
+      function toHexForColorInput(value) {
+        const v = String(value || "").trim();
+        if (/^#[0-9a-f]{6}$/i.test(v)) return v;
+        const rgbMatch = v.match(/^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
+        if (rgbMatch) {
+          const toHex = (n) => clamp(parseInt(n, 10), 0, 255).toString(16).padStart(2, "0");
+          return "#" + toHex(rgbMatch[1]) + toHex(rgbMatch[2]) + toHex(rgbMatch[3]);
+        }
+        return "#ffffff";
       }
 
       function anchorGrid(current) {
@@ -2034,7 +2773,20 @@
 
       // Anchor buttons + measure-field unit toggles live inside properties panel, delegate clicks
       propertiesBodyEl.addEventListener("click", (e) => {
-        const unitBtn = e.target.closest(".unit-btn");
+        // Align reuses the exact same .unit-toggle/.unit-btn markup as the
+        // %/PX toggle (same segmented-button look), so this branch has to
+        // tell the two apart by which data-* attribute is actually present
+        // rather than by class alone.
+        const alignBtn = e.target.closest("[data-align]");
+        if (alignBtn) {
+          const data = getSelected();
+          if (!data) return;
+          pushHistory();
+          data.textAlign = alignBtn.dataset.align;
+          render();
+          return;
+        }
+        const unitBtn = e.target.closest(".unit-btn[data-unit]");
         if (unitBtn) {
           const axis = unitBtn.closest(".unit-toggle").dataset.axis;
           const newUnit = unitBtn.dataset.unit;
@@ -2042,6 +2794,38 @@
           if (!data) return;
           pushHistory();
           switchUnit(data, axis, newUnit);
+          render();
+          return;
+        }
+        const toggleBtn = e.target.closest("[data-toggle]");
+        if (toggleBtn) {
+          const data = getSelected();
+          if (!data) return;
+          const prop = toggleBtn.dataset.toggle;
+          pushHistory();
+          if (prop === "visible") {
+            data.visible = data.visible === false; // false->true, true/undefined->false
+          } else {
+            data[prop] = !data[prop];
+          }
+          if (prop === "lockAspect" && data.lockAspect) {
+            // Same capture-current-shape logic the old checkbox's 'change' handler used — see its removed comment for why this can't be re-derived on every render.
+            const rect = containerRectFor(data);
+            data.aspectRatio = elemScreenWidth(data, rect.width) / elemScreenHeight(data, rect.width, rect.height);
+          }
+          render();
+          return;
+        }
+        const centerBtn = e.target.closest('[data-act="center-pos"]');
+        if (centerBtn) {
+          const data = getSelected();
+          if (!data) return;
+          pushHistory();
+          data.anchor = "middle-center";
+          if (data.xUnit === "px") data.xPx = 0;
+          else data.xPct = 50;
+          if (data.yUnit === "px") data.yPx = 0;
+          else data.yPct = 50;
           render();
           return;
         }
@@ -2543,6 +3327,10 @@
 
         if (isTypingInField()) return;
 
+        if (e.key === "Escape" && pickingFieldRef) {
+          cancelPicking();
+          return;
+        }
         if (e.key === "Delete" || e.key === "Backspace") {
           if (selectedIds.size > 0) {
             e.preventDefault();
@@ -2803,7 +3591,7 @@
        * whenever it's reachable: it already has real fs access rooted at
        * the actual project directory, so there's no folder-picker step,
        * nothing to accidentally point at the wrong directory (the bug this
-       * replaces — picking the project root instead of src/ui/ used to
+       * replaces — picking the project root instead of src/game/ui/ used to
        * silently write mainLayout.json somewhere the running game never
        * reads, with no error), and it works in every browser, not just
        * Chrome/Edge.
@@ -2819,7 +3607,7 @@
       let statusResetTimer = null;
       /** The real, writable handle Save should overwrite — null means "no project file bound yet, Save creates one." Only used on the File System Access fallback path — see localLayoutFilename for the local-API equivalent. */
       let currentFileHandle = null;
-      /** 'main' (src/ui/mainLayout.json — gameplay HUD/joystick) | 'endcard' (src/ui/endcardLayout.json) | 'layout' (a saved variant under layouts/) | null (unsaved/imported). */
+      /** 'main' (src/game/ui/mainLayout.json — gameplay HUD/joystick) | 'endcard' (src/game/ui/endcardLayout.json) | 'layout' (a saved variant under layouts/) | null (unsaved/imported). */
       let currentFileKind = null;
       const ACTIVE_KINDS = {
         main: { filename: "mainLayout.json", label: "mainLayout.json ★ main" },
@@ -2836,7 +3624,7 @@
         tagInput.disabled = !!activeInfo;
         nameInput.title = activeInfo
           ? "Name/tag don't apply here — Save overwrites " + activeInfo.filename + " directly while it's loaded. Load a layout (or click New) to Save As instead."
-          : "Filename this saves as under src/ui/layouts/";
+          : "Filename this saves as under src/game/ui/layouts/";
 
         if (activeInfo) {
           el.textContent = "Editing: " + activeInfo.label;
@@ -2955,6 +3743,9 @@
         document.getElementById("btn-set-main").style.display = "";
         document.getElementById("btn-set-endcard").style.display = "";
 
+        loadScriptsList(); // Scripts panel — same local-API requirement as Save/Load, so it only ever loads here, not in the FS Access fallback branch above
+        loadBindingsList();
+
         if (elements.length === 0) {
           try {
             const res = await fetch(LOCAL_API + "/load-layout?kind=main");
@@ -2973,7 +3764,7 @@
 
       /**
        * Whichever folder got picked in the browser's directory dialog —
-       * Connect's tooltip asks for the project's src/ui/ folder specifically,
+       * Connect's tooltip asks for the project's src/game/ui/ folder specifically,
        * but that's an easy folder to mis-navigate to (one level too high,
        * at the project root, is the natural first click). Before this,
        * whatever was picked was trusted blindly: pick the project root by
@@ -2981,27 +3772,32 @@
        * into the project root, no error, no warning — a file the dev
        * server's bundler never reads, so every future save *looks*
        * successful (🟢 Synced, no errors) while the running game never
-       * changes. This resolves the real src/ui/ folder regardless of which
+       * changes. This resolves the real src/game/ui/ folder regardless of which
        * of the two you picked, so a wrong pick self-corrects instead of
        * silently writing to a dead spot.
        */
       async function resolveUiDir(pickedHandle) {
-        // Already src/ui (or any folder that already has a layout in it,
+        // Already src/game/ui (or any folder that already has a layout in it,
         // e.g. reconnecting) — use it as-is, same as before this existed.
         try {
           await pickedHandle.getFileHandle(ACTIVE_KINDS.main.filename);
           return pickedHandle;
         } catch (e) {
-          // Not found here — could still be a fresh, empty src/ui with no
+          // Not found here — could still be a fresh, empty src/game/ui with no
           // layout saved yet. Keep looking below before falling back to it.
         }
-        // Picked the project root instead — descend into src/ui.
+        // Picked the project root instead — descend into src/game/ui (src/
+        // is split into engine/, reusable across playable ads, and game/,
+        // this specific one — mainLayout.json/endcardLayout.json live under
+        // the latter; keep this in sync with dev-build-api.js's UI_DIR).
         try {
           const srcDir = await pickedHandle.getDirectoryHandle("src");
-          return await srcDir.getDirectoryHandle("ui");
+          const gameDir = await srcDir.getDirectoryHandle("game");
+          return await gameDir.getDirectoryHandle("ui");
         } catch (e) {
-          // No src/ui under here either — assume the picked folder really
-          // is an empty/fresh src/ui, matching the original trust-it behavior.
+          // No src/game/ui under here either — assume the picked folder
+          // really is an empty/fresh src/game/ui, matching the original
+          // trust-it behavior.
           return pickedHandle;
         }
       }
@@ -3011,7 +3807,7 @@
         layoutsDirHandle = await projectRootHandle.getDirectoryHandle("layouts", { create: true });
         // Store what was actually picked, not the resolved folder —
         // resolveUiDir re-derives the real target from it on every
-        // reconnect, so this stays correct even if src/ui didn't exist yet
+        // reconnect, so this stays correct even if src/game/ui didn't exist yet
         // (or had no layout saved yet) the first time you connected.
         idbSet("projectRoot", pickedHandle).catch(() => { });
         document.getElementById("btn-connect").style.display = "none";
@@ -3020,7 +3816,7 @@
         // A quick way to catch a still-wrong folder before saving into it —
         // if changes ever stop showing up in the game again, hovering
         // 🟢 Synced is the first thing to check.
-        syncStatusEl.title = 'Writing layouts to the "' + projectRootHandle.name + '" folder — if game changes ever stop showing up after Save, re-Connect and confirm this is your project\'s src/ui folder.';
+        syncStatusEl.title = 'Writing layouts to the "' + projectRootHandle.name + '" folder — if game changes ever stop showing up after Save, re-Connect and confirm this is your project\'s src/game/ui folder.';
         document.getElementById("btn-set-main").style.display = "";
         document.getElementById("btn-set-endcard").style.display = "";
 
@@ -3046,7 +3842,7 @@
 
       async function connectProject() {
         if (!FS_SUPPORTED) {
-          alert("This browser can't sync directly to your project (needs Chrome or Edge). Use Save/Load JSON instead — save the file, then move it into src/ui/ by hand.");
+          alert("This browser can't sync directly to your project (needs Chrome or Edge). Use Save/Load JSON instead — save the file, then move it into src/game/ui/ by hand.");
           return;
         }
         try {
@@ -3218,7 +4014,7 @@
         }
 
         if (entries.length === 0) {
-          list.innerHTML = '<div id="load-modal-empty">No saved layouts yet in src/ui/layouts/. Save one first (type a name above, hit Save), or load a file from your computer below.</div>';
+          list.innerHTML = '<div id="load-modal-empty">No saved layouts yet in src/game/ui/layouts/. Save one first (type a name above, hit Save), or load a file from your computer below.</div>';
           return;
         }
 

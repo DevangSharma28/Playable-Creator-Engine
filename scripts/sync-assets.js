@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Copies assets/ -> public/assets/ so the dev server can serve real
 // texture/model/audio files at the same relative paths used in
-// src/assets.ts. Plain Node (no shell-specific commands) so it works
+// src/game/assets.ts. Plain Node (no shell-specific commands) so it works
 // the same on macOS, Linux, and Windows.
 const fs = require("fs");
 const path = require("path");

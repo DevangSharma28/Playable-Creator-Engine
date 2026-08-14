@@ -1,6 +1,13 @@
 import * as THREE from "three";
 import { GLTFLoader, GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { type AssetEntry } from "./assets";
+
+/** Which loader (see AssetLoader.preload below) a manifest entry needs. Generic — lives here, not in a specific game's assets.ts, since it describes the loader's own shape, not any particular game's content. */
+export type AssetKind = "texture" | "glb" | "audio";
+
+export interface AssetEntry {
+  kind: AssetKind;
+  path: string;
+}
 
 /**
  * Small caching asset loader.

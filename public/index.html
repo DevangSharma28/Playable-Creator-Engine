@@ -1026,6 +1026,18 @@
     window.addEventListener("resize", applyDeviceFrame);
     applyDeviceFrame();
 
+    // Game.create() resolves asynchronously (real GLB/texture loads) —
+    // this initial applyDeviceFrame() call above always runs *before* that
+    // finishes, so its __resizeGameTo call lands while `game` is still
+    // undefined in main.ts and silently no-ops. main.ts calls this the
+    // instant `game` is actually assigned (see its __onGameReady doc
+    // comment) — first boot and every later in-place reload alike — so the
+    // renderer/camera always end up sized to whatever letterbox is
+    // currently active instead of defaulting to the raw window size and
+    // staying that way until something else (e.g. clicking a device tab)
+    // happens to call applyDeviceFrame() again.
+    window.__onGameReady = applyDeviceFrame;
+
     // ION Engine: version + short commit hash of local HEAD, from
     // scripts/dev-build-api.js's GET /version — same dev-only API as the
     // Build button below. Fetched once on load; a stale hash until the

@@ -1,4 +1,8 @@
-import { UILayout } from "./UILayout";
+import { UILayout } from "../../engine/ui/UILayout";
+import { applyBindings, type BindingsData } from "../../engine/Bindings";
+import bindingsRaw from "./bindings.json";
+
+const bindingsData = bindingsRaw as BindingsData;
 
 /**
  * All game text/visuals now come from two editor-authored layouts:
@@ -8,15 +12,25 @@ import { UILayout } from "./UILayout";
  * the `name` given to that element in tools/ui-editor.html.
  */
 export class HUD {
-  private moneyIcon: HTMLElement | undefined;
+  public moneyIcon: HTMLElement | undefined;
+
   private hintHidden = false;
+
 
   constructor(
     private readonly main: UILayout,
     private readonly endcard: UILayout
   ) {
     this.endcard.setVisible(false);
-    this.moneyIcon = this.main.get("Hire-Cost");
+
+    // Wires up any public field the UI editor's Scripts panel drag-and-drop
+    // (or ⊙ Pick) assigned — e.g. moneyIcon gets whichever designed element
+    // was dropped onto it there, no manual `main.get("...")` call needed.
+    // Self-contained here (rather than the composition root, Game.ts,
+    // calling this externally) so HUD owns its own wiring, and the log
+    // below reflects the real, final value right where it's actually used.
+    applyBindings(this, "HUD", bindingsData, this.main, this.endcard);
+
     this.pulseMoneyIcon();
   }
 
@@ -30,9 +44,9 @@ export class HUD {
 
   pulseMoneyIcon(): void {
     if (!this.moneyIcon) return;
-    this.moneyIcon.style.animation = "pulse 2s";
+    // this.moneyIcon.style.animation = "pulse";
     setTimeout(() => {
-      this.moneyIcon!.style.animation = "";
+      this.moneyIcon!.style.scale = "0";
     }, 2000);
   }
 

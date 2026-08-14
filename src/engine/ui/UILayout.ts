@@ -75,6 +75,14 @@ export class UILayout {
     // Production's #custom-ui-layer/#endcard-layer use position:fixed in
     // their own CSS and are unaffected either way.
     this.container.style.pointerEvents = "none";
+    // Idempotent: a fresh page load's container is already empty, so this
+    // is a no-op there. It matters when a new Game instance is built into
+    // the *same*, persisting DOM — the dev preview's in-place reload after
+    // a Save (see public/index.html/main.ts) never navigates, so without
+    // this every save-triggered rebuild would stack a second full set of
+    // wrappers (score, drag-hint, cta-button, endcard-title, ...) on top of
+    // whatever the previous Game instance already built here.
+    this.container.innerHTML = "";
 
     // Two passes so a "group" element's own node exists before any child
     // that references it as `parentId` needs to be appended into it —
@@ -112,9 +120,9 @@ export class UILayout {
   /**
    * For a "joystick"-type element: the draggable base and the knob that
    * should visually follow the touch, for wiring real input (see
-   * InputHandler) to a designed joystick instead of a hardcoded one. The
+   * DynamicJoystick) to a designed joystick instead of a hardcoded one. The
    * knob returned is a plain, untransformed node nested inside the
-   * centering anchor built in buildContent — InputHandler can set its
+   * centering anchor built in buildContent — DynamicJoystick can set its
    * `transform` directly on every move without needing to know about (or
    * fight) the centering, the same way it always has.
    */
@@ -267,17 +275,20 @@ export class UILayout {
       base.style.borderRadius = "50%";
       base.style.backgroundColor = data.baseColor ?? "rgba(255,255,255,0.22)";
       base.style.border = "2px solid rgba(255,255,255,0.6)";
-      // InputHandler tracks pointerdown/pointermove on this element directly
-      // — without this, a drag gesture can trigger the browser's own
-      // scroll/zoom instead of (or alongside) the joystick.
+      // Harmless whether or not this element itself ends up receiving
+      // pointer events — DynamicJoystick actually tracks the drag on its
+      // own full-screen catcher (which sets this too), not on `base`
+      // directly, but a stray scroll/zoom gesture starting here is still
+      // worth suppressing on principle.
       base.style.touchAction = "none";
 
       // The knob's centering (left/top 50% + translate -50%,-50%) lives on
-      // this static anchor, never touched again after creation. InputHandler
-      // sets `transform` directly on the *inner* knob for every move — if it
-      // set transform on this centered node instead, each update would wipe
-      // out the centering along with it (a CSS transform assignment replaces
-      // the whole property, it doesn't compose with what was there before).
+      // this static anchor, never touched again after creation.
+      // DynamicJoystick sets `transform` directly on the *inner* knob for
+      // every move — if it set transform on this centered node instead,
+      // each update would wipe out the centering along with it (a CSS
+      // transform assignment replaces the whole property, it doesn't
+      // compose with what was there before).
       const knobAnchor = document.createElement("div");
       const knobSize = data.knobSizePct ?? 45;
       knobAnchor.style.position = "absolute";

@@ -43,7 +43,7 @@ Top-right of the dev preview, dev-only. Two rows today, room for more:
   straight from `renderer.info` every ~400ms — real numbers from the
   actual running scene, not an estimate. Below that, a small view-helper
   gizmo (red/green/blue X/Y/Z axes) mirrors the main camera's current
-  orientation each frame — `src/core/ViewHelperWidget.ts`, a separate
+  orientation each frame — `src/engine/core/ViewHelperWidget.ts`, a separate
   tiny Three.js renderer, not tied to the main scene.
 
 None of this exists in the production build — `Game.ts` only creates the
@@ -125,26 +125,34 @@ Switching tabs works whether the editor is open or closed.
      it — matching the real joystick-base's own hardcoded
      `left: 32px; bottom: 32px` in `public/index.html`.
 4. Reorder layers with the ▲/▼ buttons in the **Layers** panel (left).
-5. **🔗 Connect Project** (Chrome/Edge only — File System Access API):
-   pick your project's `src/ui/` folder once — this also auto-loads
-   `mainLayout.json`, so the editor opens already showing what you're
-   actually looking at. After that:
-   - **💾 Save** writes straight to `src/ui/layouts/<Layout name>.json`
-     (type a **Layout name** + optional **Tag** in the toolbar first) —
-     no download-and-move step.
-   - **📂 Load** shows only *this project's* saved layouts from
-     `src/ui/layouts/`, each labeled with its tag — not a generic OS
-     file browser.
-   - **⭐ Set as Main** writes the current layout to `src/ui/mainLayout.json`
-     — the gameplay HUD, joystick, and anything else visible while
-     playing. **🏁 Set as Endcard** writes to `src/ui/endcardLayout.json`
-     — hidden until the game ends (win or the 15s timer), then shown as
-     one group. Both are what `Game.ts` actually bundles; the dev server
-     picks up either and live-reloads automatically.
-   - On an unsupported browser (or before connecting), **Save**/**Load**
-     fall back to the old download/pick-a-file flow — move the file to
-     `src/ui/mainLayout.json` or `src/ui/endcardLayout.json` by hand and
-     rebuild.
+5. **Project sync** — Save/Load write straight into the project, no
+   download-and-move step, via whichever of these is available:
+   - **Local dev server** (default whenever `npm run dev` is running):
+     detected automatically, no setup — `scripts/dev-build-api.js` already
+     has real filesystem access rooted at the actual project directory, so
+     there's no folder to pick and no browser permission to grant. The
+     **🔗 Connect** button hides itself entirely once this is active.
+   - **🔗 Connect Project** (Chrome/Edge only — File System Access API):
+     fallback for when the dev server isn't reachable. Pick your project's
+     root folder or `src/game/ui/` directly — either works, it finds
+     `src/game/ui/` automatically — once. This also auto-loads
+     `mainLayout.json`, so the editor opens already showing what you're
+     actually looking at.
+   - Either way: **💾 Save** writes straight to
+     `src/game/ui/layouts/<Layout name>.json` (type a **Layout name** +
+     optional **Tag** in the toolbar first). **📂 Load** shows only *this
+     project's* saved layouts from `src/game/ui/layouts/`, each labeled
+     with its tag — not a generic OS file browser. **⭐ Set as Main**
+     writes the current layout to `src/game/ui/mainLayout.json` — the
+     gameplay HUD, joystick, and anything else visible while playing.
+     **🏁 Set as Endcard** writes to `src/game/ui/endcardLayout.json` —
+     hidden until the game ends (win or the 15s timer), then shown as one
+     group. Both are what `Game.ts` actually bundles; the dev server picks
+     up either and live-reloads automatically.
+   - With neither available (no dev server, unsupported browser, never
+     connected), **Save**/**Load** fall back to a plain download/pick-a-file
+     flow — move the file to `src/game/ui/mainLayout.json` or
+     `src/game/ui/endcardLayout.json` by hand and rebuild.
 
 There is no hardcoded game UI anywhere in `public/index.html` or
 `src/index.template.html` — score, title, drag hint, the joystick, and
@@ -158,7 +166,7 @@ on load rather than shipping with no controls. The end card's button is
 similarly just a rect named **`cta-button-bg`** with `setInteractive`
 called on it from `HUD.ts`.
 
-Everything renders through `src/ui/UILayout.ts` at runtime. Each layout is
+Everything renders through `src/engine/ui/UILayout.ts` at runtime. Each layout is
 decorative by default (doesn't block touches); call
 `game.ui.setInteractive("layerName", onClick)` (mainLayout) or
 `game.endcardUILayout.setInteractive(...)` (endcardLayout) from `Game.ts`
@@ -174,7 +182,7 @@ expects. Useful as a regression check if you modify the editor.
 
 
 
-`src/assets.ts` is the single source of truth for every asset path,
+`src/game/assets.ts` is the single source of truth for every asset path,
 grouped by type:
 
 ```ts
@@ -189,7 +197,7 @@ Add new assets by (1) dropping the file under `assets/<textures|models|audio|fon
 and (2) adding a line to the matching namespace in `assets.ts`, plus an
 entry in `manifest` if you want it preloaded automatically.
 
-`src/AssetLoader.ts` is a small cached, typed loader built on top of that
+`src/engine/AssetLoader.ts` is a small cached, typed loader built on top of that
 registry:
 
 ```ts
@@ -235,41 +243,60 @@ data URIs the same as file paths, so no loader code changes needed.
 ## Architecture
 
 `Game.ts` is the top-level orchestrator: every system is built once in its
-constructor and driven each frame from `update()`/`render()`, called by
-the tiny loop in `main.ts`. Everything else is one focused file per
-responsibility:
+constructor and driven each frame from `update()`/`render()`. `IonEngine.ts`
+owns *running* that — the rAF loop, the dev-only Engine Room hooks, and the
+in-place hot-reload dance — so it's the one piece meant to stay identical
+across any playable ad built on this engine; `Game.ts` (Player, CoinField,
+the coin-collect win condition, ...) is what actually differs between them.
+`main.ts` itself is just the entry point that connects a canvas to the two:
+
+`src/` itself is split in two: `engine/` is everything reusable across any
+playable ad built on this engine (rAF loop, dev tooling, camera/joystick/
+UI-layout systems, asset loading); `game/` is everything specific to *this*
+one (Player, CoinField, the coin-collect win condition, this HUD's exact
+element names, ...). The dependency direction only ever goes one way —
+`game/` freely imports from `engine/`, `engine/` never imports anything
+from `game/` — so `engine/` stays honestly reusable if you start a second
+playable ad from this same base later.
 
 ```
 src/
-  main.ts                 entry point: canvas -> Game -> rAF loop (~15 lines)
-  Game.ts                 orchestrator — wiring only, no game logic itself
-  assets.ts                typed registry of every asset path (libTex/libGlb/libAudio)
-  AssetLoader.ts            cached loader (textures/GLB/audio) with progress reporting
-  core/
-    InputHandler.ts         virtual joystick -> normalized {x,y} axis
-    CameraHandler.ts         camera follow behavior
-    ViewHelperWidget.ts      dev-only Engine Room X/Y/Z gizmo — its own tiny renderer, only built if #er-viewhelper exists
-  world/
-    World.ts                 static scene setup: lights, ground, walls, fog
-  entities/
-    Entity.ts                 shared contract: object3D + update() + optional dispose()
-    Player.ts                 the controllable character (animated GLB model)
-    Coin.ts                   a single collectible
-    CoinField.ts              owns all coins: spawning, animation, pickup detection
-  ui/
-    HUD.ts                    thin wrapper over the two UILayout instances: setScore, hideDragHint, showEndCard, onCtaClick
-    UILayout.ts                runtime renderer for layouts designed in tools/ui-editor.html
-    UILayoutTypes.ts           shared schema for the layout JSON
-    mainLayout.json             gameplay HUD + joystick (edit via the visual editor, not by hand)
-    endcardLayout.json          end-card title + CTA (edit via the visual editor, not by hand)
+  main.ts                 entry point: canvas -> IonEngine.boot() (4 lines)
+  engine/                  reusable across any playable ad built on this engine
+    IonEngine.ts             engine wrapper — rAF loop, dev hooks, hot-reload
+    AssetLoader.ts           cached loader (textures/GLB/audio) with progress reporting; also owns the generic AssetKind/AssetEntry shape
+    core/
+      DynamicJoystick.ts       touch-anywhere virtual joystick -> normalized {x,y} axis
+      CameraHandler.ts         generic lerp-follow camera behavior
+      SceneInspector.ts        dev-only Engine Room freecam hierarchy/inspector/gizmo
+      ViewHelperWidget.ts      dev-only Engine Room X/Y/Z gizmo — its own tiny renderer, only built if #er-viewhelper exists
+    ui/
+      UILayout.ts                runtime renderer for layouts designed in tools/ui-editor.html
+      UILayoutTypes.ts           shared schema for the layout JSON
+    entities/
+      Entity.ts                shared contract: object3D + update() + optional dispose()
+  game/                    this specific playable ad
+    Game.ts                  this ad's orchestrator — wiring + game-specific logic
+    assets.ts                typed registry of every asset path this ad uses (libTex/libGlb/libAudio)
+    world/
+      World.ts                 static scene setup: lights, ground, walls, fog
+    entities/
+      Player.ts                 the controllable character (animated GLB model)
+      Coin.ts                   a single collectible
+      CoinField.ts              owns all coins: spawning, animation, pickup detection
+    ui/
+      HUD.ts                    thin wrapper over the two UILayout instances: setScore, hideDragHint, showEndCard, onCtaClick
+      mainLayout.json            gameplay HUD + joystick (edit via the visual editor, not by hand)
+      endcardLayout.json         end-card title + CTA (edit via the visual editor, not by hand)
 tools/
   ui-editor.html               standalone visual UI editor — open directly, no build needed
 ```
 
 **Adding a new gameplay object** (Enemy, Worker, a particle burst, a second
 collectible type, etc.) follows the same shape every time:
-1. Create `src/entities/Enemy.ts` implementing `Entity` (an `object3D` plus
-   an `update(dt, elapsed)` method — widen the signature if it needs more
+1. Create `src/game/entities/Enemy.ts` implementing `Entity` (from
+   `src/engine/entities/Entity.ts` — an `object3D` plus an
+   `update(dt, elapsed)` method, widen the signature if it needs more
    inputs, the way `Player.update()` takes a joystick axis).
 2. Instantiate it in `Game`'s constructor.
 3. Call its `update()` from `Game.update()`.
@@ -299,7 +326,7 @@ touches exactly one file, not `Game.ts`.
 - `scripts/sync-assets.js` — copies `assets/` -> `public/assets/` and
   `tools/ui-editor.html` -> `public/ui-editor.html` for dev serving
 - `assets/` — your actual texture/model/audio/font files
-- `src/ui/layouts/` — saved layout variants from the UI editor's
+- `src/game/ui/layouts/` — saved layout variants from the UI editor's
   **🔗 Connect Project** sync (created on first connect; tracked in git
   like any other source file — not build output)
 - `dist/` — build output (`npm run build`)
