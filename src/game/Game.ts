@@ -84,7 +84,7 @@ export class Game {
     this.hud.setScore(0, this.coinField.total);
     this.hud.onCtaClick(() => {
       // In a real network build this would open the store listing, e.g.:
-      // window.open("https://play.google.com/store/apps/details?id=YOUR_APP", "_blank");
+      // window.open("https://devangsharma28.github.io/portfolio/", "_blank");
       alert("Install Now! (hook up your store URL here)");
     });
 

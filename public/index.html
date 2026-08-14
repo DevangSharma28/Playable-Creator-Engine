@@ -194,8 +194,15 @@
     }
 
     @keyframes eng-pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
+
+      0%,
+      100% {
+        opacity: 1;
+      }
+
+      50% {
+        opacity: 0.4;
+      }
     }
 
     #engine-room-body {
@@ -738,7 +745,8 @@
 
     #device-topbar button {
       position: relative;
-      overflow: hidden; /* keeps the click-ripple (see .dtb-ripple) contained to the button's own rounded box */
+      overflow: hidden;
+      /* keeps the click-ripple (see .dtb-ripple) contained to the button's own rounded box */
       font-family: inherit;
       font-size: 11px;
       font-weight: 700;
@@ -807,7 +815,7 @@
   <div id="engine-room">
     <div id="engine-room-header" class="eng-panel-header">
       <span class="live-dot"></span>
-      <span>ION Engine</span>
+      <span>Engine Room</span>
       <span class="tag">DEV</span>
     </div>
     <div id="engine-room-body">
@@ -827,7 +835,7 @@
         </div>
       </div>
       <div id="engine-room-footer">
-        <div class="brand">ION Engine</div>
+        <div class="brand">ION Engine Technology</div>
         <div id="engine-room-version" title="Local build">v…</div>
       </div>
     </div>
