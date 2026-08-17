@@ -20,6 +20,9 @@
       --eng-danger-soft: rgba(255, 82, 82, 0.14);
       --eng-ok: #4ade80;
       --eng-warn: #ffcc4d;
+      --eng-audio: #b98cf7;
+      --eng-audio-soft: rgba(185, 140, 247, 0.16);
+      --eng-audio-hover: #cba9fa;
       --eng-text: #e8e9eb;
       --eng-text-dim: #9aa0a8;
       --eng-text-faint: #676c74;
@@ -310,6 +313,70 @@
 
     #er-btn-viewer:hover {
       background: #9de3fa;
+    }
+
+    /* Audio Reactor — violet, deliberately a third distinct hue alongside
+       the amber primary actions and the cyan 3D View button, so all three
+       read as separate "modes" at a glance instead of blurring together.
+       Same button treatment as #er-btn-viewer, just re-tinted. */
+    #er-btn-audio {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      font-family: inherit;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #1f1033;
+      background: var(--eng-audio);
+      border: 1px solid var(--eng-audio);
+      padding: 7px 4px;
+      border-radius: var(--eng-radius-sm);
+      cursor: pointer;
+      margin-bottom: 9px;
+      transition: background 0.12s ease;
+    }
+
+    #er-btn-audio:hover {
+      background: var(--eng-audio-hover);
+    }
+
+    /* Audio Reactor panel — dev-only, empty placeholder for now. Same
+       "eng-panel" chrome as the Engine Room dock but a free-floating panel
+       (bottom-left) rather than docked, since it isn't tied to freecam like
+       #si-hierarchy/#si-inspector are — it can open regardless of 3D View
+       state. Toggled purely by #er-btn-audio (see script section). */
+    #audio-reactor {
+      display: none;
+      position: fixed;
+      left: 10px;
+      bottom: 10px;
+      z-index: 70;
+      width: 250px;
+    }
+
+    #audio-reactor.visible {
+      display: block;
+    }
+
+    #audio-reactor .eng-panel-header .dot {
+      background: var(--eng-audio);
+      box-shadow: 0 0 5px var(--eng-audio);
+    }
+
+    #audio-reactor .eng-panel-header .tag {
+      color: var(--eng-audio);
+      background: var(--eng-audio-soft);
+      border-color: rgba(185, 140, 247, 0.3);
+    }
+
+    #audio-reactor-body {
+      padding: 16px 14px;
+      font-size: 11px;
+      font-style: italic;
+      color: var(--eng-text-faint);
+      text-align: center;
     }
 
     /* Exit-3D-View: the only thing shown top-right while freecam is active
@@ -1282,6 +1349,7 @@
         <button id="er-btn-build" class="primary" title="Run the production build (build.sh)">🛠 Builder</button>
       </div>
       <button id="er-btn-viewer" title="Orbit-inspect the live gameplay scene">🧭 3D View</button>
+      <button id="er-btn-audio" title="Audio Reactor — coming soon">🎧 Audio Reactor</button>
       <div id="engine-room-stats">
         <span>FPS</span><span class="val" id="er-fps">--</span>
         <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
@@ -1333,6 +1401,14 @@
   <button id="er-exit-3d" title="Exit 3D View">Exit 3D View</button>
   <div id="si-hierarchy"></div>
   <div id="si-inspector"></div>
+  <div id="audio-reactor" class="eng-panel">
+    <div class="eng-panel-header">
+      <span class="dot"></span>
+      <span>Audio Reactor</span>
+      <span class="tag">DEV</span>
+    </div>
+    <div id="audio-reactor-body">Nothing here yet.</div>
+  </div>
   <div id="si-gizmo-toolbar">
     <button data-gizmo="none" title="Select (Q) — click objects without transforming them">🖐</button>
     <button data-gizmo="translate" class="active" title="Move (W)">↔</button>
@@ -1929,6 +2005,16 @@
 
     viewerBtn.addEventListener("click", () => setFreecamUI(true));
     exitViewerBtn.addEventListener("click", () => setFreecamUI(false));
+
+    // Engine Room: Audio Reactor — placeholder panel, no audio system wired
+    // up yet. Independent of freecam (unlike the hierarchy/inspector panels
+    // above), so it opens/closes purely off its own button regardless of
+    // 3D View state.
+    const audioBtn = document.getElementById("er-btn-audio");
+    const audioPanel = document.getElementById("audio-reactor");
+    audioBtn.addEventListener("click", () => {
+      audioPanel.classList.toggle("visible");
+    });
 
     // Gizmo mode (Select/Move/Rotate/Scale) — a thin passthrough to
     // SceneInspector via main.ts's __setGizmoMode hook (only meaningful
