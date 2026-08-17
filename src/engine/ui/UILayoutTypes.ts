@@ -108,6 +108,15 @@ export interface UIElementData {
   /** Hidden at game start when false; toggle at runtime via UILayout.show()/hide(). */
   visible?: boolean;
   animation?: UIAnimation;
+  /**
+   * Makes this element clickable at render time — sets pointer-events:auto
+   * and cursor:pointer automatically (see UILayout.ts's buildElement), so
+   * a class binding it via the Scripts panel just needs
+   * `UILayout.onClick(this.field, handler)`, no manual style/listener
+   * boilerplate per element. Off by default like every other UI element
+   * (most aren't buttons) — toggle it in the editor's Properties panel.
+   */
+  interactive?: boolean;
 
   /** Keep widthPct/heightPct's on-screen ratio fixed across canvas/device shapes. Always true for "joystick". */
   lockAspect?: boolean;

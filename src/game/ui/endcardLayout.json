@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "canvasWidth": 474.75,
-  "canvasHeight": 844,
+  "canvasWidth": 511.875,
+  "canvasHeight": 910,
   "elements": [
     {
       "id": "el_end_bg",
@@ -36,7 +36,7 @@
       "zIndex": 2,
       "widthPct": 80,
       "heightPct": 22,
-      "text": "Nice rolling!\nGet the full game!",
+      "text": "Nice!\nGet the full game!",
       "fontSizePct": 5,
       "color": "#ffffff",
       "fontWeight": "800",
@@ -89,7 +89,7 @@
       "widthPct": 76.29910714285715,
       "heightPct": 48.22857142857143,
       "text": "Install Now",
-      "fontSizePct": 3.6,
+      "fontSizePct": 3.3,
       "color": "#ffffff",
       "fontWeight": "800",
       "textAlign": "center",
@@ -123,15 +123,16 @@
       "zIndex": 2,
       "renderOrder": 4,
       "zOrder": 0,
-      "widthPx": 400,
-      "heightPx": 200,
+      "widthPx": 223.98046875,
+      "heightPx": 68.5,
       "widthPct": 58.97840968931016,
       "heightPct": 47.39336492890995,
       "name": "Group",
       "backgroundColor": "transparent",
       "borderRadiusPct": 0,
       "borderWidthPx": 0,
-      "borderColor": "transparent"
+      "borderColor": "transparent",
+      "interactive": true
     }
   ]
 }

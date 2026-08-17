@@ -13,7 +13,7 @@ const ANCHOR_TRANSFORM: Record<AnchorPreset, string> = {
   "bottom-right": "translate(-100%, -100%)",
 };
 
-/** Where each anchor preset's own point sits in the container, as a fraction of its width/height — the origin PX position offsets from (see buildElement). */
+/** Where each anchor preset's own point sits in the container, as a fraction of its width/height — the origin PX position offsets from (see applyGeometry). */
 const ANCHOR_FRAC: Record<AnchorPreset, { x: number; y: number }> = {
   "top-left": { x: 0, y: 0 },
   "top-center": { x: 0.5, y: 0 },
@@ -26,7 +26,7 @@ const ANCHOR_FRAC: Record<AnchorPreset, { x: number; y: number }> = {
   "bottom-right": { x: 1, y: 1 },
 };
 
-/** Mirrors tools/ui-editor.html's needsLockedAspect() — a joystick is always locked. */
+/** Mirrors tools/ui-editor.html's needsLockedAspect() exactly — a joystick is always locked. */
 function needsLockedAspect(data: UIElementData): boolean {
   return data.type === "joystick" || data.lockAspect === true;
 }
@@ -60,10 +60,37 @@ function ensureKeyframes(): void {
  * touches from the joystick or buttons underneath. Call `setInteractive()`
  * if you want a specific element (e.g. a designed button sprite) to be
  * clickable.
+ *
+ * Deliberately the SAME geometry formulas tools/ui-editor.html's own
+ * renderCanvas()/pxScale() use, element for element — that editor preview
+ * is the source of truth for "what this layout should look like", so this
+ * renderer is written to reproduce it exactly rather than to be "an
+ * equivalent, differently-built system": every element (top-level or
+ * nested inside a group) is appended as a real DOM descendant of its real
+ * parent (the container itself, or the parent group's own content node) —
+ * no intermediate fixed-resolution "stage" wrapper — so a `%` field
+ * resolves natively against whatever its real containing block's current
+ * size is, exactly like plain CSS `%` always has, with zero extra math
+ * needed. A `px` field is a *design-resolution* value (canvasWidth/
+ * canvasHeight below, matching the editor's designWidth/designHeight) —
+ * pxScale() converts it to the current live size, uniformly (never
+ * stretched differently per axis just because the live aspect ratio isn't
+ * the design's own) — see pxScale()'s own doc comment.
  */
 export class UILayout {
   /** Maps a placed element's name to its content node (the img/text/rect/joystick — not the positioning wrapper). */
   private readonly elements = new Map<string, HTMLElement>();
+  /** The layout's own fixed reference resolution — what every px value on every element means "at" (matches tools/ui-editor.html's designWidth/designHeight, pinned from this same canvasWidth/canvasHeight when a layout loads there). */
+  private readonly canvasWidth: number;
+  private readonly canvasHeight: number;
+  /** Live container size from the most recent updateScale() call — scaleX/scaleY are `live / canvasWidth-or-Height`; liveHeight feeds text's font-size (see buildContent's text branch). */
+  private scaleX = 1;
+  private scaleY = 1;
+  private liveHeight = 0;
+  /** Every placed element, for updateScale() to re-run applyGeometry() on after a resize. */
+  private readonly geometryElements: { data: UIElementData; wrapper: HTMLElement }[] = [];
+  /** Every text element's own content node, for updateScale() to re-apply its font-size after a resize — see buildContent's text branch. */
+  private readonly textNodes: { data: UIElementData; node: HTMLElement }[] = [];
 
   constructor(private readonly container: HTMLElement, data: UILayoutData) {
     ensureKeyframes();
@@ -83,6 +110,9 @@ export class UILayout {
     // wrappers (score, drag-hint, cta-button, endcard-title, ...) on top of
     // whatever the previous Game instance already built here.
     this.container.innerHTML = "";
+
+    this.canvasWidth = data.canvasWidth;
+    this.canvasHeight = data.canvasHeight;
 
     // Two passes so a "group" element's own node exists before any child
     // that references it as `parentId` needs to be appended into it —
@@ -105,6 +135,101 @@ export class UILayout {
       (parent ?? this.container).appendChild(wrapper);
       this.elements.set(el.name, content);
     }
+
+    this.updateScale(this.container.getBoundingClientRect().width, this.container.getBoundingClientRect().height);
+  }
+
+  /**
+   * Re-derives every element's geometry for the container's current real
+   * size — call after anything that might change it (window resize, MRAID
+   * ready/sizeChange, the dev device-frame simulator's own resizeTo — see
+   * Game.ts's handleResize/resizeTo, which already do).
+   *
+   * Takes the target width/height explicitly rather than re-measuring
+   * `container.getBoundingClientRect()` itself — deliberately, not for
+   * consistency's sake alone: `#device-frame` (the dev device-frame
+   * simulator's letterboxed box, `#custom-ui-layer`'s real containing
+   * block there — see public/index.html) animates its own width/height
+   * over a 150ms CSS transition. Measuring the DOM synchronously, in the
+   * same tick `resizeTo()` sets the new target size, reads the box
+   * *before* that transition has moved at all — capturing and baking in
+   * the stale pre-resize size permanently, since nothing re-measures it
+   * again once the transition actually finishes. Every caller already
+   * has (or already computed) the real target size on hand — Game.ts's
+   * resizeTo(width, height) directly, handleResize() from
+   * window.innerWidth/innerHeight — so there's no reason to re-derive it
+   * from a DOM read that can be caught mid-transition.
+   */
+  updateScale(width: number, height: number): void {
+    if (width <= 0 || height <= 0) return; // not laid out yet (e.g. a hidden container) — the next real resize call will supply real numbers
+    this.scaleX = width / this.canvasWidth;
+    this.scaleY = height / this.canvasHeight;
+    this.liveHeight = height;
+    for (const { data, wrapper } of this.geometryElements) {
+      this.applyGeometry(data, wrapper);
+    }
+    for (const { data, node } of this.textNodes) {
+      this.applyFontSize(data, node);
+    }
+  }
+
+  /**
+   * The one, uniform design-space-px -> live-screen-px factor for EVERY
+   * px field (position or size, locked-aspect or not) — never
+   * scaleX/scaleY independently. Mirrors tools/ui-editor.html's own
+   * pxScale() exactly. A `%` field is meant to keep stretching to fill
+   * the real container exactly like plain CSS `%` always has (so it's
+   * left alone, resolved natively — see applyGeometry); a `px` field
+   * means a physical size/offset that should stay proportioned the same
+   * on any aspect ratio, not stretched differently per axis, hence one
+   * shared factor (the more-constrained axis) for both.
+   */
+  private pxScale(): number {
+    return Math.min(this.scaleX, this.scaleY);
+  }
+
+  /** Sets an element's left/top/width/height/transform for the current live size — called for every element both from updateScale() (after a resize) and once at construction time (via the constructor's own initial updateScale() call). Mirrors tools/ui-editor.html's renderCanvas() geometry block exactly. */
+  private applyGeometry(data: UIElementData, wrapper: HTMLElement): void {
+    const px = this.pxScale();
+
+    // For position, it's an offset from the anchor's OWN point — not always
+    // the container's top-left. The anchor's point is itself a fraction of
+    // the container (ANCHOR_FRAC), expressed as a % so it still tracks the
+    // live container size correctly; the px part is just the fixed nudge
+    // away from it. So middle-center + (0,0) sits exactly at the true
+    // center on any screen shape (0 offset from a point that's always 50%
+    // across); bottom-left + (32,32) sits 32px in from that corner, same as
+    // the real joystick-base's hardcoded `left: 32px; bottom: 32px`. This
+    // mirrors Unity's anchoredPosition, where the offset is always relative
+    // to the anchor, not a fixed page origin.
+    // A positive offset always means "inward, toward center" regardless of
+    // which side the anchor is on — matching CSS's own left/right and
+    // top/bottom conventions (bottom: 32px moves an element UP from the
+    // bottom edge, even though `top` and `bottom` count in opposite
+    // directions). Since every anchor here is placed via `left`/`top`
+    // specifically, an anchor on the far edge (right/bottom, frac 1) needs
+    // its offset flipped to negative to move inward the same way.
+    const originX = ANCHOR_FRAC[data.anchor].x * 100;
+    const originY = ANCHOR_FRAC[data.anchor].y * 100;
+    const signX = ANCHOR_FRAC[data.anchor].x === 1 ? -1 : 1;
+    const signY = ANCHOR_FRAC[data.anchor].y === 1 ? -1 : 1;
+    wrapper.style.left = data.xUnit === "px" ? `calc(${originX}% + ${signX * (data.xPx ?? 0) * px}px)` : `${data.xPct}%`;
+    wrapper.style.top = data.yUnit === "px" ? `calc(${originY}% + ${signY * (data.yPx ?? 0) * px}px)` : `${data.yPct}%`;
+    wrapper.style.width = data.widthUnit === "px" ? `${(data.widthPx ?? 0) * px}px` : `${data.widthPct}%`;
+    if (needsLockedAspect(data)) {
+      wrapper.style.aspectRatio = `${data.aspectRatio ?? 1}`;
+      wrapper.style.height = "auto";
+    } else if (data.heightUnit === "px") {
+      wrapper.style.height = `${(data.heightPx ?? 0) * px}px`;
+    } else {
+      wrapper.style.height = `${data.heightPct}%`;
+    }
+    wrapper.style.transform = `${ANCHOR_TRANSFORM[data.anchor]} rotate(${data.rotation}deg)`;
+  }
+
+  /** `fontSizePct`% of the container's current real height, as a literal px value — mirrors tools/ui-editor.html's own text font-size formula exactly (there: `fontSizePct * (canvasEl's real height / 100)`). */
+  private applyFontSize(data: UIElementData, node: HTMLElement): void {
+    node.style.fontSize = `${((data.fontSizePct ?? 4) / 100) * this.liveHeight}px`;
   }
 
   /** Look up a placed element's content node by the `name` you gave it in the editor. */
@@ -156,9 +281,19 @@ export class UILayout {
     if (node) node.style.display = "none";
   }
 
-  /** Opt a specific element into receiving pointer events (e.g. a designed button). */
-  setInteractive(name: string, onClick?: () => void): void {
-    const node = this.elements.get(name);
+  /**
+   * Opt an element into receiving pointer events, either by name (a
+   * designed button not bound to a field) or by passing the element
+   * itself directly — the latter is what a Scripts-panel-bound field
+   * already holds (see Bindings.ts): `this.endcard.setInteractive(this.someButton, handler)`.
+   * Style/pointer-events are set here either way (idempotent alongside
+   * the editor's "🖱 Interactable" toggle, which does the same thing at
+   * render time — see buildElement) so this always works even if that
+   * toggle was left off. No-op if the name doesn't resolve or the
+   * element is undefined (nothing assigned in the editor yet).
+   */
+  setInteractive(nameOrElement: string | HTMLElement | undefined, onClick?: () => void): void {
+    const node = typeof nameOrElement === "string" ? this.elements.get(nameOrElement) : nameOrElement;
     if (!node) return;
     node.style.pointerEvents = "auto";
     node.style.cursor = "pointer";
@@ -176,48 +311,15 @@ export class UILayout {
   private buildElement(data: UIElementData): { wrapper: HTMLElement; content: HTMLElement } {
     const wrapper = document.createElement("div");
     wrapper.style.position = "absolute";
-    // "px" is a literal, unscaled CSS px value — same real size/margin on
-    // every device, never derived from container %. For size, that's what
-    // stops a locked-aspect element (e.g. the joystick) from ballooning.
-    //
-    // For position, it's an offset from the anchor's OWN point — not always
-    // the container's top-left. The anchor's point is itself a fraction of
-    // the container (ANCHOR_FRAC), expressed as a % so it still tracks the
-    // live container size correctly; the px part is just the fixed nudge
-    // away from it. So middle-center + (0,0) sits exactly at the true
-    // center on any screen shape (0 offset from a point that's always 50%
-    // across); bottom-left + (32,32) sits 32px in from that corner, same as
-    // the real joystick-base's hardcoded `left: 32px; bottom: 32px`. This
-    // mirrors Unity's anchoredPosition, where the offset is always relative
-    // to the anchor, not a fixed page origin.
-    // A positive offset always means "inward, toward center" regardless of
-    // which side the anchor is on — matching CSS's own left/right and
-    // top/bottom conventions (bottom: 32px moves an element UP from the
-    // bottom edge, even though `top` and `bottom` count in opposite
-    // directions). Since every anchor here is placed via `left`/`top`
-    // specifically, an anchor on the far edge (right/bottom, frac 1) needs
-    // its offset flipped to negative to move inward the same way.
-    const originX = ANCHOR_FRAC[data.anchor].x * 100;
-    const originY = ANCHOR_FRAC[data.anchor].y * 100;
-    const signX = ANCHOR_FRAC[data.anchor].x === 1 ? -1 : 1;
-    const signY = ANCHOR_FRAC[data.anchor].y === 1 ? -1 : 1;
-    wrapper.style.left = data.xUnit === "px" ? `calc(${originX}% + ${signX * (data.xPx ?? 0)}px)` : `${data.xPct}%`;
-    wrapper.style.top = data.yUnit === "px" ? `calc(${originY}% + ${signY * (data.yPx ?? 0)}px)` : `${data.yPct}%`;
-    wrapper.style.width = data.widthUnit === "px" ? `${data.widthPx ?? 0}px` : `${data.widthPct}%`;
-    if (needsLockedAspect(data)) {
-      wrapper.style.aspectRatio = `${data.aspectRatio ?? 1}`;
-      wrapper.style.height = "auto";
-    } else if (data.heightUnit === "px") {
-      wrapper.style.height = `${data.heightPx ?? 0}px`;
-    } else {
-      wrapper.style.height = `${data.heightPct}%`;
-    }
     wrapper.style.opacity = `${data.opacity}`;
     // renderOrder is the real visual-stacking value; fall back to zIndex for
     // layouts saved before renderOrder existed (see its doc comment).
     wrapper.style.zIndex = `${data.renderOrder ?? data.zIndex}`;
-    wrapper.style.transform = `${ANCHOR_TRANSFORM[data.anchor]} rotate(${data.rotation}deg)`;
     wrapper.style.pointerEvents = "none";
+    // Position/size aren't set here — the constructor's own updateScale()
+    // call, right after every element is built, applies the real
+    // first-ever geometry via applyGeometry() (see geometryElements).
+    this.geometryElements.push({ data, wrapper });
 
     const content = this.buildContent(data);
     content.style.width = "100%";
@@ -225,6 +327,15 @@ export class UILayout {
     if (data.visible === false) content.style.display = "none";
     if (data.animation && data.animation !== "none") {
       content.style.animation = ANIMATION_CSS[data.animation];
+    }
+    // Same two style writes setInteractive(name, ...) makes by hand below
+    // — baked in at render time instead for anything the editor's
+    // Properties panel marked interactive, so a class binding this
+    // element via the Scripts panel only ever needs UILayout.onClick(...)
+    // to add the actual handler, no per-element style boilerplate.
+    if (data.interactive) {
+      content.style.pointerEvents = "auto";
+      content.style.cursor = "pointer";
     }
     wrapper.appendChild(content);
 
@@ -313,7 +424,6 @@ export class UILayout {
     text.textContent = data.text ?? "";
     text.style.display = "flex";
     text.style.alignItems = "center";
-    text.style.fontSize = `${data.fontSizePct ?? 4}vh`;
     text.style.color = data.color ?? "#ffffff";
     text.style.fontWeight = data.fontWeight ?? "700";
     text.style.textAlign = data.textAlign ?? "left";
@@ -321,6 +431,11 @@ export class UILayout {
     text.style.whiteSpace = "pre-wrap";
     text.style.overflow = "hidden";
     text.style.fontFamily = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    // Font-size isn't set here — it depends on the container's current
+    // real height, which isn't known yet this early (see applyFontSize,
+    // called for every text node from the constructor's own initial
+    // updateScale() call, same timing as applyGeometry above).
+    this.textNodes.push({ data, node: text });
     return text;
   }
 }

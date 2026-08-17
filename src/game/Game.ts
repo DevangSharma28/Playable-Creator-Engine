@@ -13,6 +13,8 @@ import type { UILayoutData } from "../engine/ui/UILayoutTypes";
 import mainLayoutRaw from "./ui/mainLayout.json";
 import endcardLayoutRaw from "./ui/endcardLayout.json";
 import { AssetLoader } from "../engine/AssetLoader";
+import { MraidAdapter } from "../engine/MraidAdapter";
+import { MindworksAdapter } from "../engine/MindworksAdapter";
 import { manifest, libGlb } from "./assets";
 
 const mainLayoutData = mainLayoutRaw as UILayoutData;
@@ -21,6 +23,8 @@ const endcardLayoutData = endcardLayoutRaw as UILayoutData;
 const COIN_COUNT = 6;
 const AUTO_END_MS = 15000;
 const CAMERA_OFFSET = new THREE.Vector3(0, 7.5, 7.5);
+/** Real store listing / click-through URL — swap this for the actual app before a network build. Every CTA (HUD button, endcard) routes through MraidAdapter.openStoreUrl, which uses mraid.open() inside a real ad network host and falls back to a new tab everywhere else (this dev preview included). */
+const STORE_URL = "https://devangsharma28.github.io/portfolio/";
 
 export class Game {
   private readonly scene: THREE.Scene;
@@ -91,11 +95,30 @@ export class Game {
     // own constructor — see src/game/ui/HUD.ts and src/engine/Bindings.ts.
     this.hud = new HUD(this.mainUI, this.endcardUI);
     this.hud.setScore(0, this.coinField.total);
+    // Not window.open()/alert() — most ad-network WebViews (Mintegral's
+    // Mindworks included) block or silently swallow plain navigation, and
+    // alert() specifically can no-op or hang the JS thread depending on
+    // the host's WebView build. Mindworks' own review doc is explicit
+    // that a playable must never redirect on its own when its interface
+    // is present — window.install() must be the *only* thing a CTA click
+    // does then — so that branch is checked first and taken exclusively;
+    // MraidAdapter (real MRAID host, or a plain new-tab open in this dev
+    // preview) is only the fallback for hosts that don't define it.
     this.hud.onCtaClick(() => {
-      // In a real network build this would open the store listing, e.g.:
-      // window.open("https://devangsharma28.github.io/portfolio/", "_blank");
-      alert("Install Now! (hook up your store URL here)");
+      if (MindworksAdapter.isPresent) {
+        MindworksAdapter.install();
+      } else {
+        MraidAdapter.openStoreUrl(STORE_URL);
+      }
     });
+
+    this.hud.onInGameCtaClick(() => {
+      if (MindworksAdapter.isPresent) {
+        MindworksAdapter.install();
+      } else {
+        MraidAdapter.openStoreUrl(STORE_URL);
+      }
+    })
 
     // The joystick is a real, editable layout element (type: "joystick",
     // named "joystick") — not hardcoded HTML — so DynamicJoystick reuses
@@ -116,6 +139,32 @@ export class Game {
     this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
 
     window.addEventListener("resize", this.onWindowResize);
+
+    // Some ad-network WebViews (Mintegral's Mindworks among them) can
+    // still be mid-layout — sometimes literally reporting 0×0 — the
+    // instant this constructor runs, and aren't guaranteed to ever fire a
+    // native `resize` event once they settle; they signal through MRAID's
+    // own ready/sizeChange events instead. Without this, a renderer sized
+    // once here from window.innerWidth/innerHeight and never revisited
+    // can stay wrong (in the 0×0 case, invisible) for the whole session —
+    // see MraidAdapter.onReady's own doc comment.
+    MraidAdapter.onReady(() => {
+      if (!this.manualSize) this.handleResize();
+    });
+    MraidAdapter.onSizeChange(() => {
+      if (!this.manualSize) this.handleResize();
+    });
+
+    // Mindworks calls these *into* the playable itself (see
+    // MindworksAdapter.exposeLifecycleHooks' own doc comment) — real
+    // no-op functions for now since this game has no countdown/music
+    // system yet to hook them up to; wire real behavior in here once it
+    // does, rather than leaving window.gameStart/gameClose undefined
+    // (the review tool checks they exist as callable functions).
+    MindworksAdapter.exposeLifecycleHooks(
+      () => { },
+      () => { }
+    );
   }
 
   /** Stored so dispose() can remove exactly this listener — an inline arrow passed straight to addEventListener can never be removed later. */
@@ -130,7 +179,13 @@ export class Game {
     const model = loader.getGlb(path).scene;
     const clips = loader.getAnimations(path);
 
-    return new Game(canvas, model, clips);
+    const game = new Game(canvas, model, clips);
+    // Every asset is loaded and the game is fully constructed — Mindworks'
+    // own loading overlay waits for this before it'll consider the
+    // playable loaded at all (see MindworksAdapter.gameReady's own doc
+    // comment); a no-op everywhere else.
+    MindworksAdapter.gameReady();
+    return game;
   }
 
   /** Access designed sprites/text from mainLayout.json by the name given in tools/ui-editor.html. */
@@ -154,6 +209,14 @@ export class Game {
     this.manualSize = true;
     this.cameraHandler.handleResize(width, height);
     this.renderer.setSize(width, height);
+    // The explicit target size, not a DOM re-measure — see
+    // UILayout.updateScale's own doc comment for why that matters here
+    // specifically: #device-frame (this method's caller, the dev
+    // device-frame simulator) animates its own resize over a CSS
+    // transition, so reading its box synchronously right after setting a
+    // new size would catch it mid-transition.
+    this.mainUI.updateScale(width, height);
+    this.endcardUI.updateScale(width, height);
   }
 
   /**
@@ -281,10 +344,13 @@ export class Game {
     if (this.ended) return;
     this.ended = true;
     this.hud.showEndCard(won);
+    MindworksAdapter.gameEnd();
   }
 
   private handleResize(): void {
     this.cameraHandler.handleResize(window.innerWidth, window.innerHeight);
     this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.mainUI.updateScale(window.innerWidth, window.innerHeight);
+    this.endcardUI.updateScale(window.innerWidth, window.innerHeight);
   }
 }

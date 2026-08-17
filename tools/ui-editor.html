@@ -1498,11 +1498,36 @@
        *   baseColor?:string,knobColor?:string,knobSizePct?:number}} UIElementData
        */
 
-      /** Always the canvas's real, live on-screen box size (see applyCanvasSize) — there's no separate "design canvas" anymore, the canvas IS the actual screen (or the parent's simulated device-frame box, when embedded — see applyDeviceFrameToCanvas). */
+      /** The canvas's real, live on-screen box size (see applyCanvasSize) — the full window normally, or the parent's simulated device-frame box when embedded (see applyDeviceFrameToCanvas). */
       let canvasWidth = window.innerWidth;
       let canvasHeight = window.innerHeight;
-      /** Always 1 — kept only so the existing %/px geometry math below (shared with the history it evolved from) doesn't need touching. No separate editor zoom: whatever box the canvas currently occupies (full window, or a simulated device frame) is always shown at true 1:1 scale. */
-      const currentZoomScale = 1;
+      /**
+       * The layout's own fixed reference resolution — what every px value
+       * on every element actually means "at", exactly mirroring what
+       * UILayout.ts's `stage` treats as its reference resolution at
+       * runtime (canvasWidth/canvasHeight in the saved JSON). Deliberately
+       * NOT the same thing as canvasWidth/canvasHeight above once a real
+       * layout is loaded: those keep tracking the live window/device-frame
+       * box (so Save always has the true current size on hand for a fresh
+       * layout, and so switching device-frame tabs mid-edit is a *preview*
+       * of a different real screen against the same fixed design, not a
+       * silent redefinition of the design itself). See applyCanvasSize and
+       * applyLoadedData for where these get pinned vs. kept tracking live.
+       */
+      let designWidth = window.innerWidth;
+      let designHeight = window.innerHeight;
+      /** False until a real design intent exists (a layout loaded, or "New" clicked) — see applyCanvasSize's doc comment. While false, designWidth/Height keep tracking live canvasWidth/Height (today's old behavior), so a from-scratch session with nothing loaded/saved yet still just shows everything at true 1:1 like before. */
+      let designPinned = false;
+      /**
+       * Non-uniform per-axis scale from the fixed design resolution to
+       * whatever the live canvas box currently is — exactly the same
+       * `scaleX`/`scaleY` math as UILayout.ts's updateScale(), recomputed
+       * in applyCanvasSize() any time the live box changes. This is what
+       * makes the editor an accurate preview of runtime at any device-frame
+       * tab instead of just always showing 1:1.
+       */
+      let scaleX = 1;
+      let scaleY = 1;
       /** @type {UIElementData[]} */
       let elements = [];
       /** Almost everything (drag, resize, the Properties panel) still works off a single selection; multi-select exists specifically to feed Group Selected/Delete/Duplicate. */
@@ -1602,13 +1627,35 @@
       /*  Canvas sizing                                                      */
       /* ------------------------------------------------------------------ */
 
-      /** Keep canvasWidth/canvasHeight (used for % math and px clamp bounds) tracking whatever the canvas's actual on-screen box currently is — the full window normally, or the parent's device-frame rect when embedded and one's been applied (see applyDeviceFrameToCanvas). */
+      /**
+       * Keep canvasWidth/canvasHeight tracking whatever the canvas's actual
+       * on-screen box currently is — the full window normally, or the
+       * parent's device-frame rect when embedded and one's been applied
+       * (see applyDeviceFrameToCanvas) — then derive scaleX/scaleY against
+       * the fixed design resolution (see pxScale()/elemScreenWidth etc.,
+       * which use these). While nothing's pinned it yet (designPinned
+       * false — a from-scratch session with nothing loaded/saved),
+       * designWidth/Height just follow along too, so scaleX/scaleY stay 1
+       * and every element renders at true 1:1, exactly like before this
+       * existed. Called from render() on every single render, so nothing
+       * else needs to remember to call this after changing
+       * designWidth/Height/designPinned.
+       */
       function applyCanvasSize() {
         const rect = canvasEl.getBoundingClientRect();
         canvasWidth = rect.width;
         canvasHeight = rect.height;
+        if (!designPinned) {
+          designWidth = canvasWidth;
+          designHeight = canvasHeight;
+        }
+        scaleX = designWidth > 0 ? canvasWidth / designWidth : 1;
+        scaleY = designHeight > 0 ? canvasHeight / designHeight : 1;
         const hud = document.getElementById("viewport-hud");
-        if (hud) hud.textContent = Math.round(canvasWidth) + " × " + Math.round(canvasHeight);
+        if (hud) {
+          hud.textContent =
+            Math.round(canvasWidth) + " × " + Math.round(canvasHeight) + (designPinned ? "  (design " + Math.round(designWidth) + "×" + Math.round(designHeight) + ")" : "");
+        }
       }
 
       window.addEventListener("resize", () => {
@@ -1704,22 +1751,40 @@
       }
 
       /**
-       * Unit-aware geometry, all in *live on-screen px* (the real viewport,
-       * always — this editor has no separate zoom or device simulation).
-       * "%" fields resolve against the live container width/height (rectW/
-       * rectH) — exactly what CSS `%` does. "px" fields are a literal
-       * real-device px value that never depends on the container's shape.
-       * Locked-aspect height is
-       * always derived from width/ratio, regardless of either field's unit.
-       * Funneling drag/resize/snap through these means neither gesture code
-       * nor the properties panel has to special-case which unit is active.
+       * The one, uniform design-space-px -> live-screen-px factor for
+       * EVERY px field (position or size, locked-aspect or not) — never
+       * scaleX/scaleY independently. A "%" field is meant to keep
+       * stretching to fill the real container exactly like plain CSS "%"
+       * always has (so it still uses scaleX/scaleY's real per-axis
+       * container fraction directly, unaffected by this); a "px" field
+       * means a physical size/offset that should stay proportioned the
+       * same on any aspect ratio, not stretched differently per axis.
+       * Mirrors UILayout.ts's applyGeometry() baseline correction exactly
+       * — see its doc comment for the full reasoning.
+       */
+      function pxScale() {
+        return Math.min(scaleX, scaleY);
+      }
+      /**
+       * Unit-aware geometry, all in *live on-screen px* — the real,
+       * currently-visible viewport (full window, or a simulated
+       * device-frame box — see applyDeviceFrameToCanvas). "%" fields
+       * resolve against the live container width/height (rectW/rectH) —
+       * exactly what CSS `%` does. "px" fields are a *design-resolution*
+       * value (see designWidth/designHeight's doc comment) — scaled up/down
+       * uniformly by pxScale() to land at the correct live on-screen size,
+       * mirroring exactly how UILayout.ts's applyGeometry() does the same
+       * at runtime. Locked-aspect height is always derived from
+       * width/ratio, regardless of either field's unit. Funneling
+       * drag/resize/snap through these means neither gesture code nor the
+       * properties panel has to special-case which unit is active.
        */
       function elemScreenWidth(d, rectW) {
-        return d.widthUnit === "px" ? (d.widthPx || 0) * currentZoomScale : (d.widthPct / 100) * rectW;
+        return d.widthUnit === "px" ? (d.widthPx || 0) * pxScale() : (d.widthPct / 100) * rectW;
       }
       function elemScreenHeight(d, rectW, rectH) {
         if (needsLockedAspect(d)) return elemScreenWidth(d, rectW) / visualAspectRatio(d);
-        return d.heightUnit === "px" ? (d.heightPx || 0) * currentZoomScale : (d.heightPct / 100) * rectH;
+        return d.heightUnit === "px" ? (d.heightPx || 0) * pxScale() : (d.heightPct / 100) * rectH;
       }
       // Position PX is an offset from the anchor's OWN point, not always the
       // container's top-left — the anchor's point is itself ANCHOR_FRAC of the
@@ -1745,10 +1810,10 @@
         return ANCHOR_FRAC[d.anchor].y === 1 ? -1 : 1;
       }
       function elemScreenX(d, rectW) {
-        return d.xUnit === "px" ? ANCHOR_FRAC[d.anchor].x * rectW + pxSignX(d) * (d.xPx || 0) * currentZoomScale : (d.xPct / 100) * rectW;
+        return d.xUnit === "px" ? ANCHOR_FRAC[d.anchor].x * rectW + pxSignX(d) * (d.xPx || 0) * pxScale() : (d.xPct / 100) * rectW;
       }
       function elemScreenY(d, rectH) {
-        return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + pxSignY(d) * (d.yPx || 0) * currentZoomScale : (d.yPct / 100) * rectH;
+        return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + pxSignY(d) * (d.yPx || 0) * pxScale() : (d.yPct / 100) * rectH;
       }
       function boxCenterScreenX(d, rectW) {
         return elemScreenX(d, rectW) + elemScreenWidth(d, rectW) * (0.5 - ANCHOR_FRAC[d.anchor].x);
@@ -1759,21 +1824,21 @@
       /** Given a desired box-center in live screen px, back out x/y in whichever unit that axis is currently using. */
       function setXForScreenCenter(d, centerScreenX, rectW) {
         const targetScreenX = centerScreenX - elemScreenWidth(d, rectW) * (0.5 - ANCHOR_FRAC[d.anchor].x);
-        if (d.xUnit === "px") d.xPx = (pxSignX(d) * (targetScreenX - ANCHOR_FRAC[d.anchor].x * rectW)) / currentZoomScale;
+        if (d.xUnit === "px") d.xPx = (pxSignX(d) * (targetScreenX - ANCHOR_FRAC[d.anchor].x * rectW)) / pxScale();
         else d.xPct = (targetScreenX / rectW) * 100;
       }
       function setYForScreenCenter(d, centerScreenY, rectW, rectH) {
         const targetScreenY = centerScreenY - elemScreenHeight(d, rectW, rectH) * (0.5 - ANCHOR_FRAC[d.anchor].y);
-        if (d.yUnit === "px") d.yPx = (pxSignY(d) * (targetScreenY - ANCHOR_FRAC[d.anchor].y * rectH)) / currentZoomScale;
+        if (d.yUnit === "px") d.yPx = (pxSignY(d) * (targetScreenY - ANCHOR_FRAC[d.anchor].y * rectH)) / pxScale();
         else d.yPct = (targetScreenY / rectH) * 100;
       }
       /** Writes a target on-screen width/height (against the given container size), honoring whichever unit is active. Shared by resize-dragging and by Group/Ungroup's coordinate-space conversion. */
       function writeWidthForContainer(d, screenPx, rectW) {
-        if (d.widthUnit === "px") d.widthPx = clamp(screenPx / currentZoomScale, 4, 4000);
+        if (d.widthUnit === "px") d.widthPx = clamp(screenPx / pxScale(), 4, 4000);
         else d.widthPct = clamp((screenPx / rectW) * 100, 2, 200);
       }
       function writeHeightForContainer(d, screenPx, rectH) {
-        if (d.heightUnit === "px") d.heightPx = clamp(screenPx / currentZoomScale, 4, 4000);
+        if (d.heightUnit === "px") d.heightPx = clamp(screenPx / pxScale(), 4, 4000);
         else d.heightPct = clamp((screenPx / rectH) * 100, 2, 200);
       }
       /** Switches an axis's unit while preserving its current on-screen position/size exactly (no visual jump). */
@@ -1782,22 +1847,22 @@
         if (axis === "x") {
           const screenPx = elemScreenX(d, rect.width);
           d.xUnit = newUnit;
-          if (newUnit === "px") d.xPx = (pxSignX(d) * (screenPx - ANCHOR_FRAC[d.anchor].x * rect.width)) / currentZoomScale;
+          if (newUnit === "px") d.xPx = (pxSignX(d) * (screenPx - ANCHOR_FRAC[d.anchor].x * rect.width)) / pxScale();
           else d.xPct = (screenPx / rect.width) * 100;
         } else if (axis === "y") {
           const screenPx = elemScreenY(d, rect.height);
           d.yUnit = newUnit;
-          if (newUnit === "px") d.yPx = (pxSignY(d) * (screenPx - ANCHOR_FRAC[d.anchor].y * rect.height)) / currentZoomScale;
+          if (newUnit === "px") d.yPx = (pxSignY(d) * (screenPx - ANCHOR_FRAC[d.anchor].y * rect.height)) / pxScale();
           else d.yPct = (screenPx / rect.height) * 100;
         } else if (axis === "width") {
           const screenPx = elemScreenWidth(d, rect.width);
           d.widthUnit = newUnit;
-          if (newUnit === "px") d.widthPx = screenPx / currentZoomScale;
+          if (newUnit === "px") d.widthPx = screenPx / pxScale();
           else d.widthPct = (screenPx / rect.width) * 100;
         } else if (axis === "height") {
           const screenPx = elemScreenHeight(d, rect.width, rect.height);
           d.heightUnit = newUnit;
-          if (newUnit === "px") d.heightPx = screenPx / currentZoomScale;
+          if (newUnit === "px") d.heightPx = screenPx / pxScale();
           else d.heightPct = (screenPx / rect.height) * 100;
         }
       }
@@ -1879,18 +1944,18 @@
           node.className = "ui-el" + (selectedIds.has(data.id) ? " selected" : "");
           node.style.left =
             data.xUnit === "px"
-              ? "calc(" + ANCHOR_FRAC[data.anchor].x * 100 + "% + " + pxSignX(data) * (data.xPx || 0) * currentZoomScale + "px)"
+              ? "calc(" + ANCHOR_FRAC[data.anchor].x * 100 + "% + " + pxSignX(data) * (data.xPx || 0) * pxScale() + "px)"
               : data.xPct + "%";
           node.style.top =
             data.yUnit === "px"
-              ? "calc(" + ANCHOR_FRAC[data.anchor].y * 100 + "% + " + pxSignY(data) * (data.yPx || 0) * currentZoomScale + "px)"
+              ? "calc(" + ANCHOR_FRAC[data.anchor].y * 100 + "% + " + pxSignY(data) * (data.yPx || 0) * pxScale() + "px)"
               : data.yPct + "%";
-          node.style.width = data.widthUnit === "px" ? (data.widthPx || 0) * currentZoomScale + "px" : data.widthPct + "%";
+          node.style.width = data.widthUnit === "px" ? (data.widthPx || 0) * pxScale() + "px" : data.widthPct + "%";
           if (needsLockedAspect(data)) {
             node.style.aspectRatio = String(visualAspectRatio(data));
             node.style.height = "auto";
           } else if (data.heightUnit === "px") {
-            node.style.height = (data.heightPx || 0) * currentZoomScale + "px";
+            node.style.height = (data.heightPx || 0) * pxScale() + "px";
           } else {
             node.style.height = data.heightPct + "%";
           }
@@ -1899,6 +1964,12 @@
           // comment in UILayoutTypes.ts) — falls back to zIndex for
           // elements saved before renderOrder existed.
           node.style.zIndex = data.renderOrder ?? data.zIndex;
+          // Unlike UILayout.ts's runtime renderer, there's no separate
+          // outer "stage" transform here to counteract — every px value
+          // above is already individually resolved to its correct
+          // uniformly-scaled live-screen size via pxScale(), so the box
+          // itself is already correct with no extra correction transform
+          // needed here.
           node.style.transform = ANCHOR_TRANSFORM[data.anchor] + " rotate(" + data.rotation + "deg)";
           node.dataset.id = data.id;
 
@@ -2517,6 +2588,10 @@
           ["none", "pulse", "bob", "spin", "fadeIn"].map((a) => '<option value="' + a + '"' + (data.animation === a ? " selected" : "") + ">" + a + "</option>").join("") +
           "</select></div>";
         html += '<div class="field"><button type="button" class="toggle-btn' + (data.visible === false ? "" : " active") + '" data-toggle="visible">Visible on game start</button></div>';
+        html +=
+          '<div class="field"><button type="button" class="toggle-btn' +
+          (data.interactive ? " active" : "") +
+          '" data-toggle="interactive" title="Makes this element clickable — call UILayout.setInteractive(this.fieldName, handler) on it from code, no manual style setup needed">🖱 Interactable</button></div>';
 
         if (data.type === "text") {
           html += "<h3>Text</h3>";
@@ -2860,12 +2935,12 @@
           const dyScreen = ev.clientY - startY;
 
           if (data.xUnit === "px") {
-            data.xPx = clamp(startXPx + (pxSignX(data) * dxScreen) / currentZoomScale, -containerRect.width * 0.5, containerRect.width * 1.5);
+            data.xPx = clamp(startXPx + (pxSignX(data) * dxScreen) / pxScale(), (-containerRect.width * 0.5) / pxScale(), (containerRect.width * 1.5) / pxScale());
           } else {
             data.xPct = clamp(startXPct + (dxScreen / containerRect.width) * 100, -50, 150);
           }
           if (data.yUnit === "px") {
-            data.yPx = clamp(startYPx + (pxSignY(data) * dyScreen) / currentZoomScale, -containerRect.height * 0.5, containerRect.height * 1.5);
+            data.yPx = clamp(startYPx + (pxSignY(data) * dyScreen) / pxScale(), (-containerRect.height * 0.5) / pxScale(), (containerRect.height * 1.5) / pxScale());
           } else {
             data.yPct = clamp(startYPct + (dyScreen / containerRect.height) * 100, -50, 150);
           }
@@ -3004,15 +3079,15 @@
         };
       }
 
-      /** Size fields for a freshly-added element: widthPx/heightPx as given (the active PX values), plus a %-equivalent seeded from the current canvas so the % toggle isn't blank if switched to later. */
+      /** Size fields for a freshly-added element: widthPx/heightPx as given (the active PX values, in design-resolution units — see designWidth's doc comment), plus a %-equivalent seeded from the design resolution so the % toggle isn't blank if switched to later. */
       function pxSizeFields(widthPx, heightPx) {
         return {
           widthUnit: "px",
           heightUnit: "px",
           widthPx: widthPx,
           heightPx: heightPx,
-          widthPct: clamp((widthPx / canvasWidth) * 100, 2, 200),
-          heightPct: clamp((heightPx / canvasHeight) * 100, 2, 200),
+          widthPct: clamp((widthPx / designWidth) * 100, 2, 200),
+          heightPct: clamp((heightPx / designHeight) * 100, 2, 200),
         };
       }
 
@@ -3486,17 +3561,23 @@
         future = [];
         currentFileHandle = null;
         currentFileKind = null;
+        // Un-pin the design resolution — a fresh layout has no reference
+        // yet, so it goes back to tracking the live canvas 1:1 (see
+        // applyCanvasSize) until this one gets saved or another gets
+        // loaded.
+        designPinned = false;
         document.getElementById("layout-name").value = "";
         document.getElementById("layout-tag").value = "";
         updateEditingLabel();
         render();
       });
 
+      /** canvasWidth/canvasHeight here are the *design* resolution, not necessarily today's live window/frame size — see designWidth's doc comment for why that split exists. Saving the live size instead would silently redefine every element's own reference resolution based on whichever device-frame tab happened to be open at Save time. */
       function currentLayoutData() {
         return {
           version: 1,
-          canvasWidth: canvasWidth,
-          canvasHeight: canvasHeight,
+          canvasWidth: designWidth,
+          canvasHeight: designHeight,
           elements: elements.map((e) => Object.assign({}, e)),
         };
       }
@@ -3518,16 +3599,25 @@
       }
 
       /**
-       * Applies parsed layout data to editor state (elements/history). Doesn't
-       * touch canvasWidth/canvasHeight — those always track the real live
-       * viewport (see applyCanvasSize), not whatever a loaded file's metadata
-       * happened to record; and doesn't touch file-tracking state.
+       * Applies parsed layout data to editor state (elements/history), and
+       * pins designWidth/designHeight to this file's own canvasWidth/
+       * canvasHeight — exactly the reference resolution UILayout.ts will
+       * use for these same elements at runtime, so device-frame tabs
+       * (Portrait/Landscape/Real) now preview accurately against it
+       * instead of silently reinterpreting every px value against
+       * whatever the editor window happens to be. Doesn't touch
+       * file-tracking state.
        */
       function applyLoadedData(data) {
         elements = (data.elements || []).map((el) =>
           Object.assign({ id: uid(), visible: true, animation: "none", lockAspect: false }, el)
         );
         nextZ = elements.reduce((max, el) => Math.max(max, el.zIndex + 1), 1);
+        if (data.canvasWidth > 0 && data.canvasHeight > 0) {
+          designWidth = data.canvasWidth;
+          designHeight = data.canvasHeight;
+          designPinned = true;
+        }
         selectedIds = new Set();
         history = [];
         future = [];

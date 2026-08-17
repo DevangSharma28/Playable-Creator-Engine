@@ -572,7 +572,106 @@ Do not create a second incompatible UI layout system.
 
 ------------------------------------------------------------------------
 
-# 15. Transform Separation in UI
+# 15. Screen Resizing & UI Scaling System --- LOCKED, Final
+
+**Status: correct, verified, and final.** Do not touch this system on a
+whim. It reached its current form only after several rounds of "editor
+and runtime don't quite agree" bugs, each traced down through real
+browser measurement (not just code review). Treat any request to "fix
+resizing" or "fix stretching" as a request to re-read this section
+first, not a blank slate.
+
+## The rule
+
+`tools/ui-editor.html` is the source of truth for what a layout should
+look like. `src/engine/ui/UILayout.ts` (the runtime renderer) must
+reproduce the editor's own geometry formulas **element for element**,
+not just "an equivalent system built a different way." Two
+independently-derived-but-mathematically-equivalent systems drift the
+moment either one changes; one system ported verbatim into the other
+cannot drift.
+
+**If you ever change this system, change both `tools/ui-editor.html`
+and `src/engine/ui/UILayout.ts` in the same edit, keeping their
+formulas identical.** Changing one without the other is exactly how the
+last several bugs happened.
+
+## The formulas (must match, both files)
+
+- Every element has a fixed **design resolution** it was authored
+  against: `canvasWidth`×`canvasHeight` in the saved layout JSON
+  (`designWidth`/`designHeight` in the editor's own variables, pinned
+  from that same JSON the moment a layout loads — see
+  `applyLoadedData`).
+- `scaleX = liveWidth / canvasWidth`, `scaleY = liveHeight /
+  canvasHeight` — the live container's real current size against that
+  fixed design resolution.
+- `pxScale() = Math.min(scaleX, scaleY)` — **one uniform factor**, used
+  for every `px`-unit field (position AND size, locked-aspect or not).
+  A `px` value is a physical quantity: it must scale the same amount on
+  any aspect ratio, never stretched differently per axis. This is what
+  keeps a joystick circular and a button's proportions intact in
+  landscape instead of ballooning into an oval.
+- A `%`-unit field is left alone, resolved as plain native CSS `%`
+  against the element's real containing block (the container itself, or
+  its parent group's real rendered box if nested) — no JS math needed,
+  exactly like CSS `%` has always worked. This is what makes a
+  full-bleed background or a proportionally-placed element correctly
+  reach the real edges on any aspect ratio.
+- Position offset (`xPx`/`yPx`): `anchorFraction% + sign * offsetPx *
+  pxScale()`, via `calc()`. Anchor fraction stays a plain `%` (tracks
+  the real edge); only the offset gets the uniform correction.
+- Text font-size: `fontSizePct% of the container's current real
+  height` (`fontSizePct / 100 * liveHeight`), recomputed on every
+  resize. **Not** a CSS `vh` unit, and **not** `pxScale()`-corrected —
+  text intentionally tracks live height directly, matching the editor's
+  own formula exactly. An earlier `vh`-based attempt assumed no
+  transform sat between the text and the real viewport; a `pxScale()`
+  shrink-to-fit attempt made text shrink more aggressively than the
+  editor's own preview did. Both were real bugs, both are why this
+  specific formula is the one that stuck.
+
+## Why there is no "stage" wrapper in `UILayout.ts`
+
+An earlier version of the runtime renderer built every element into a
+fixed-size `canvasWidth`×`canvasHeight` "stage" `<div>`, then applied
+one outer `transform: scale(scaleX, scaleY)` to fit it to the real
+container — non-uniform per axis. This looked correct at moderate
+aspect ratios, but at an extreme one (e.g. a 1600×800 landscape window
+against a ~512×910 portrait design), the anisotropic stretch it applied
+to *everything* inside it — including text sized in `vh` — went far
+enough that a button reading "INSTALL" rendered as "STA" (the outer
+letters pushed past the box's own clipped edges). Patching that with
+per-element counter-scale transforms fixed the symptom but kept two
+structurally different systems (editor's direct DOM computation vs.
+runtime's stage-transform-plus-correction) that only *happened* to be
+mathematically equivalent — exactly the kind of setup that drifts the
+next time either side changes. The fix that stuck: delete the stage
+entirely and have `UILayout.ts` build elements as real DOM descendants
+of their real parent (the container, or a group's real content node)
+and compute `left`/`top`/`width`/`height`/`font-size` the same way
+`tools/ui-editor.html`'s `renderCanvas()` does — because that is
+provably identical to the editor, not just similar to it.
+
+## Before touching either file
+
+1. Read `tools/ui-editor.html`'s `pxScale()`, `elemScreenWidth`/
+   `elemScreenHeight`/`elemScreenX`/`elemScreenY`, and the geometry
+   block inside `renderCanvas()`.
+2. Read `UILayout.ts`'s `pxScale()`, `applyGeometry()`, and
+   `applyFontSize()`.
+3. If they don't compute the same value for the same input, that is
+   the bug — not a reason to invent a third approach.
+4. Verify any change with a real browser at an aspect ratio far from
+   the design's own (e.g. a 490×872 design previewed at 1600×800) —
+   nothing about this system is reliably verifiable by code reading
+   alone; every past regression here was only caught by actually
+   measuring rendered `getBoundingClientRect()` values in Playwright/a
+   real browser, not by reasoning about the CSS.
+
+------------------------------------------------------------------------
+
+# 16. Transform Separation in UI
 
 The UI runtime deliberately separates:
 
@@ -603,7 +702,7 @@ the layout transform.
 
 ------------------------------------------------------------------------
 
-# 16. Visual UI Editor
+# 17. Visual UI Editor
 
 The UI editor is a core Ion Engine tool.
 
@@ -643,7 +742,7 @@ The editor should operate on generic layout and script metadata.
 
 ------------------------------------------------------------------------
 
-# 17. Script Bindings
+# 18. Script Bindings
 
 The Scripts panel allows UI elements to be assigned to public fields.
 
@@ -674,7 +773,7 @@ When adding binding features:
 
 ------------------------------------------------------------------------
 
-# 18. Editor vs Runtime Separation
+# 19. Editor vs Runtime Separation
 
 This is critical.
 
@@ -710,7 +809,7 @@ unnecessary runtime behavior.
 
 ------------------------------------------------------------------------
 
-# 19. Scene Inspector
+# 20. Scene Inspector
 
 The SceneInspector is a development tool.
 
@@ -744,7 +843,7 @@ object.
 
 ------------------------------------------------------------------------
 
-# 20. Gizmos
+# 21. Gizmos
 
 Transform gizmos should modify the selected object's transform.
 
@@ -762,7 +861,7 @@ A gizmo is an authoring tool, not a gameplay system.
 
 ------------------------------------------------------------------------
 
-# 21. Build Pipeline
+# 22. Build Pipeline
 
 Development and production builds have different goals.
 
@@ -803,7 +902,7 @@ unless explicitly requested.
 
 ------------------------------------------------------------------------
 
-# 22. Single-File Playable Mindset
+# 23. Single-File Playable Mindset
 
 Playable-ad environments may require highly constrained deployment.
 
@@ -825,7 +924,7 @@ experience.
 
 ------------------------------------------------------------------------
 
-# 23. Playable-Ad Design
+# 24. Playable-Ad Design
 
 Ion Engine exists to build playable advertisements.
 
@@ -863,7 +962,7 @@ Avoid long tutorials and unnecessary menus.
 
 ------------------------------------------------------------------------
 
-# 24. Game Feel
+# 25. Game Feel
 
 When implementing interactive gameplay, consider:
 
@@ -901,7 +1000,7 @@ Progress increases
 
 ------------------------------------------------------------------------
 
-# 25. Animation
+# 26. Animation
 
 Prefer the project's existing tween/animation utilities.
 
@@ -921,7 +1020,7 @@ destroyed.
 
 ------------------------------------------------------------------------
 
-# 26. Debugging Protocol
+# 27. Debugging Protocol
 
 When something breaks, do not immediately rewrite the system.
 
@@ -963,7 +1062,7 @@ Do not blindly increase collider size.
 
 ------------------------------------------------------------------------
 
-# 27. TypeScript Standards
+# 28. TypeScript Standards
 
 Prefer strict, explicit TypeScript.
 
@@ -997,7 +1096,7 @@ Avoid unnecessary static managers.
 
 ------------------------------------------------------------------------
 
-# 28. Dependency Rules
+# 29. Dependency Rules
 
 Before adding a dependency ask:
 
@@ -1026,7 +1125,7 @@ The current editor is intentionally vanilla HTML/CSS/JS.
 
 ------------------------------------------------------------------------
 
-# 29. Architecture Decision Rule
+# 30. Architecture Decision Rule
 
 When several implementations are possible, prioritize:
 
@@ -1045,7 +1144,7 @@ flexibility.
 
 ------------------------------------------------------------------------
 
-# 30. Refactoring Rules
+# 31. Refactoring Rules
 
 Do not perform large refactors during a small feature request.
 
@@ -1066,7 +1165,7 @@ If a deeper architectural issue genuinely blocks the feature:
 
 ------------------------------------------------------------------------
 
-# 31. New Engine Feature Checklist
+# 32. New Engine Feature Checklist
 
 Before adding something to `src/engine/`, ask:
 
@@ -1103,7 +1202,7 @@ If the answer to these questions is unclear, keep the feature in
 
 ------------------------------------------------------------------------
 
-# 32. New Editor Feature Checklist
+# 33. New Editor Feature Checklist
 
 Before modifying the editor:
 
@@ -1121,7 +1220,7 @@ Editor state and game state should not be confused.
 
 ------------------------------------------------------------------------
 
-# 33. New UI Feature Checklist
+# 34. New UI Feature Checklist
 
 Before changing UI:
 
@@ -1143,7 +1242,7 @@ correctly by the editor if the feature is supposed to be authorable.
 
 ------------------------------------------------------------------------
 
-# 34. Performance Checklist
+# 35. Performance Checklist
 
 For every significant runtime feature, consider:
 
@@ -1166,7 +1265,7 @@ Do not optimize prematurely, but do not ignore obvious hot paths.
 
 ------------------------------------------------------------------------
 
-# 35. Response Style
+# 36. Response Style
 
 When helping the developer:
 
@@ -1208,7 +1307,7 @@ Do not rewrite entire files unless necessary.
 
 ------------------------------------------------------------------------
 
-# 36. When Existing Code Is Provided
+# 37. When Existing Code Is Provided
 
 Always preserve the user's existing conventions.
 
@@ -1228,7 +1327,7 @@ pattern.
 
 ------------------------------------------------------------------------
 
-# 37. Absolute Guardrails
+# 38. Absolute Guardrails
 
 Never do these without explicit approval:
 
@@ -1242,10 +1341,14 @@ Never do these without explicit approval:
 8.  Add production editor/debug systems unnecessarily.
 9.  Rewrite working systems during unrelated feature work.
 10. Break the ability to build a standalone playable.
+11. Change the screen-resizing/UI-scaling formulas (§15) in only
+    `tools/ui-editor.html` OR only `src/engine/ui/UILayout.ts` — that
+    system is locked precisely because it's both files kept identical;
+    edit both together or not at all.
 
 ------------------------------------------------------------------------
 
-# 38. Definition of a Good Ion Engine Change
+# 39. Definition of a Good Ion Engine Change
 
 A good change should ideally make the engine:
 
@@ -1268,7 +1371,7 @@ quickly and use to build a new playable without fighting the engine.
 
 ------------------------------------------------------------------------
 
-# 39. Final Mental Model
+# 40. Final Mental Model
 
 Always think:
 

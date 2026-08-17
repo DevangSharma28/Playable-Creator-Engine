@@ -27,18 +27,19 @@ seems stuck on old behavior is almost always this.
 `npm run dev` (`scripts/dev.js`) actually runs two processes: esbuild's
 own watch+serve on **:8000**, and a tiny build-trigger API
 (`scripts/dev-build-api.js`) on **:8001** for the Engine Room panel's
-**Build** button (see below) — both dev-only, both stop cleanly on
-Ctrl+C. If the Build button ever says "API offline", that second
+**Builder** button (see below) — both dev-only, both stop cleanly on
+Ctrl+C. If the Builder button ever says "API offline", that second
 process didn't start; restart `npm run dev`.
 
 ## Engine Room (dev panel)
 
 Top-right of the dev preview, dev-only. Two rows today, room for more:
-- **✏️ Editor** / **🛠 Build** buttons. Editor opens the same UI layout
+- **✏️ Editor** / **🛠 Builder** buttons. Editor opens the same UI layout
   editor overlay as before (just moved here from its old top-left spot).
-  Build POSTs to the local API above, which runs the real `build.sh` and
-  reports back — same output as running it from the terminal, just
-  without leaving the browser.
+  Builder POSTs to the local API above, which runs the real `build.sh`
+  and opens a small modal reporting the final `dist/index.html` size
+  against the ~5MB single-file budget — same build as running it from
+  the terminal, just without leaving the browser.
 - **Live stats**: FPS (smoothed), draw calls, and triangle count, read
   straight from `renderer.info` every ~400ms — real numbers from the
   actual running scene, not an estimate. Below that, a small view-helper
@@ -225,20 +226,19 @@ clips) is loaded through this registry via `Game.create()`. `libTex` /
 `libAudio` / `libFont` are still empty — add entries there the same way
 when you wire in textures, sound, or fonts.
 
-### Going fully single-file (zero extra HTTP requests)
+### Single-file by default (zero extra HTTP requests)
 
-The default build copies `assets/` next to `dist/index.html` as separate
-files. Most ad networks are fine with that (a handful of small requests
-to the same origin), but some require *one single file* with nothing
-else. If you hit that requirement, base64-inline assets instead:
+`build.sh` inlines every `./assets/...` path the bundle references as a
+base64 `data:` URI directly into `dist/index.html` — there's no
+`dist/assets/` folder, no relative paths, nothing else to upload.
+`AssetLoader` doesn't care — `THREE.TextureLoader` and friends accept a
+data URI exactly like a file path, so `assets.ts` keeps using normal
+paths (`"./assets/models/player.glb"`) and never needs hand-written data
+URIs. The result opens directly via `file://` and works on any ad network
+that only accepts one file.
 
-```ts
-// in assets.ts, replace path strings with data URIs, e.g. via a small
-// build-time script that reads each file and emits:
-export const coin: string = "data:image/png;base64,iVBORw0KG...";
-```
-`AssetLoader` doesn't care — `THREE.TextureLoader` and friends accept
-data URIs the same as file paths, so no loader code changes needed.
+The Engine Room panel's **🛠 Builder** button runs this and reports the
+final size against most networks' ~5MB single-file budget.
 
 ## Architecture
 
@@ -321,7 +321,7 @@ touches exactly one file, not `Game.ts`.
   something to open (gitignored)
 - `scripts/dev.js` — runs esbuild's watch+serve and the build-trigger API
   together for `npm run dev`; forwards Ctrl+C to both
-- `scripts/dev-build-api.js` — the Engine Room **🛠 Build** button's
+- `scripts/dev-build-api.js` — the Engine Room **🛠 Builder** button's
   backing API, `127.0.0.1:8001`, dev-only, runs `build.sh` on request
 - `scripts/sync-assets.js` — copies `assets/` -> `public/assets/` and
   `tools/ui-editor.html` -> `public/ui-editor.html` for dev serving

@@ -720,8 +720,14 @@ const server = http.createServer((req, res) => {
         res.end(JSON.stringify({ ok: false, error: err.message, stdout, stderr }));
         return;
       }
+      // build.sh prints this on its own final line once dist/index.html is
+      // written — parsed straight from stdout rather than re-stat-ing the
+      // file here so the reported size is exactly the bytes build.sh itself
+      // just measured, not a second, possibly-racy read.
+      const sizeMatch = stdout.match(/BUILD_SIZE_BYTES=(\d+)/);
+      const sizeBytes = sizeMatch ? Number(sizeMatch[1]) : null;
       res.writeHead(200);
-      res.end(JSON.stringify({ ok: true, stdout, stderr }));
+      res.end(JSON.stringify({ ok: true, stdout, stderr, sizeBytes }));
     });
     return;
   }

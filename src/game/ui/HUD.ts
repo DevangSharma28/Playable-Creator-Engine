@@ -16,6 +16,7 @@ export class HUD {
 
   private hintHidden = false;
 
+  public inGameCTA: HTMLElement | undefined
 
   constructor(
     private readonly main: UILayout,
@@ -65,8 +66,19 @@ export class HUD {
     this.endcard.setVisible(true);
   }
 
-  /** Wire up the install button. Swap the handler's contents for a real store URL. */
+  /** Wire up the install button — see Game.ts's constructor for the actual handler (routes through MraidAdapter.openStoreUrl and STORE_URL there, not hardcoded here). */
   onCtaClick(handler: () => void): void {
     this.endcard.setInteractive("cta-button-bg", handler);
+  }
+
+  onInGameCtaClick(handler: () => void): void {
+    console.log("HUD.onInGameCtaClick — inGameCTA:", this.inGameCTA);
+    // Passing the element directly (not a name) — which instance this is
+    // called through doesn't actually matter functionally (see
+    // setInteractive's own doc comment), but `main` is the semantically
+    // correct one: an "in-game" CTA lives on the main HUD, not the
+    // endcard.
+    console.log(this.inGameCTA)
+    this.main.setInteractive(this.inGameCTA, handler);
   }
 }

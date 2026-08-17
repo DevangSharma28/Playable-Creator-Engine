@@ -74,7 +74,9 @@ Everything below that comment (down to the next `Header(...)` or the end of the 
 
 ## 6. Ship it
 
-**🛠 Build** (top of Engine Room) runs `build.sh`: bundles `src/main.ts` with esbuild, inlines everything into `src/index.template.html`, copies `assets/`, and produces a single self-contained `dist/index.html` — no server needed, ready to upload to an ad network. None of the Engine Room/dev-only code above is included in this output; it's simply never referenced by the production template.
+**🛠 Builder** (top of Engine Room) runs `build.sh`: bundles `src/main.ts` with esbuild, inlines every asset (textures, models, audio) as base64 straight into the bundle, then inlines that into `src/index.template.html` — one genuinely self-contained `dist/index.html`, no `dist/assets/` folder, nothing else to upload. It opens directly via `file://` and works on any ad network that only accepts a single file. None of the Engine Room/dev-only code above is included in it; the production template never references any of it.
+
+Clicking Builder opens a small modal with a glowing progress bar showing the final file size against the ~5MB budget most ad networks enforce for a single-file upload.
 
 You can also run it from the terminal:
 
@@ -94,7 +96,7 @@ bash build.sh
 | Group related fields in Control Desk | `// Header("Name")` comment above the first field in the group |
 | See private fields for debugging | **🐞 Debug** toggle (Scripts panel *or* Control Desk — separate toggles) |
 | See the actual running 3D scene / move the camera | **🧭 3D View** button |
-| Produce the final ad file | **🛠 Build** button, or `bash build.sh` |
+| Produce the final ad file | **🛠 Builder** button, or `bash build.sh` |
 
 ## Where things live
 
