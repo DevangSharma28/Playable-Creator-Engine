@@ -3,6 +3,7 @@
 // ============================================================================
 
 import * as THREE from "three";
+import { Group } from "three/examples/jsm/libs/tween.module.js";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 
 
@@ -29,15 +30,19 @@ export class Player {
   // Accessible from outside the class
   // ==========================================================================
 
-  readonly object3D: THREE.Group;
+  private readonly object3D: THREE.Group;
 
+
+  public me!: THREE.Group
 
   // ==========================================================================
   // 🔒 PRIVATE VARIABLES
   // Internal data used only by Player
   // ==========================================================================
 
-  private readonly speed = 4.5;
+  // Header("Player settings")
+  public speed: number = 4;
+
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private currentAction: THREE.AnimationAction | null = null;
@@ -60,7 +65,6 @@ export class Player {
     // ------------------------------------------------------------------------
 
     this.object3D = skeletonClone(model) as THREE.Group;
-
 
     // ------------------------------------------------------------------------
     // Animation Mixer
@@ -165,7 +169,6 @@ export class Player {
   // 🔄 UPDATE
   // Called every frame
   // ==========================================================================
-
   update(
     dt: number,
     _elapsed: number,
@@ -177,8 +180,6 @@ export class Player {
     // ------------------------------------------------------------------------
 
     const moving = axis.x !== 0 || axis.y !== 0;
-
-
     // ------------------------------------------------------------------------
     // Move Character
     // ------------------------------------------------------------------------
@@ -234,7 +235,6 @@ export class Player {
     // ------------------------------------------------------------------------
 
     else {
-
       if (this.actions.has(PlayerAnimation.Idle))
         this.play(PlayerAnimation.Idle);
     }

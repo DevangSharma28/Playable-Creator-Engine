@@ -167,7 +167,7 @@
       right: 0;
       bottom: 0;
       z-index: 70;
-      width: 232px;
+      width: 280px;
       display: flex;
       flex-direction: column;
       background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel) 45%, var(--eng-panel-2));
@@ -208,6 +208,7 @@
     #engine-room-body {
       padding: 14px;
       flex: 1;
+      min-height: 0;
       display: flex;
       flex-direction: column;
     }
@@ -668,6 +669,345 @@
       height: 60px;
     }
 
+    /* Engine Room: Control Desk — a live public-field viewer/editor for the
+       running game's own gameplay classes (Player, CoinField, World, Game
+       itself; never src/game/ui/ or src/engine/ — see /list-logic-scripts
+       in scripts/dev-build-api.js). Values come straight from the live
+       instance via window.__getInspectable (see IonEngine.ts) — no
+       serialization, same document, so edits write straight back onto the
+       running object.
+       This wrapper itself never scrolls — it's a fixed-height flex column
+       (fills whatever's left of the dock below the stats/viewhelper) whose
+       two content children (#er-scripts-list, #er-controldesk-body) each
+       scroll independently instead, so their own section titles (and the
+       Debug/Save buttons riding along with Control Desk's) stay put while
+       only the list underneath moves. */
+    #engine-room-scripts {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--eng-border-soft);
+      overflow: hidden;
+    }
+
+    .er-section-title {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      text-transform: uppercase;
+      color: var(--eng-text-dim);
+      margin: 0 0 6px;
+    }
+
+    .er-section-title .count {
+      margin-left: auto;
+      color: var(--eng-text-faint);
+      font-weight: 600;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .er-cd-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 4px;
+    }
+
+    .er-cd-actions button {
+      font-family: inherit;
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--eng-text-dim);
+      background: var(--eng-panel-2);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 6px;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+
+    .er-cd-actions button:hover:not(:disabled) {
+      color: var(--eng-text);
+      border-color: #3a3e45;
+    }
+
+    .er-cd-actions button:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+
+    #er-cd-debug.active {
+      color: var(--eng-danger);
+      border-color: var(--eng-danger);
+      background: var(--eng-danger-soft);
+    }
+
+    #er-cd-save.dirty {
+      color: #1a1204;
+      background: var(--eng-accent);
+      border-color: var(--eng-accent);
+    }
+
+    /* Private/protected fields only ever appear with Debug active — shown
+       for visibility, dimmed to signal they're read-only (Control Desk
+       only ever lets you edit public number/boolean fields). */
+    .er-cd-field.private {
+      opacity: 0.7;
+    }
+
+    .er-cd-assigned {
+      flex-shrink: 0;
+      font-size: 8px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      padding: 1px 4px;
+      border-radius: 999px;
+      text-transform: uppercase;
+    }
+
+    .er-cd-assigned.yes {
+      color: #8ef2a8;
+      background: rgba(142, 242, 168, 0.12);
+    }
+
+    .er-cd-assigned.no {
+      color: var(--eng-text-faint);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Capped to ~5 rows (measured real row height 23px incl. padding +
+       2px gap — see .er-script-row's own flex-shrink:0 below, needed so
+       flexbox overflows into a scrollbar here instead of squeezing every
+       row shorter to fit) so a long script list scrolls on its own
+       instead of pushing Control Desk further down the dock; the count
+       badge next to the "Scripts" title still shows the true total. */
+    #er-scripts-list {
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      max-height: 123px;
+      overflow-y: auto;
+      margin-bottom: 14px;
+      padding-right: 6px;
+    }
+
+    /* Takes whatever's left of the dock below the Scripts list — grows to
+       fill it (flex: 1) and scrolls on its own once its content (fields,
+       possibly several classes' worth with Debug on) runs past that. */
+    #er-controldesk-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding-right: 6px;
+    }
+
+    /* Thin gray line, no track background, rounded — instead of the
+       platform-default scrollbar (which on most setups overlays right on
+       top of the text/controls near the edge rather than reserving its
+       own space). Applied to every scrollable region in the Engine Room
+       dock: the two independent inner scrollers above, plus the outer
+       #engine-room itself (a safety-net scroll, see its own CSS) in case
+       content ever exceeds even that. */
+    #er-scripts-list,
+    #er-controldesk-body,
+    #engine-room {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+    }
+
+    #er-scripts-list::-webkit-scrollbar,
+    #er-controldesk-body::-webkit-scrollbar,
+    #engine-room::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    #er-scripts-list::-webkit-scrollbar-track,
+    #er-controldesk-body::-webkit-scrollbar-track,
+    #engine-room::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #er-scripts-list::-webkit-scrollbar-thumb,
+    #er-controldesk-body::-webkit-scrollbar-thumb,
+    #engine-room::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.22);
+      border-radius: 999px;
+    }
+
+    #er-scripts-list::-webkit-scrollbar-thumb:hover,
+    #er-controldesk-body::-webkit-scrollbar-thumb:hover,
+    #engine-room::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.38);
+    }
+
+    .er-script-row {
+      flex-shrink: 0;
+      padding: 5px 7px;
+      border-radius: var(--eng-radius-sm);
+      cursor: pointer;
+      font-family: var(--eng-mono);
+      font-size: 10.5px;
+      color: var(--eng-text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-left: 2px solid transparent;
+      transition: background 0.1s ease;
+    }
+
+    .er-script-row:hover {
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .er-script-row.selected {
+      background: var(--eng-accent-soft);
+      border-left-color: var(--eng-accent);
+      color: #ffd8a3;
+      font-weight: 700;
+    }
+
+    .er-cd-empty {
+      color: var(--eng-text-faint);
+      font-style: italic;
+      font-size: 10.5px;
+      padding: 2px 0;
+    }
+
+    .er-cd-class {
+      margin-bottom: 12px;
+    }
+
+    .er-cd-class-name {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--eng-accent);
+      margin-bottom: 5px;
+    }
+
+    .er-cd-live-badge {
+      font-size: 8.5px;
+      font-weight: 700;
+      padding: 1px 5px;
+      border-radius: 999px;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .er-cd-live-badge.live {
+      color: #8ef2a8;
+      background: rgba(142, 242, 168, 0.12);
+    }
+
+    .er-cd-live-badge.stale {
+      color: var(--eng-text-faint);
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    /* Unity-[Header]-style section divider — see Header("...") in
+       scripts/dev-build-api.js's doc comment. Blue to read as a distinct
+       grouping layer, separate from the class-name row's accent orange
+       and the Z Order label's own light-blue (same color, deliberately —
+       both are "structural divider" cues in this panel). */
+    .er-cd-header {
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #7dd3fc;
+      margin: 10px 0 4px;
+      padding-bottom: 3px;
+      border-bottom: 2px solid #7dd3fc;
+    }
+
+    .er-cd-header:first-of-type {
+      margin-top: 2px;
+    }
+
+    .er-cd-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+      font-size: 10.5px;
+    }
+
+    .er-cd-field .name {
+      flex: 1;
+      min-width: 0;
+      color: var(--eng-text-dim);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .er-cd-field .type {
+      font-size: 9px;
+      color: var(--eng-text-faint);
+      font-family: var(--eng-mono);
+    }
+
+    .er-cd-field input[type=number] {
+      width: 62px;
+      flex-shrink: 0;
+      background: var(--eng-panel-2);
+      border: 1px solid var(--eng-border);
+      color: var(--eng-text);
+      border-radius: 4px;
+      padding: 3px 5px;
+      font-family: var(--eng-mono);
+      font-size: 10.5px;
+    }
+
+    .er-cd-field input[type=number]:focus {
+      outline: none;
+      border-color: var(--eng-accent);
+    }
+
+    .er-cd-field input[type=checkbox] {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      accent-color: var(--eng-accent);
+      cursor: pointer;
+    }
+
+    .er-cd-field select {
+      flex-shrink: 0;
+      max-width: 108px;
+      background: var(--eng-panel-2);
+      border: 1px solid var(--eng-border);
+      color: var(--eng-text);
+      border-radius: 4px;
+      padding: 3px 4px;
+      font-size: 10px;
+    }
+
+    .er-cd-field .readonly-val {
+      flex-shrink: 0;
+      color: var(--eng-text-faint);
+      font-family: var(--eng-mono);
+      font-size: 10px;
+      max-width: 108px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     /* Device-frame simulator: switches the "screen" between the real
        window and a letterboxed 16:9 box (landscape or portrait; portrait
        is the default — see `simMode` below, since this is a mobile
@@ -684,7 +1024,7 @@
       position: fixed;
       top: 0;
       left: var(--dock-left, 0px);
-      right: var(--dock-right, 232px);
+      right: var(--dock-right, 280px);
       height: 44px;
       z-index: 60;
       display: flex;
@@ -834,6 +1174,22 @@
           <canvas id="er-viewhelper" width="64" height="64"></canvas>
         </div>
       </div>
+      <div id="engine-room-scripts">
+        <div class="er-section-title">📜 Scripts <span class="count" id="er-scripts-count"></span></div>
+        <div id="er-scripts-list"></div>
+        <div class="er-section-title">
+          🕹 Control Desk
+          <span class="er-cd-actions">
+            <button type="button" id="er-cd-debug" title="Also show private/protected fields, read-only, dimmed">🐞
+              Debug</button>
+            <button type="button" id="er-cd-save"
+              title="Write the live values of editable fields back into the script's source" disabled>💾 Save</button>
+          </span>
+        </div>
+        <div id="er-controldesk-body">
+          <div class="er-cd-empty">Select a script above to inspect its live public fields.</div>
+        </div>
+      </div>
       <div id="engine-room-footer">
         <div class="brand">ION Engine Technology</div>
         <div id="engine-room-version" title="Local build">v…</div>
@@ -936,7 +1292,7 @@
     // match tools/ui-editor.html's CSS for those) — otherwise the
     // simulated screen would sit partly hidden behind them.
     const EDITOR_INSETS = { top: 53, left: 220, right: 296 };
-    const ENGINE_ROOM_WIDTH = 232;
+    const ENGINE_ROOM_WIDTH = 280;
     // #device-topbar's own height (see its CSS) — also what #si-hierarchy/
     // #si-inspector/#er-exit-3d are offset below (54px = this + a 10px
     // margin, hardcoded in their CSS) so the freecam-mode chrome doesn't
@@ -1094,6 +1450,270 @@
         buildBtn.textContent = originalText;
       }, 2200);
     });
+
+    // Engine Room: Control Desk — a live public-field viewer/editor for the
+    // running game's own gameplay classes (Player, CoinField, World, Game
+    // itself; never src/game/ui/ or src/engine/ — see
+    // scripts/dev-build-api.js's /list-logic-scripts). Field names/types
+    // come from a static source scan (/script-info, same one the UI
+    // editor's Scripts panel uses); live *values* come straight off the
+    // running instance via window.__getInspectable (see IonEngine.ts) — no
+    // serialization involved, this page and the running game share the
+    // same document, so an edit here writes straight onto the real object.
+    // Only number/boolean fields are actually editable; arrays render as a
+    // view-only dropdown of their current contents; anything else (string,
+    // Vector3, nested objects, ...) is shown read-only. Each field also
+    // shows whether its declaration is "assigned" (has an initializer/
+    // default) or "undefined" (bare declaration) — from the same
+    // /script-info data, not a live-value check.
+    // 🐞 Debug reveals private/protected fields too (dimmed, always
+    // read-only — Debug widens visibility, never editability).
+    // 💾 Save writes the live value of every currently-editable field back
+    // into the script's own source (POST /save-inspectable-values below) —
+    // a regex-scoped patch of just that field's declaration, not a full
+    // rewrite. Saving touches a watched source file, so esbuild's dev
+    // watcher rebuilds and the game hot-reloads, same as any other save.
+    (() => {
+      const LOCAL_API_ORIGIN = "http://127.0.0.1:8001";
+      const scriptsListEl = document.getElementById("er-scripts-list");
+      const scriptsCountEl = document.getElementById("er-scripts-count");
+      const cdBody = document.getElementById("er-controldesk-body");
+      const debugBtn = document.getElementById("er-cd-debug");
+      const saveBtn = document.getElementById("er-cd-save");
+
+      let selected = null; // { path, classes: [{ name, fields }] }
+      let pollTimer = null;
+      let debugOn = false;
+      // Bumped on every selectScript call, captured by that call's own
+      // closure — if a slower-resolving fetch from an *earlier* selection
+      // lands after a newer one already started (real risk: nothing
+      // stopped a user from clicking two script rows in quick succession),
+      // its stale response is dropped instead of clobbering `selected`
+      // and `pollTimer` out from under the selection that's actually
+      // showing — without this, the newer pollTimer reference gets
+      // overwritten too, orphaning the newer interval running forever
+      // uncleared alongside whatever the stale one just started.
+      let selectionToken = 0;
+
+      debugBtn.addEventListener("click", () => {
+        debugOn = !debugOn;
+        debugBtn.classList.toggle("active", debugOn);
+        renderControlDesk(true); // force — bypass the focus-skip below, this is a deliberate click, not a poll tick
+      });
+
+      saveBtn.addEventListener("click", async () => {
+        const edits = collectEditableFields();
+        if (!edits.length || !selected) return;
+        const originalText = saveBtn.textContent;
+        saveBtn.disabled = true;
+        saveBtn.textContent = "Saving…";
+        try {
+          const res = await fetch(LOCAL_API_ORIGIN + "/save-inspectable-values", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ category: "game", path: selected.path, edits }),
+          });
+          const data = await res.json();
+          if (data.ok) {
+            saveBtn.textContent = "✅ Saved " + data.applied.length;
+            if (data.failed && data.failed.length) console.warn("Control Desk: couldn't save", data.failed);
+          } else {
+            saveBtn.textContent = "❌ Failed";
+            console.error("Control Desk save failed:", data.error);
+          }
+        } catch (err) {
+          saveBtn.textContent = "❌ API offline";
+          console.error("Control Desk: save-inspectable-values unreachable", err);
+        }
+        setTimeout(() => {
+          saveBtn.disabled = !collectEditableFields().length;
+          saveBtn.textContent = originalText;
+        }, 2200);
+      });
+
+      /** Fresh at call time (never a cached render-time snapshot) so Save always picks up whatever's live right now — including a value still mid-edit in a focused input, which skips the poll-driven re-render below but has already written straight onto the instance via onFieldEdit. */
+      function collectEditableFields() {
+        if (!selected || typeof window.__getInspectable !== "function") return [];
+        const out = [];
+        selected.classes.forEach((cls) => {
+          const instance = window.__getInspectable(cls.name);
+          if (!instance) return;
+          cls.fields.forEach((f) => {
+            if (f.visibility !== "public") return;
+            const value = instance[f.name];
+            if (typeof value === "number" || typeof value === "boolean") {
+              out.push({ className: cls.name, fieldName: f.name, kind: f.kind, value });
+            }
+          });
+        });
+        return out;
+      }
+
+      fetch(LOCAL_API_ORIGIN + "/list-logic-scripts")
+        .then((res) => res.json())
+        .then((data) => {
+          const files = data.files || [];
+          scriptsCountEl.textContent = files.length;
+          if (!files.length) {
+            scriptsListEl.innerHTML = '<div class="er-cd-empty">No scripts found.</div>';
+            return;
+          }
+          scriptsListEl.innerHTML = "";
+          files.forEach((relPath) => {
+            const row = document.createElement("div");
+            row.className = "er-script-row";
+            row.textContent = relPath;
+            row.title = relPath;
+            row.addEventListener("click", () => selectScript(relPath, row));
+            scriptsListEl.appendChild(row);
+          });
+        })
+        .catch(() => {
+          scriptsListEl.innerHTML = '<div class="er-cd-empty">Build API offline — start with `npm run dev`.</div>';
+        });
+
+      async function selectScript(relPath, rowEl) {
+        const myToken = ++selectionToken;
+        document.querySelectorAll(".er-script-row").forEach((r) => r.classList.toggle("selected", r === rowEl));
+        if (pollTimer) {
+          clearInterval(pollTimer);
+          pollTimer = null;
+        }
+        cdBody.innerHTML = '<div class="er-cd-empty">Loading…</div>';
+        try {
+          const res = await fetch(LOCAL_API_ORIGIN + "/script-info?category=game&path=" + encodeURIComponent(relPath));
+          const data = await res.json();
+          if (myToken !== selectionToken) return; // superseded by a newer click while this fetch was in flight
+          if (!data.ok) throw new Error(data.error || "script-info failed");
+          selected = { path: relPath, classes: data.classes };
+          renderControlDesk();
+          pollTimer = setInterval(renderControlDesk, 500);
+        } catch (err) {
+          if (myToken !== selectionToken) return;
+          cdBody.innerHTML = '<div class="er-cd-empty">Failed to load script info.</div>';
+          console.error("Control Desk: script-info failed", err);
+        }
+      }
+
+      function renderControlDesk(force) {
+        if (!selected) return;
+        // A number input the user is actively typing into would otherwise
+        // get clobbered mid-edit by the next poll tick's rebuild — skip
+        // this tick entirely while focus is inside the panel, resume as
+        // soon as it isn't. A deliberate action (Debug toggle) forces
+        // through regardless.
+        if (!force && cdBody.contains(document.activeElement)) return;
+
+        const hasHook = typeof window.__getInspectable === "function";
+        // Debug off: public fields only (the original, editable surface).
+        // Debug on: every field, private/protected included — those render
+        // dimmed and always read-only, see renderField's isPrivate branch.
+        const classesToShow = selected.classes
+          .map((cls) => ({ name: cls.name, fields: cls.fields.filter((f) => debugOn || f.visibility === "public") }))
+          .filter((cls) => cls.fields.length);
+
+        if (!classesToShow.length) {
+          cdBody.innerHTML = selected.classes.length
+            ? '<div class="er-cd-empty">No ' + (debugOn ? "" : "public ") + "fields on " + (selected.classes.length === 1 ? "this class" : "these classes") + ".</div>"
+            : '<div class="er-cd-empty">No classes found in this script.</div>';
+          saveBtn.disabled = true;
+          return;
+        }
+
+        let html = "";
+        classesToShow.forEach((cls) => {
+          const instance = hasHook ? window.__getInspectable(cls.name) : undefined;
+          html += '<div class="er-cd-class"><div class="er-cd-class-name">' + cls.name;
+          html += instance ? '<span class="er-cd-live-badge live">● live</span>' : '<span class="er-cd-live-badge stale">○ not running</span>';
+          html += "</div>";
+          // Fields already arrive in source order from /script-info, each
+          // carrying whichever Header("...") text (if any) governs it —
+          // just watch for that value changing as we walk the list and
+          // drop in a divider row right before the first field under a
+          // new one.
+          let lastHeader;
+          cls.fields.forEach((f) => {
+            if (f.header && f.header !== lastHeader) {
+              html += '<div class="er-cd-header">' + escapeHtml(f.header) + "</div>";
+            }
+            lastHeader = f.header;
+            html += renderField(cls.name, f, instance ? instance[f.name] : undefined, !!instance);
+          });
+          html += "</div>";
+        });
+        cdBody.innerHTML = html;
+        saveBtn.disabled = !collectEditableFields().length;
+
+        cdBody.querySelectorAll("[data-field]").forEach((el) => {
+          el.addEventListener(el.type === "checkbox" ? "change" : "input", onFieldEdit);
+        });
+      }
+
+      function renderField(className, field, value, live) {
+        const isPrivate = field.visibility !== "public";
+        let control;
+        if (!live) {
+          control = '<span class="readonly-val">—</span>';
+        } else if (!isPrivate && typeof value === "boolean") {
+          control = '<input type="checkbox" data-field="' + field.name + '" data-class="' + className + '" ' + (value ? "checked" : "") + " />";
+        } else if (!isPrivate && typeof value === "number") {
+          control = '<input type="number" step="any" data-field="' + field.name + '" data-class="' + className + '" value="' + value + '" />';
+        } else if (Array.isArray(value)) {
+          const options = value.length ? value.map((item, i) => "<option>" + i + ": " + escapeHtml(summarize(item)) + "</option>").join("") : "<option>(empty)</option>";
+          control = '<select disabled title="Arrays are view-only — only boolean/number fields are editable">' + options + "</select>";
+        } else {
+          const text = escapeHtml(summarize(value));
+          control = '<span class="readonly-val" title="' + text + '">' + text + "</span>";
+        }
+        // Live, not static: field.assigned only reflects whether the
+        // *declaration itself* has an initializer (e.g. `x: number;` has
+        // none, even though the constructor always assigns a real value a
+        // moment later) — a field like that would show "undefined"
+        // forever even once it's genuinely live. Once an instance exists,
+        // trust the actual current value instead — re-read every poll
+        // tick, same as the control above, so a late assignment (async
+        // load, constructor-order dependency, ...) flips the badge over
+        // on its own the moment it happens rather than staying stuck at
+        // whatever the source code alone could tell you.
+        const assigned = live ? value !== undefined : field.assigned;
+        const assignedClass = assigned ? "yes" : "no";
+        const assignedLabel = assigned ? "assigned" : "undefined";
+        return (
+          '<div class="er-cd-field' + (isPrivate ? " private" : "") + '"><span class="name" title="' + field.name + " : " + (field.type || "") + '">' + field.name + "</span>" +
+          '<span class="er-cd-assigned ' + assignedClass + '">' + assignedLabel + "</span>" +
+          control +
+          "</div>"
+        );
+      }
+
+      function summarize(value) {
+        if (value === undefined) return "undefined";
+        if (value === null) return "null";
+        if (typeof value === "object") {
+          if (typeof value.x === "number" && typeof value.y === "number" && typeof value.z === "number") {
+            return "(" + value.x.toFixed(2) + ", " + value.y.toFixed(2) + ", " + value.z.toFixed(2) + ")";
+          }
+          return (value.constructor && value.constructor.name) || "object";
+        }
+        return String(value);
+      }
+
+      function escapeHtml(s) {
+        return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      }
+
+      function onFieldEdit(e) {
+        const el = e.target;
+        const instance = typeof window.__getInspectable === "function" ? window.__getInspectable(el.dataset.class) : undefined;
+        if (!instance) return;
+        if (el.type === "checkbox") {
+          instance[el.dataset.field] = el.checked;
+        } else {
+          const num = parseFloat(el.value);
+          if (!Number.isNaN(num)) instance[el.dataset.field] = num;
+        }
+      }
+    })();
 
     // Engine Room: 3D View — toggles freecam (OrbitControls) over the live
     // gameplay scene via main.ts's __setFreecamActive hook, which also

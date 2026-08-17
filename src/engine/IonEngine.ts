@@ -46,6 +46,14 @@ import type { UILayout } from "./ui/UILayout";
  * active, until something else (e.g. clicking a device-preview tab)
  * happens to call applyDeviceFrame() again.
  *
+ * __getInspectable: the Engine Room panel's Control Desk (a live public-
+ * field viewer/editor, keyed by class name) calls this to reach an actual
+ * running instance — Player, CoinField, World, Game itself, whatever
+ * Game.ts chose to register (see Game.getInspectable) — and reads/writes
+ * its fields directly. No serialization involved: the dev panel and the
+ * running game share this same `window`, so the hook just hands back the
+ * real object reference.
+ *
  * __disposeGame / __gameInstanceGeneration: in-place hot-reload itself.
  * public/index.html swaps in a freshly-rebuilt bundle.js after every
  * source/layout save instead of doing a full page navigation, specifically
@@ -62,6 +70,7 @@ type EngineWindow = Window & {
   __setFreecamActive?: (active: boolean) => void;
   __setGizmoMode?: (mode: string) => void;
   __onGizmoModeChanged?: (mode: string) => void;
+  __getInspectable?: (className: string) => object | undefined;
   __disposeGame?: () => void;
   __gameInstanceGeneration?: number;
   __onGameReady?: () => void;
@@ -183,6 +192,7 @@ export class IonEngine {
     this.win.__setGizmoMode = (mode) => {
       activeGame.setGizmoMode(mode as Parameters<Game["setGizmoMode"]>[0]);
     };
+    this.win.__getInspectable = (className) => activeGame.getInspectable(className);
 
     // Must be last: __onGameReady's whole job is to trigger a resize
     // against the now-ready activeGame (see its doc comment above), so

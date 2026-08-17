@@ -54,6 +54,9 @@ export class Game {
   /** True once something has called resizeTo() explicitly (the dev-only device-frame simulator) — while true, the window's own resize event no longer drives sizing, so the simulator stays in control until it hands back (by calling resizeTo() with the real window size again). Production never sets this; the window listener below is the only thing that ever runs there. */
   private manualSize = false;
 
+  /** Dev-only: class-name -> live instance lookup for the Engine Room's Control Desk panel (see IonEngine.installDevHooks' __getInspectable hook). Explicit, hand-picked entries — same reasoning as Bindings.ts's explicit field wiring, not a reflective registry that auto-discovers every object the game happens to construct. */
+  private readonly inspectables: Map<string, object>;
+
   private constructor(canvas: HTMLCanvasElement, model: THREE.Group, clips: THREE.AnimationClip[]) {
     this.assetLoader = new AssetLoader();
 
@@ -72,6 +75,12 @@ export class Game {
     this.world = new World(this.scene);
     this.player = new Player(this.scene, this.world.bound, model, clips);
     this.coinField = new CoinField(this.scene, COIN_COUNT, this.world.bound);
+    this.inspectables = new Map<string, object>([
+      ["Game", this],
+      ["World", this.world],
+      ["Player", this.player],
+      ["CoinField", this.coinField],
+    ]);
 
     this.mainLayer = document.getElementById("custom-ui-layer") as HTMLElement;
     const endcardLayer = document.getElementById("endcard-layer") as HTMLElement;
@@ -207,6 +216,11 @@ export class Game {
   onGizmoModeChange(cb: (mode: GizmoMode) => void): void {
     this.gizmoModeChangeCallback = cb;
     this.sceneInspector?.addModeChangeListener(cb);
+  }
+
+  /** Dev-only: Engine Room Control Desk's class-name -> live instance lookup — see this.inspectables above and IonEngine's __getInspectable hook. */
+  getInspectable(className: string): object | undefined {
+    return this.inspectables.get(className);
   }
 
   /** Advance all systems by one frame. Call once per requestAnimationFrame tick. */

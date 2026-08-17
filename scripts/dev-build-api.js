@@ -106,12 +106,60 @@ function splitTopLevelParams(text) {
 }
 
 // Lookbehind, not a consuming group — `;` (or `}`, the tail of a blanked
-// method's "{…}" placeholder) has to stay unconsumed so the *next* field
-// right after it can still anchor on the same boundary. A consuming
-// `(?:^|;)` here would eat each field's own trailing `;` as it matched,
-// leaving nothing for the next field to anchor on and silently dropping
-// every field after the first in a class.
-const PUBLIC_FIELD_PATTERN = /(?<=^|;|\})\s*(?:(private|protected|public)\s+)?(readonly\s+)?([\w$]+)\s*(\?)?\s*(?::\s*([^=;{}]+?))?\s*(=\s*([^;]+?))?\s*;/g;
+// method's "{…}" placeholder, or `\n`, a plain line break) has to stay
+// unconsumed so the *next* field right after it can still anchor on the
+// same boundary. A consuming `(?:^|;)` here would eat each field's own
+// trailing `;` as it matched, leaving nothing for the next field to
+// anchor on and silently dropping every field after the first in a
+// class. `\n` is in the accepted set (safe here specifically because
+// this only ever runs against a class body with every nested block
+// already blanked out — see extractClasses' maskedForFields — so the
+// only things a bare newline could be separating are field declarations,
+// blank lines, or masked-out former comments, never mid-expression
+// content) because a field written without its own trailing semicolon
+// (valid TS via ASI — this codebase has a few) still needs to hand off a
+// real boundary to whatever comes after it once its own match stops at
+// that same newline instead of hunting for a literal `;`.
+//
+// [^=;{}\n] / [^;\n] — bounded against \n on both the type and
+// initializer captures, and the terminator accepts a lookahead newline/
+// EOF as an alternative to a literal `;`, for exactly the same reason:
+// without the \n exclusion, a field missing its semicolon let the old
+// version of this regex run right past its own line hunting for the
+// next `;` *anywhere later in the class* — silently swallowing (and,
+// worse, hiding from every /script-info consumer — the Scripts panel,
+// the Engine Room's Control Desk, Header() grouping) every field in
+// between. Confirmed happening for real: `private me!: THREE.Group` (no
+// trailing `;`) in Player.ts made `time` vanish from the listing
+// entirely even though it was never touched on disk.
+//
+// [?!] — either the optional marker (`x?: T`, may never be assigned) or
+// TS's definite-assignment assertion (`x!: T`, "trust me, something else
+// assigns this before it's ever read" — e.g. a constructor calling an
+// init helper the type checker can't trace into). Different meanings,
+// same syntactic slot; extractClasses below only treats a bare `?` as
+// contributing to the static "assigned" flag — see its own comment.
+// "d" flag (match.indices) — the leading `\s*` right after the lookbehind
+// can span backward across an entire blank-line/masked-comment region
+// (including a Header() comment sitting there) before reaching the
+// actual field name, so `match.index` (the whole match's start) is *not*
+// a reliable stand-in for "where this field's name token is" — see
+// extractClasses' header-assignment loop, which needs the real one to
+// correctly tell "this header is above field A" from "this header is
+// above field B" instead of crediting it to whichever field's `\s*`
+// happened to reach back far enough to include it.
+const PUBLIC_FIELD_PATTERN = /(?<=^|;|\}|\n)\s*(?:(private|protected|public)\s+)?(readonly\s+)?([\w$]+)\s*([?!])?\s*(?::\s*([^=;{}\n]+?))?\s*(=\s*([^;\n]+?))?\s*(?:;|(?=\n|$))/gd;
+
+/**
+ * Unity-[Header]-style section divider for the Engine Room's Control Desk
+ * — a plain `// Header("Section name")` comment placed directly above one
+ * or more field declarations groups everything below it (down to the
+ * next Header, or the end of the class) under that heading, rendered as
+ * a labeled divider in the panel. No real decorator/metadata involved —
+ * this is a lightweight regex tool working off text, not a type checker,
+ * so a comment is the natural (and zero-runtime-cost) place for it.
+ */
+const HEADER_PATTERN = /\/\/\s*Header\(\s*(['"`])(.*?)\1\s*\)/g;
 
 /**
  * Strips `//` and `/* *\/` comments, leaving string/template literal
@@ -216,7 +264,11 @@ function extractClasses(rawSourceText) {
         if (!m) continue;
         const [, visibility, readonly, name, optional, type, defaultValue] = m;
         if (!visibility && !readonly) continue; // no modifier at all — a plain argument, not a property
-        fields.push({ name, type: type.trim(), assigned: !!defaultValue || !!optional, kind: "constructor-param", visibility: visibility || "public" });
+        // header: null — Header() grouping only applies to plain field
+        // declarations below (Unity's [Header] groups serialized fields,
+        // not constructor arguments); kept here only so every field
+        // object has the same shape regardless of kind.
+        fields.push({ name, type: type.trim(), assigned: !!defaultValue || !!optional, kind: "constructor-param", visibility: visibility || "public", header: null });
       }
     }
 
@@ -224,18 +276,57 @@ function extractClasses(rawSourceText) {
     // nested block blanked out first (see blankNestedBraces), so this
     // only ever matches direct members, never something inside a method.
     // Every visibility collected here too, same reason as above.
-    const blanked = blankNestedBraces(body);
+    //
+    // Headers live inside comments, and `body` above came from
+    // stripComments' output — comments are gone by this point, deleted
+    // outright (not blanked to spaces), so there's nothing left here to
+    // find a Header in. Re-slice the *raw*, comment-intact class body
+    // instead (findClassBodySpan does its own brace-counting directly on
+    // rawSourceText, same helper the Save endpoint uses) and mask
+    // comments/strings to same-length whitespace (maskCommentsAndStrings)
+    // rather than deleting them — deletion would shift every offset after
+    // it, which is exactly what breaks correlating a header's position
+    // with the fields that follow it. Masking preserves length, so a
+    // header match's index and a field match's index, both taken from
+    // this same masked text, stay directly comparable.
+    const rawSpan = findClassBodySpan(rawSourceText, className);
+    const rawBody = rawSpan ? rawSourceText.slice(rawSpan.start, rawSpan.end) : body;
+    const blankedRaw = blankNestedBraces(rawBody);
+    // blankMethodSignatures runs on top of the comment-masked view (not
+    // the reverse) so its own paren-depth counting can't be thrown off by
+    // a stray `(`/`)` sitting inside a comment.
+    const maskedForFields = blankMethodSignatures(maskCommentsAndStrings(blankedRaw));
+
+    const headerMatches = [...blankedRaw.matchAll(HEADER_PATTERN)].map((hm) => ({ index: hm.index, text: hm[2].trim() }));
+    let headerCursor = 0;
+    let currentHeader = null;
+
     PUBLIC_FIELD_PATTERN.lastIndex = 0;
     let fieldMatch;
-    while ((fieldMatch = PUBLIC_FIELD_PATTERN.exec(blanked))) {
-      const [, visibility, , name, optional, type, , initializer] = fieldMatch;
+    while ((fieldMatch = PUBLIC_FIELD_PATTERN.exec(maskedForFields))) {
+      const [, visibility, , name, marker, type, , initializer] = fieldMatch;
       if (name === "constructor") continue; // never a real match (constructor has no trailing `;` right after its `{…}`), but skip defensively
+      const namePos = fieldMatch.indices[3][0]; // real position of the name token — see PUBLIC_FIELD_PATTERN's own comment for why fieldMatch.index itself isn't safe to use here
+      while (headerCursor < headerMatches.length && headerMatches[headerCursor].index < namePos) {
+        currentHeader = headerMatches[headerCursor].text;
+        headerCursor++;
+      }
       fields.push({
         name,
         type: type ? type.trim() : null,
-        assigned: !!initializer || !!optional,
+        // `?` (optional) reads as "already has a real default" for this
+        // flag's purposes, same as an explicit initializer. `!` (definite
+        // assignment assertion) means the *opposite* by declaration —
+        // "not assigned here, something else assigns it later" — so it
+        // does NOT count on its own; the Engine Room's Control Desk shows
+        // the truthful live-assigned state once an instance actually
+        // exists anyway (see renderField's `live ? value !== undefined :
+        // field.assigned` in public/index.html), this static flag is only
+        // ever a best guess for before that.
+        assigned: !!initializer || marker === "?",
         kind: "field",
         visibility: visibility || "public",
+        header: currentHeader,
       });
     }
 
@@ -251,6 +342,295 @@ function resolveScriptPath(category, relPath) {
   const resolved = path.join(baseDir, relPath);
   if (!resolved.startsWith(baseDir + path.sep)) return null;
   return resolved;
+}
+
+/**
+ * Backing /save-inspectable-values (the Engine Room's Control Desk 💾
+ * Save button) — writes a live-tweaked field value back into the actual
+ * .ts source as that field's new default, so it survives past the current
+ * run instead of only living in the in-memory instance until the next
+ * reload. Deliberately narrow: a small regex-scoped patch of just the one
+ * field's declaration/assignment (on real source text, not a real AST
+ * rewrite) — see maskCommentsAndStrings below for how it stays safe
+ * against false matches inside comments/string literals anyway. Only ever
+ * called with number/boolean values (see the Engine Room's
+ * collectEditableFields) — literalFor rejects anything else, including
+ * non-finite numbers (NaN/Infinity are valid *identifiers* in TS, so a
+ * naive String(value) would happily write `= NaN;` into a source file
+ * without erroring), so a bad payload fails loudly instead of writing
+ * something meaningless into a source file.
+ */
+function literalFor(value) {
+  if (typeof value === "boolean") return String(value);
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  throw new Error("Unsupported value for save: " + value);
+}
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Length-preserving comment/string-literal blanker — every character
+ * inside a `//`/`/* *‍/` comment or a `"…"`/`'…'`/`\`…\`` literal becomes a
+ * space (newlines stay newlines), everything else passes through
+ * unchanged. Unlike stripComments above (which drops characters and is
+ * fine for extractClasses' read-only field listing), every index in the
+ * result lines up 1:1 with the same index in the original — so the patch
+ * functions below can match against *this* (guaranteeing they can never
+ * mistake a field-shaped fragment sitting inside a comment or a string
+ * literal type, e.g. `label: "circle" | "square"`, for a real
+ * declaration) while still reporting offsets valid against the real text.
+ */
+function maskCommentsAndStrings(text) {
+  let result = "";
+  let i = 0;
+  const n = text.length;
+  while (i < n) {
+    const ch = text[i];
+    const next = text[i + 1];
+    if (ch === "/" && next === "/") {
+      while (i < n && text[i] !== "\n") {
+        result += " ";
+        i++;
+      }
+      continue;
+    }
+    if (ch === "/" && next === "*") {
+      result += "  ";
+      i += 2;
+      while (i < n && !(text[i] === "*" && text[i + 1] === "/")) {
+        result += text[i] === "\n" ? "\n" : " ";
+        i++;
+      }
+      if (i < n) {
+        result += "  ";
+        i += 2;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      const quote = ch;
+      result += " ";
+      i++;
+      while (i < n && text[i] !== quote) {
+        if (text[i] === "\\" && i + 1 < n) {
+          result += "  ";
+          i += 2;
+          continue;
+        }
+        result += text[i] === "\n" ? "\n" : " ";
+        i++;
+      }
+      if (i < n) {
+        result += " ";
+        i++;
+      }
+      continue;
+    }
+    result += ch;
+    i++;
+  }
+  return result;
+}
+
+/**
+ * blankNestedBraces collapses a method/constructor/getter *body* down to
+ * a 3-character "{…}" placeholder, but leaves its *signature* (name,
+ * parameter list, optional return type) as real text — and a multi-line
+ * parameter list (`constructor(\n  scene: THREE.Scene,\n  ...)`) is
+ * indistinguishable from a run of field declarations to
+ * PUBLIC_FIELD_PATTERN once a bare newline counts as a valid boundary
+ * (needed there for a different reason — see that pattern's own
+ * comment). Used only for extractClasses' plain-field scan: finds every
+ * `name(...) ... {…}` shape blankNestedBraces left behind and blanks the
+ * whole thing (signature included) to same-length whitespace, so nothing
+ * method-shaped survives for the field scanner to mistake for a
+ * declaration. Constructor parameter *properties* are unaffected — those
+ * are read straight out of the constructor's own parameter list by a
+ * separate, earlier pass in extractClasses, before this ever runs.
+ */
+const METHOD_MODIFIER_KEYWORDS = new Set(["get", "set", "static", "async", "private", "protected", "public", "readonly", "override", "abstract"]);
+
+function blankMethodSignatures(text) {
+  let result = "";
+  let i = 0;
+  const n = text.length;
+  const idStart = /[A-Za-z_$]/;
+  const idPart = /[\w$]/;
+  while (i < n) {
+    if (idStart.test(text[i])) {
+      // Walk through zero or more leading modifier keywords (`get`, `set`,
+      // `static`, `private`, ...) — `get position(): T {…}` would
+      // otherwise leave the "get" name blanking check to fail (it's not
+      // itself followed by `(`) *and* the field scanner mistake bare
+      // "get" for a valueless field once it's the only thing left
+      // standing. `j` ends up pointing past whichever identifier turns
+      // out to actually be the method name.
+      let cur = i;
+      let j = i;
+      for (;;) {
+        let end = cur + 1;
+        while (end < n && idPart.test(text[end])) end++;
+        const word = text.slice(cur, end);
+        let k = end;
+        while (k < n && /\s/.test(text[k])) k++;
+        if (METHOD_MODIFIER_KEYWORDS.has(word) && idStart.test(text[k] || "")) {
+          cur = k;
+          continue;
+        }
+        j = k;
+        break;
+      }
+      if (text[j] === "(") {
+        const k = j;
+        let depth = 1;
+        let m = k + 1;
+        for (; m < n && depth > 0; m++) {
+          if (text[m] === "(") depth++;
+          else if (text[m] === ")") depth--;
+        }
+        let p = m;
+        while (p < n && /\s/.test(text[p])) p++;
+        if (text[p] === ":") {
+          p++;
+          while (p < n && text[p] !== "{" && text[p] !== "\n") p++;
+        }
+        while (p < n && /\s/.test(text[p])) p++;
+        if (text.startsWith("{…}", p)) {
+          const end = p + 3;
+          for (let q = i; q < end; q++) result += text[q] === "\n" ? "\n" : " ";
+          i = end;
+          continue;
+        }
+      }
+    }
+    result += text[i];
+    i++;
+  }
+  return result;
+}
+
+/** Finds `re`'s first match against the masked (comment/string-safe) view of `text`, then re-runs the same regex against the *real* substring at that exact span so captured groups (type text, etc.) come from the genuine source, never blanked-out placeholder spaces. Returns null if there's no match, or in the vanishingly unlikely case the real substring doesn't re-match its own already-known span (would mean the masked and real text disagree in a way that shouldn't be possible). */
+function matchOnRealText(text, re) {
+  const masked = maskCommentsAndStrings(text);
+  const m = re.exec(masked);
+  if (!m) return null;
+  const real = text.slice(m.index, m.index + m[0].length);
+  const reMatch = re.exec(real); // none of these regexes carry the "g" flag, so this always scans from 0 regardless of any prior lastIndex
+  if (!reMatch || reMatch.index !== 0) return null;
+  reMatch.index = m.index;
+  return reMatch;
+}
+
+/** Same class-boundary brace-counting as extractClasses, but run directly over raw (un-stripped) source — via matchOnRealText for the header itself — so the returned span's indices are valid offsets into the exact text about to be written back to disk. */
+function findClassBodySpan(rawText, className) {
+  const re = new RegExp("\\bclass\\s+" + escapeRegExp(className) + "\\b[^{]*\\{");
+  const m = matchOnRealText(rawText, re);
+  if (!m) return null;
+  const bodyStart = m.index + m[0].length;
+  let depth = 1;
+  let i = bodyStart;
+  for (; i < rawText.length && depth > 0; i++) {
+    if (rawText[i] === "{") depth++;
+    else if (rawText[i] === "}") depth--;
+  }
+  return { start: bodyStart, end: i - 1 };
+}
+
+/**
+ * A class-field initializer (`readonly bound: number = 5;`) runs *before*
+ * the constructor body — so if that body also does `this.bound = ...`
+ * (common for anything computed from constructor params, e.g. World.bound
+ * from `size`), the initializer never actually takes effect; it's
+ * immediately overwritten. Patching the declaration in that case would
+ * "succeed" while silently changing nothing at runtime. This finds that
+ * assignment inside the constructor body specifically (not just anywhere
+ * in the class — a same-named assignment in some other method shouldn't
+ * match), so the caller can prefer patching *that* over the declaration
+ * whenever one exists — for both a plain field and a constructor-param
+ * property (which can still be reassigned by hand inside the body even
+ * though its *initial* value is compiler-synthesized).
+ */
+function patchConstructorAssignment(body, fieldName, literal) {
+  const ctorRe = /constructor\s*\([\s\S]*?\)\s*(?::[^{]+)?\{/;
+  const cm = matchOnRealText(body, ctorRe);
+  if (!cm) return null;
+  const ctorBodyStart = cm.index + cm[0].length;
+  let depth = 1;
+  let i = ctorBodyStart;
+  for (; i < body.length && depth > 0; i++) {
+    if (body[i] === "{") depth++;
+    else if (body[i] === "}") depth--;
+  }
+  const ctorBodyEnd = i - 1;
+  const ctorBody = body.slice(ctorBodyStart, ctorBodyEnd);
+  // The value expression is bounded to a single line (`[^;\n]+?`, same
+  // reasoning as patchFieldDeclaration below) and its end accepts a
+  // newline via lookahead as well as a literal `;` — TS's own ASI treats
+  // both as a valid statement end. Without the \n exclusion, a
+  // *different* nearby statement missing its semicolon (this codebase
+  // has a few, tsc doesn't require it) would let `[^;]+?` run right past
+  // the intended line hunting for the next `;` anywhere in the
+  // constructor, silently swallowing and then deleting everything in
+  // between when the match gets replaced.
+  const assignRe = new RegExp("\\bthis\\." + escapeRegExp(fieldName) + "\\s*=\\s*[^;\\n]+?\\s*(?:;|(?=\\n|$))");
+  const am = matchOnRealText(ctorBody, assignRe);
+  if (!am) return null;
+  return { start: ctorBodyStart + am.index, end: ctorBodyStart + am.index + am[0].length, replacement: "this." + fieldName + " = " + literal + ";" };
+}
+
+/**
+ * Patches a plain field declaration (`name: type;` or `name: type = old;`,
+ * any visibility/readonly combination) inside a class body slice, forcing
+ * in `literal` as its new initializer. Returns null if no such declaration
+ * is found (e.g. the field only exists as a constructor-param property —
+ * see below). Prefer patchConstructorAssignment first when the field
+ * might be reassigned in the constructor body — see its own doc comment.
+ *
+ * The initializer capture `[^;\n]+?` — and the terminator accepting a
+ * bare newline via lookahead, not just a literal `;` — matter more than
+ * they look: this codebase has fields written without a trailing
+ * semicolon (`public time: number = 0`, valid TS via ASI). Without the
+ * `\n` exclusion, that missing `;` let the *old* version of this regex
+ * treat everything up to the next semicolon *anywhere later in the
+ * class* as this field's own initializer — including entire unrelated
+ * field declarations — which then vanished the moment the match got
+ * replaced. Confirmed and fixed after exactly that happened to a real
+ * file (see the conversation this was fixed in).
+ */
+function patchFieldDeclaration(body, fieldName, literal) {
+  const escaped = escapeRegExp(fieldName);
+  // [?!]? — same as PUBLIC_FIELD_PATTERN above: either the optional marker
+  // or a definite-assignment assertion.
+  const re = new RegExp("((?:private|protected|public)\\s+)?(readonly\\s+)?\\b" + escaped + "\\b([?!]?)\\s*:\\s*([^=;{}\\n]+?)\\s*(?:=\\s*([^;\\n]+?))?\\s*(?:;|(?=\\n|$))");
+  const m = matchOnRealText(body, re);
+  if (!m) return null;
+  const [full, vis, ro, opt, type] = m;
+  // `?` is echoed back unchanged — `x?: number = 5;` is perfectly valid
+  // TS. `!` is dropped, not echoed: TS hard-errors (TS1263) on a
+  // definite-assignment assertion combined with an initializer, and once
+  // we're writing in a real value the assertion ("something else is
+  // responsible for assigning this") is exactly what's no longer true.
+  const marker = opt === "?" ? "?" : "";
+  const replacement = (vis || "") + (ro || "") + fieldName + marker + ": " + type.trim() + " = " + literal + ";";
+  return { start: m.index, end: m.index + full.length, replacement };
+}
+
+/** Same idea as patchFieldDeclaration, but for a constructor-parameter property (`constructor(private readonly speed: number = 4.5)`) — the field never appears in the class body itself, only in the constructor's own parameter list. */
+function patchCtorParamDeclaration(body, fieldName, literal) {
+  const ctorRe = /constructor\s*\(([\s\S]*?)\)\s*(?::[^{]+)?\{/;
+  const cm = matchOnRealText(body, ctorRe);
+  if (!cm) return null;
+  const params = cm[1];
+  const paramsStart = cm.index + cm[0].indexOf(params);
+  const escaped = escapeRegExp(fieldName);
+  const fieldRe = new RegExp("((?:private|protected|public)\\s+)?(readonly\\s+)?\\b" + escaped + "\\b(\\??)\\s*:\\s*([^=,)]+?)\\s*(?:=\\s*([^,)]+?))?\\s*(?=[,)])");
+  const fm = matchOnRealText(params, fieldRe);
+  if (!fm) return null;
+  const [full, vis, ro, opt, type] = fm;
+  const replacement = (vis || "") + (ro || "") + fieldName + (opt || "") + ": " + type.trim() + " = " + literal;
+  return { start: paramsStart + fm.index, end: paramsStart + fm.index + full.length, replacement };
 }
 
 function readRequestBody(req, maxBytes) {
@@ -447,6 +827,27 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/list-logic-scripts") {
+    // Engine Room's Control Desk — live runtime field inspector (see
+    // public/index.html). The inverse filter of /list-scripts above: only
+    // src/game/ files OUTSIDE ui/ (gameplay classes — Player, CoinField,
+    // World, Game itself — the things with tweakable runtime state), never
+    // ui/ (that's Scripts-panel/Bindings territory, not live-tweak
+    // territory) and never src/engine/ at all (generic, no game-specific
+    // state to tweak).
+    const files = [];
+    try {
+      walkTsFiles(SCRIPT_CATEGORIES.game, SCRIPT_CATEGORIES.game, files);
+    } catch {
+      // Shouldn't happen (checked into the repo), same reasoning as above.
+    }
+    const result = files.filter((f) => !f.startsWith("ui/")).sort();
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify({ category: "game", files: result }));
+    return;
+  }
+
   if (req.method === "GET" && req.url.startsWith("/script-info")) {
     const query = new URL(req.url, "http://localhost").searchParams;
     const category = query.get("category");
@@ -463,6 +864,85 @@ const server = http.createServer((req, res) => {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false, error: err.message }));
     }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/save-inspectable-values") {
+    readRequestBody(req, 1024 * 1024)
+      .then((raw) => {
+        const body = JSON.parse(raw);
+        const { category, path: relPath, edits } = body;
+        // Only ever "game" in practice (Control Desk never lists src/engine/
+        // — see /list-logic-scripts), but resolveScriptPath enforces it's a
+        // real category either way, same guard every other file-writing
+        // endpoint here uses.
+        if (!category || !relPath || !Array.isArray(edits) || !edits.length) throw new Error("Missing category/path/edits");
+        const fullPath = resolveScriptPath(category, relPath);
+        if (!fullPath) throw new Error("Invalid category/path");
+
+        let source = fs.readFileSync(fullPath, "utf8");
+        const applied = [];
+        const failed = [];
+
+        // Grouped by class so each class body is only re-sliced out of the
+        // (possibly already-patched-by-an-earlier-class) source once, and
+        // multiple fields on the same class are patched against the same
+        // live body string in sequence — each patch's replacement can
+        // shift that body's own length, but never another class's span,
+        // since classes never nest in this codebase.
+        const byClass = new Map();
+        for (const e of edits) {
+          if (!byClass.has(e.className)) byClass.set(e.className, []);
+          byClass.get(e.className).push(e);
+        }
+
+        for (const [className, classEdits] of byClass) {
+          const span = findClassBodySpan(source, className);
+          if (!span) {
+            classEdits.forEach((e) => failed.push(className + "." + e.fieldName));
+            continue;
+          }
+          let bodyText = source.slice(span.start, span.end);
+          for (const e of classEdits) {
+            let literal;
+            try {
+              literal = literalFor(e.value);
+            } catch {
+              failed.push(className + "." + e.fieldName);
+              continue;
+            }
+            // Either kind might still be reassigned by hand somewhere in
+            // the constructor body (patchConstructorAssignment's doc
+            // comment covers the plain-field case; a constructor-param
+            // property's *initial* value is compiler-synthesized so this
+            // normally finds nothing for it, but an explicit reassignment
+            // later in the same body is still possible and, same as a
+            // plain field, would silently shadow a patched default) — try
+            // that first either way, only falling back to each kind's own
+            // declaration/default when there's no such assignment.
+            const patch =
+              patchConstructorAssignment(bodyText, e.fieldName, literal) ||
+              (e.kind === "constructor-param" ? patchCtorParamDeclaration(bodyText, e.fieldName, literal) : patchFieldDeclaration(bodyText, e.fieldName, literal));
+            if (!patch) {
+              failed.push(className + "." + e.fieldName);
+              continue;
+            }
+            bodyText = bodyText.slice(0, patch.start) + patch.replacement + bodyText.slice(patch.end);
+            applied.push(className + "." + e.fieldName);
+          }
+          source = source.slice(0, span.start) + bodyText + source.slice(span.end);
+        }
+
+        if (applied.length) fs.writeFileSync(fullPath, source, "utf8");
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, applied, failed }));
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
     return;
   }
 
@@ -523,5 +1003,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /script-info, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
 });
