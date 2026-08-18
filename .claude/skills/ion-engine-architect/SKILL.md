@@ -1,7 +1,7 @@
 ---
 description: Master engineering skill for Ion Engine, a lightweight
   browser-based playable-ad engine built with TypeScript, Three.js,
-  HTML/CSS, esbuild, and a vanilla-JS visual editor. Use this skill
+  HTML/CSS, Vite, and a vanilla-JS visual editor. Use this skill
   whenever modifying, extending, debugging, refactoring, or designing
   anything in the Ion Engine codebase.
 name: ion-engine-architect
@@ -884,13 +884,11 @@ Production:
 ``` text
 src/main.ts
  ↓
-esbuild
+Vite (vite.config.prod.mts)
  ↓
-bundle + minify
+bundle + minify, inlined into src/index.template.html
  ↓
-HTML template
- ↓
-assets
+post-build asset inlining (base64)
  ↓
 dist/index.html
 ```

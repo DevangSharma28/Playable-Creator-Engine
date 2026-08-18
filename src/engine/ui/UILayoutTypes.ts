@@ -39,7 +39,7 @@ export type UIAnimation = "none" | "pulse" | "bob" | "spin" | "fadeIn";
  * there on any device. A corner anchor's point is that corner, so
  * bottom-left + xPx/yPx: 32 sits 32px in from it — matching the real
  * joystick-base's hardcoded `left: 32px; bottom: 32px` in
- * public/index.html. "%" remains correct for stretchy/proportional sizing
+ * index.html. "%" remains correct for stretchy/proportional sizing
  * either way; it's unaffected by any of this.
  *
  * Defaults to "pct" when absent.

@@ -29,8 +29,8 @@ main.ts
 `IonEngine` ([src/engine/IonEngine.ts](src/engine/IonEngine.ts)) owns *running* a game, not the game itself:
 
 - The per-frame rAF loop (`update()`/`render()` each tick, capped `dt`, exponential-moving-average FPS)
-- Dev-only hooks for the Engine Room panel (`public/index.html`) — pause-while-editing, device-frame resize, freecam toggle, gizmo mode, live stats
-- In-place hot-reload teardown — `public/index.html` swaps in a freshly-rebuilt `bundle.js` after every source/layout save instead of a full page navigation (so the UI editor's undo history and Connect session survive a Save). Each bundle execution is an isolated closure, so `IonEngine` reaches into the *previous* one via `window.__disposeGame` to tear it down before the new one takes over the same canvas, and a `window.__gameInstanceGeneration` counter stops the old RAF chain from rescheduling itself once superseded.
+- Dev-only hooks for the Engine Room panel (`index.html`, the dev entry — see `vite.config.mts`) — pause-while-editing, device-frame resize, freecam toggle, gizmo mode, live stats
+- In-place hot-reload teardown — `main.ts` self-accepts its own Vite HMR updates (`import.meta.hot.accept()`) after every source/layout save instead of a full page navigation (so the UI editor's undo history and Connect session survive a Save). Each module execution is an isolated closure, so `IonEngine` reaches into the *previous* one via `window.__disposeGame` to tear it down before the new one takes over the same canvas, and a `window.__gameInstanceGeneration` counter stops the old RAF chain from rescheduling itself once superseded.
 
 None of this exists in the production build — nothing in `src/index.template.html` or the shipped bundle ever calls any `window.__*` hook, so it's simply inert there.
 
@@ -89,4 +89,4 @@ It talks to `scripts/dev-build-api.js` (localhost:8001, dev-only, started by `np
 
 ## Production build
 
-`build.sh` bundles+minifies `src/main.ts` (engine and game code together — there's no separate engine bundle) via esbuild, inlines the result into `src/index.template.html`'s `/*BUNDLE_PLACEHOLDER*/` marker, and copies `assets/` alongside. Single self-contained `dist/index.html`, no server needed. See README.md's "Going fully single-file" section for the asset-inlining caveat if you need a true one-file upload for an ad network.
+`build.sh` bundles+minifies `src/main.ts` (engine and game code together — there's no separate engine bundle) via Vite (`vite.config.prod.mts` + `vite-plugin-singlefile`), building `src/index.template.html` — a minimal page shell with none of the dev-only Engine Room chrome — into a single `dist/index.html` with the JS inlined directly. A post-build step then base64-inlines every real asset (textures, models, audio — referenced as plain runtime string paths in `assets.ts`, so Vite's own module graph never sees them) straight into that same file. Single self-contained `dist/index.html`, no server needed. See README.md's "Going fully single-file" section for the asset-inlining caveat if you need a true one-file upload for an ad network.

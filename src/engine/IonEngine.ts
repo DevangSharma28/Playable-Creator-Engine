@@ -2,11 +2,11 @@ import { Game } from "../game/Game";
 import type { UILayout } from "./ui/UILayout";
 
 /**
- * Dev-only hooks the Engine Room panel (public/index.html) and the in-place
- * hot-reload flow (public/index.html's "/esbuild" change listener) talk to.
- * All inert in the production build — nothing in src/index.template.html or
- * the shipped bundle ever calls any of these, so this whole surface is
- * simply never touched there.
+ * Dev-only hooks the Engine Room panel (index.html, the dev entry — see
+ * vite.config.ts) and the in-place hot-reload flow (main.ts's own
+ * `import.meta.hot.accept()`) talk to. All inert in the production build —
+ * nothing in src/index.template.html or the shipped bundle ever calls any
+ * of these, so this whole surface is simply never touched there.
  *
  * __setUIEditorPaused: the "Edit UI" overlay calls this to pause gameplay
  * (joystick input, coin collection, the 15s auto-endcard timer) while it's
@@ -35,6 +35,18 @@ import type { UILayout } from "./ui/UILayout";
  * panel's toolbar buttons find out and update their own active-highlight to
  * match, instead of only ever reflecting clicks on themselves.
  *
+ * __toggleGrid / __toggleHelpers / __toggleSnap / __toggleSpace /
+ * __frameSelected: the Engine Room panel's Grid/Helpers/Snap/Space/Frame
+ * toolbar buttons, same passthrough shape as __setGizmoMode. The four
+ * toggles return their new state so the button's own click handler can
+ * flip its active-highlight immediately, without waiting on
+ * __onInspectorStateChanged below.
+ *
+ * __onInspectorStateChanged: the reverse direction for that same toolbar —
+ * F/G/H/X/C keyboard shortcuts (handled inside SceneInspector, see its
+ * onKeyDown) also flip these, so this is how the buttons find out and stay
+ * in sync, same reasoning as __onGizmoModeChanged.
+ *
  * __onGameReady: fires once Game.create()'s async asset loading actually
  * resolves and a real Game exists — Game.create() takes real time (GLB/
  * texture loads), so anything that sizes the renderer against the current
@@ -55,13 +67,14 @@ import type { UILayout } from "./ui/UILayout";
  * real object reference.
  *
  * __disposeGame / __gameInstanceGeneration: in-place hot-reload itself.
- * public/index.html swaps in a freshly-rebuilt bundle.js after every
- * source/layout save instead of doing a full page navigation, specifically
- * so the UI editor overlay's own in-memory session (undo history, unsaved
- * edits, Connect state) survives a Save — a full reload used to wipe all of
- * it out from under you every time. Each bundle execution is its own
- * isolated closure with no shared state, so the *new* one has to reach back
- * into the *old* one via `window` to tear it down — see start()/dispose().
+ * main.ts self-accepts its own Vite HMR updates (`import.meta.hot.accept()`)
+ * so a source/layout save re-executes just that module in place instead of
+ * a full page navigation, specifically so the UI editor overlay's own
+ * in-memory session (undo history, unsaved edits, Connect state) survives a
+ * Save — a full reload used to wipe all of it out from under you every
+ * time. Each module execution is its own isolated closure with no shared
+ * state, so the *new* one has to reach back into the *old* one via `window`
+ * to tear it down — see start()/dispose().
  */
 type EngineWindow = Window & {
   __setUIEditorPaused?: (paused: boolean) => void;
@@ -70,6 +83,12 @@ type EngineWindow = Window & {
   __setFreecamActive?: (active: boolean) => void;
   __setGizmoMode?: (mode: string) => void;
   __onGizmoModeChanged?: (mode: string) => void;
+  __toggleGrid?: () => boolean | undefined;
+  __toggleHelpers?: () => boolean | undefined;
+  __toggleSnap?: () => boolean | undefined;
+  __toggleSpace?: () => string | undefined;
+  __frameSelected?: () => void;
+  __onInspectorStateChanged?: (state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void;
   __getInspectable?: (className: string) => object | undefined;
   __disposeGame?: () => void;
   __gameInstanceGeneration?: number;
@@ -103,7 +122,7 @@ export class IonEngine {
   private constructor(private readonly canvas: HTMLCanvasElement) {
     // Derived from the real DOM, not defaulted to false — this instance is
     // recreated fresh on every in-place reload, but the editor overlay's
-    // own visibility (owned by public/index.html, never touched by a
+    // own visibility (owned by index.html, never touched by a
     // bundle swap) isn't. Without this, saving a layout while the editor
     // is open would silently un-pause gameplay underneath it — the
     // joystick, coin pickup, and the 15s auto-endcard timer would all
@@ -192,6 +211,12 @@ export class IonEngine {
     this.win.__setGizmoMode = (mode) => {
       activeGame.setGizmoMode(mode as Parameters<Game["setGizmoMode"]>[0]);
     };
+    this.win.__toggleGrid = () => activeGame.toggleGrid();
+    this.win.__toggleHelpers = () => activeGame.toggleHelpers();
+    this.win.__toggleSnap = () => activeGame.toggleSnap();
+    this.win.__toggleSpace = () => activeGame.toggleSpace();
+    this.win.__frameSelected = () => activeGame.frameSelected();
+    activeGame.onInspectorStateChange((state) => this.win.__onInspectorStateChanged?.(state));
     this.win.__getInspectable = (className) => activeGame.getInspectable(className);
 
     // Must be last: __onGameReady's whole job is to trigger a resize

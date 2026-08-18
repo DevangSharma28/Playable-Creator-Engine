@@ -10,6 +10,7 @@
       "DOM"
     ],
     "skipLibCheck": true,
+    "types": ["vite/client"],
     "rootDir": "src",
     "outDir": "dist",
     "noEmitOnError": true

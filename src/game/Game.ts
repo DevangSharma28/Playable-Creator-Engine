@@ -3,7 +3,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DynamicJoystick } from "../engine/core/DynamicJoystick";
 import { CameraHandler } from "../engine/core/CameraHandler";
 import { ViewHelperWidget } from "../engine/core/ViewHelperWidget";
-import { SceneInspector, type GizmoMode } from "../engine/core/SceneInspector";
+import { SceneInspector, type GizmoMode, type InspectorToolState } from "../engine/core/SceneInspector";
 import { World } from "./world/World";
 import { Player } from "./entities/Player";
 import { CoinField } from "./entities/CoinField";
@@ -50,6 +50,8 @@ export class Game {
   private sceneInspector: SceneInspector | undefined;
   /** Set via onGizmoModeChange(); re-attached to each new SceneInspector instance since one is (re)created per freecam session — see setFreecam(). */
   private gizmoModeChangeCallback: ((mode: GizmoMode) => void) | undefined;
+  /** Same reasoning as gizmoModeChangeCallback, for grid/helpers/snap/space instead of gizmo mode — see onInspectorStateChange(). */
+  private inspectorStateChangeCallback: ((state: InspectorToolState) => void) | undefined;
 
   private collected = 0;
   private ended = false;
@@ -200,7 +202,7 @@ export class Game {
 
   /**
    * Dev-only: sizes the renderer/camera to an explicit box instead of the
-   * real window — how the device-frame simulator (see public/index.html)
+   * real window — how the device-frame simulator (see index.html)
    * previews a fixed aspect ratio letterboxed within your actual browser
    * window. Takes over from the window's own resize event until called
    * again; passing the real window size hands control back to "real" mode.
@@ -217,6 +219,10 @@ export class Game {
     // new size would catch it mid-transition.
     this.mainUI.updateScale(width, height);
     this.endcardUI.updateScale(width, height);
+    // The joystick lives outside mainUI's own DOM subtree by the time
+    // anyone could resize (see DynamicJoystick's constructor/syncSize()
+    // doc comments) — updateScale() above doesn't reach it.
+    this.input.syncSize();
   }
 
   /**
@@ -258,6 +264,7 @@ export class Game {
         // activates, so re-wire any previously-registered listener rather
         // than relying on it surviving from a prior session.
         if (this.gizmoModeChangeCallback) this.sceneInspector.addModeChangeListener(this.gizmoModeChangeCallback);
+        if (this.inspectorStateChangeCallback) this.sceneInspector.addStateChangeListener(this.inspectorStateChangeCallback);
       }
     } else {
       this.orbitControls?.dispose();
@@ -279,6 +286,29 @@ export class Game {
   onGizmoModeChange(cb: (mode: GizmoMode) => void): void {
     this.gizmoModeChangeCallback = cb;
     this.sceneInspector?.addModeChangeListener(cb);
+  }
+
+  /** Dev-only: Engine Room's Grid/Helpers/Snap/Space toolbar — thin passthroughs, only meaningful while freecam is active. Each returns the new state so the caller (the toolbar button's click handler) can update its own active-highlight without a round trip through onInspectorStateChange. */
+  toggleGrid(): boolean | undefined {
+    return this.sceneInspector?.toggleGrid();
+  }
+  toggleHelpers(): boolean | undefined {
+    return this.sceneInspector?.toggleHelpers();
+  }
+  toggleSnap(): boolean | undefined {
+    return this.sceneInspector?.toggleSnap();
+  }
+  toggleSpace(): ("local" | "world") | undefined {
+    return this.sceneInspector?.toggleSpace();
+  }
+  frameSelected(): void {
+    this.sceneInspector?.frameSelected();
+  }
+
+  /** Same reasoning as onGizmoModeChange, for the toolbar toggles above — keeps the toolbar's active-highlight in sync when a toggle happens via keyboard shortcut (F/G/H/X/C) instead of a button click. */
+  onInspectorStateChange(cb: (state: InspectorToolState) => void): void {
+    this.inspectorStateChangeCallback = cb;
+    this.sceneInspector?.addStateChangeListener(cb);
   }
 
   /** Dev-only: Engine Room Control Desk's class-name -> live instance lookup — see this.inspectables above and IonEngine's __getInspectable hook. */
@@ -352,5 +382,7 @@ export class Game {
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.mainUI.updateScale(window.innerWidth, window.innerHeight);
     this.endcardUI.updateScale(window.innerWidth, window.innerHeight);
+    // See resizeTo()'s matching call for why this is needed here too.
+    this.input.syncSize();
   }
 }

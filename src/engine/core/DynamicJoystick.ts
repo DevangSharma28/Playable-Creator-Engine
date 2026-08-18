@@ -19,9 +19,26 @@ export class DynamicJoystick {
   private pointerId: number | null = null;
   /** Where the current drag started (real viewport px) — the base is centered here for the whole gesture, not re-measured from its own box each move. */
   private readonly center = { x: 0, y: 0 };
-  private readonly radius: number;
+  /** The knob's max travel distance from center, in real screen px — how far the constructor's own `radius` param scales, kept proportional to the base's own current rendered size (see syncSize()). Not `readonly`: syncSize() rescales it on every resize, same reason `base`'s own width/height aren't fixed at construction either. */
+  private radius: number;
+  /** `radius`'s own value at construction, paired with the base's rendered width at that same moment (`originalBaseWidth` below) — syncSize() scales both together by the same ratio the base's width changed by, so the knob's travel stays exactly as proportioned to the base's own edge as it was originally designed, on any screen size. */
+  private readonly originalRadius: number;
+  private originalBaseWidth = 0;
   /** Full-screen invisible hit layer this class creates and owns — the visible base/knob are purely decorative now (no pointer-events of their own), since dragging is tracked from here + window, not from the base's own (now-roaming) box. */
   private readonly catcher: HTMLElement;
+  /**
+   * `base`'s original positioning wrapper — the same node UILayout.ts's
+   * geometryElements list keeps re-sizing via applyGeometry() on every
+   * resize (see updateScale()), even though `base` itself moved out from
+   * under it below and it's now empty/invisible. Kept around purely as a
+   * live reference size: syncSize() re-reads its current
+   * getBoundingClientRect() (still accurate — CSS `aspect-ratio` sizes an
+   * empty box exactly the same as a full one) and re-applies it to `base`,
+   * so the reparented joystick's own visible size stays in lockstep with
+   * whatever pxScale() the rest of the UI is currently using instead of
+   * staying frozen at whatever it happened to be at construction time.
+   */
+  private readonly sizeSource: HTMLElement | null;
 
   constructor(
     parent: HTMLElement,
@@ -31,6 +48,7 @@ export class DynamicJoystick {
     private readonly onFirstInput?: () => void
   ) {
     this.radius = radius;
+    this.originalRadius = radius;
 
     this.catcher = document.createElement("div");
     this.catcher.style.position = "absolute";
@@ -48,16 +66,24 @@ export class DynamicJoystick {
     this.catcher.style.touchAction = "none";
     parent.appendChild(this.catcher);
 
+    // Captured *before* reparenting below, while base.parentElement is
+    // still its real UILayout-managed wrapper — see sizeSource's own doc
+    // comment.
+    this.sizeSource = this.base.parentElement;
+
     // Lock in whatever size the UI editor configured (widthPx/heightPx or
     // %, resolved against the joystick's normal anchored box) as an
     // explicit pixel size *before* reparenting/switching it to
     // position:fixed below — once fixed, "100%/100%" (what UILayout.ts's
     // buildElement sets on every content node) would otherwise resolve
     // against the viewport instead of its old wrapper, ballooning it to
-    // fill the whole screen.
+    // fill the whole screen. syncSize() (called on every later resize —
+    // see Game.ts's resizeTo()/handleResize()) keeps this current instead
+    // of frozen at whatever it was the moment this constructor ran.
     const rect = this.base.getBoundingClientRect();
     this.base.style.width = `${rect.width}px`;
     this.base.style.height = `${rect.height}px`;
+    this.originalBaseWidth = rect.width;
     // Same reason as width/height above: UILayout.ts's buildElement sets
     // *opacity* on the wrapper too (`wrapper.style.opacity = data.opacity`,
     // straight from the Properties panel's Opacity slider), not on `base`
@@ -96,6 +122,34 @@ export class DynamicJoystick {
     window.addEventListener("pointermove", this.handlePointerMove);
     window.addEventListener("pointerup", this.handlePointerUp);
     window.addEventListener("pointercancel", this.handlePointerUp);
+  }
+
+  /**
+   * Re-applies `base`'s width/height from its original (still
+   * UILayout-managed, still-correctly-sized, just empty/invisible now)
+   * wrapper — call after anything that changes the live screen size (see
+   * sizeSource's doc comment). Without this, the joystick was the one UI
+   * element that stayed frozen at whatever physical size it happened to
+   * render at the moment this class was constructed, because reparenting
+   * it out to <body> (see the constructor) takes it out of UILayout's own
+   * resize tracking entirely — everything else (score, buttons, text)
+   * already re-syncs via UILayout.updateScale(), this is that same idea
+   * for the one element that had to leave that system's DOM subtree.
+   * No-op mid-drag — resizing while actively dragging is rare enough (and
+   * `center`/`radius` below are independent of the base's own rendered
+   * size anyway) that snapping the visible base to a new size under your
+   * thumb would be a more distracting glitch than just picking it up on
+   * the next press.
+   */
+  syncSize(): void {
+    if (!this.sizeSource || this.active) return;
+    const rect = this.sizeSource.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || this.originalBaseWidth <= 0) return;
+    this.base.style.width = `${rect.width}px`;
+    this.base.style.height = `${rect.height}px`;
+    // Keep the knob's max travel proportioned to the base's own edge —
+    // see originalRadius's doc comment.
+    this.radius = this.originalRadius * (rect.width / this.originalBaseWidth);
   }
 
   get isActive(): boolean {

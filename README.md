@@ -13,23 +13,27 @@ npm install
 ```bash
 npm run dev
 ```
-Opens at **http://localhost:8000**. esbuild watches `src/` and rebuilds on
-save; the page live-reloads itself. Before starting, a `predev` hook
-copies `assets/` into `public/assets/` (via `scripts/sync-assets.js`) so
-texture/model/audio paths resolve the same way in dev as in production.
-Re-run `npm run dev` (or just `node scripts/sync-assets.js`) after adding
-new asset files — or after editing `tools/ui-editor.html` itself — while
-the server is already running; esbuild's watcher only covers `src/`, so
-neither is picked up automatically otherwise. Editing `tools/ui-editor.html`
-while `npm run dev` has been running for a while and the editor overlay
-seems stuck on old behavior is almost always this.
+Opens at **http://localhost:8000**. Vite watches `src/` and hot-reloads on
+save — `src/main.ts` self-accepts its own updates (`import.meta.hot.accept()`)
+so a save re-runs `IonEngine.boot()` in place instead of a full page
+reload, which is what lets the UI editor overlay's undo history/unsaved
+edits survive a Save instead of getting wiped out by a navigation. Before
+starting, a `predev` hook copies `assets/` into `public/assets/` (via
+`scripts/sync-assets.js`) so texture/model/audio paths resolve the same
+way in dev as in production. Re-run `npm run dev` (or just `node
+scripts/sync-assets.js`) after adding new asset files — or after editing
+`tools/ui-editor.html` itself — while the server is already running;
+Vite's own watcher only covers `src/`, so neither is picked up
+automatically otherwise. Editing `tools/ui-editor.html` while `npm run
+dev` has been running for a while and the editor overlay seems stuck on
+old behavior is almost always this.
 
-`npm run dev` (`scripts/dev.js`) actually runs two processes: esbuild's
-own watch+serve on **:8000**, and a tiny build-trigger API
-(`scripts/dev-build-api.js`) on **:8001** for the Engine Room panel's
-**Builder** button (see below) — both dev-only, both stop cleanly on
-Ctrl+C. If the Builder button ever says "API offline", that second
-process didn't start; restart `npm run dev`.
+`npm run dev` (`scripts/dev.js`) actually runs two processes: Vite's own
+dev server on **:8000** (config: `vite.config.mts`), and a tiny
+build-trigger API (`scripts/dev-build-api.js`) on **:8001** for the
+Engine Room panel's **Builder** button (see below) — both dev-only, both
+stop cleanly on Ctrl+C. If the Builder button ever says "API offline",
+that second process didn't start; restart `npm run dev`.
 
 ## Engine Room (dev panel)
 
@@ -60,9 +64,12 @@ npm run typecheck
 ```bash
 npm run build      # or ./build.sh
 ```
-Bundles + minifies `main.ts` (and Three.js) into `dist/bundle.js`, inlines
-it into `dist/index.html`, and copies `assets/` to `dist/assets/`. Open
-`dist/index.html` directly — no server needed.
+Bundles + minifies `main.ts` (and Three.js) via Vite (config:
+`vite.config.prod.mts`), inlines it directly into `dist/index.html`
+(`vite-plugin-singlefile`), then base64-inlines every real asset
+(textures, models, audio) straight into that same file — no
+`dist/assets/` folder, nothing else to upload. Open `dist/index.html`
+directly — no server needed.
 
 ## Visual UI editor (Unity-style)
 
@@ -310,16 +317,21 @@ changes stay local — swapping the camera style or redesigning the HUD
 touches exactly one file, not `Game.ts`.
 
 ## Other files
-- `src/index.template.html` — production page shell with a
-  `/*BUNDLE_PLACEHOLDER*/` marker where compiled JS gets inlined
-- `public/index.html` — dev-only page shell that loads `bundle.js` as an
-  external script (so live-reload works); not shipped in the final build
+- `index.html` — dev-only page shell (the Engine Room panel, device-frame
+  simulator, UI editor overlay), Vite's dev entry (`vite.config.mts`);
+  loads `/src/main.ts` as a real ES module, not shipped in the final build
+- `src/index.template.html` — production page shell, Vite's build entry
+  for `build.sh` (`vite.config.prod.mts`) — a minimal shell with none of
+  the dev-only Engine Room chrome, loading `./main.ts`
 - `public/assets/` — auto-generated copy of `assets/`, created by
   `scripts/sync-assets.js` before `npm run dev` (gitignored)
 - `public/ui-editor.html` — auto-generated copy of `tools/ui-editor.html`,
   same script, so the Engine Room panel's **✏️ Editor** button has
   something to open (gitignored)
-- `scripts/dev.js` — runs esbuild's watch+serve and the build-trigger API
+- `vite.config.mts` / `vite.config.prod.mts` — dev-server and
+  production-build Vite configs, respectively (deliberately separate —
+  see `vite.config.prod.mts`'s own doc comment for why)
+- `scripts/dev.js` — runs Vite's dev server and the build-trigger API
   together for `npm run dev`; forwards Ctrl+C to both
 - `scripts/dev-build-api.js` — the Engine Room **🛠 Builder** button's
   backing API, `127.0.0.1:8001`, dev-only, runs `build.sh` on request

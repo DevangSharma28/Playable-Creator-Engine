@@ -4,6 +4,14 @@ import type { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js
 
 export type GizmoMode = "none" | "translate" | "rotate" | "scale";
 
+/** Grid/helper visibility, snap-on-drag, and gizmo space — surfaced to the Engine Room toolbar via addStateChangeListener so its buttons stay in sync whether toggled by keyboard shortcut or by clicking the button itself (same pattern as GizmoMode/onModeChange). */
+export interface InspectorToolState {
+  grid: boolean;
+  helpers: boolean;
+  snap: boolean;
+  space: "local" | "world";
+}
+
 export interface SceneInspectorOptions {
   scene: THREE.Scene;
   /** The real gameplay camera — its frustum is drawn via CameraHelper so you can see what it sees while freely orbiting with a different camera. */
@@ -53,6 +61,7 @@ export class SceneInspector {
 
   private readonly cameraHelper: THREE.CameraHelper;
   private readonly lightHelpers: THREE.Object3D[] = [];
+  private readonly gridHelper: THREE.GridHelper;
   private readonly ownedHelpers = new Set<THREE.Object3D>();
   private readonly transformControls: TransformControls;
   /** TransformControls itself isn't an Object3D (it extends the newer three.js Controls base) — its rendered gizmo lives on this helper, returned by getHelper(), which is what actually needs adding to the scene and toggling visible. */
@@ -65,6 +74,12 @@ export class SceneInspector {
   private mode: GizmoMode = "translate";
   private downPos: { x: number; y: number } | null = null;
   private readonly onModeChange = new Set<(mode: GizmoMode) => void>();
+
+  /** Off by default — the camera/light helpers below were always-on before this existed, grid is new and would just be clutter until asked for. */
+  private gridVisible = false;
+  private helpersVisible = true;
+  private snapEnabled = false;
+  private readonly onStateChange = new Set<(state: InspectorToolState) => void>();
 
   /** Built once per selected object (see buildInspectorFields), then just refreshed in place every frame — rebuilding the whole innerHTML each frame would steal focus/cursor position out of whichever field you're mid-typing in. */
   private posInputs: AxisInputs | undefined;
@@ -84,6 +99,11 @@ export class SceneInspector {
     this.cameraHelper = new THREE.CameraHelper(this.gameplayCamera);
     this.scene.add(this.cameraHelper);
     this.ownedHelpers.add(this.cameraHelper);
+
+    this.gridHelper = new THREE.GridHelper(20, 20, 0x666666, 0x333333);
+    this.gridHelper.visible = this.gridVisible;
+    this.scene.add(this.gridHelper);
+    this.ownedHelpers.add(this.gridHelper);
 
     this.scene.traverse((obj) => {
       const helper = this.makeLightHelper(obj);
@@ -150,6 +170,72 @@ export class SceneInspector {
     this.onModeChange.add(cb);
   }
 
+  /** Toggleable via G or the Engine Room toolbar — off by default, see gridVisible's field comment. */
+  toggleGrid(): boolean {
+    this.gridVisible = !this.gridVisible;
+    this.gridHelper.visible = this.gridVisible;
+    this.emitStateChange();
+    return this.gridVisible;
+  }
+
+  /** Camera frustum + light helpers, toggleable via H — separate from the grid since it's existing always-on debug visuals, not a new opt-in. */
+  toggleHelpers(): boolean {
+    this.helpersVisible = !this.helpersVisible;
+    this.cameraHelper.visible = this.helpersVisible;
+    for (const helper of this.lightHelpers) helper.visible = this.helpersVisible;
+    this.emitStateChange();
+    return this.helpersVisible;
+  }
+
+  /** Fixed increments (0.25 world units / 15° / 0.1 scale) rather than a configurable amount — this is a quick on/off for "line things up roughly," not a precision-authoring feature yet. */
+  toggleSnap(): boolean {
+    this.snapEnabled = !this.snapEnabled;
+    this.transformControls.setTranslationSnap(this.snapEnabled ? 0.25 : null);
+    this.transformControls.setRotationSnap(this.snapEnabled ? THREE.MathUtils.degToRad(15) : null);
+    this.transformControls.setScaleSnap(this.snapEnabled ? 0.1 : null);
+    this.emitStateChange();
+    return this.snapEnabled;
+  }
+
+  /** World (default) vs. the selected object's own local axes — same toggle Blender/Unity expose next to their gizmo. */
+  toggleSpace(): "local" | "world" {
+    const next = this.transformControls.space === "world" ? "local" : "world";
+    this.transformControls.setSpace(next);
+    this.emitStateChange();
+    return next;
+  }
+
+  /** F — recenters the orbit target on the selected object and dollies the camera back just far enough to fit it, keeping the camera's current look direction rather than snapping to a canned angle. No-op with nothing selected. */
+  frameSelected(): void {
+    if (!this.selected) return;
+    const box = new THREE.Box3().setFromObject(this.selected);
+    if (box.isEmpty()) return;
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() * 0.5, 0.5);
+
+    const dir = this.viewCamera.position.clone().sub(this.orbitControls.target);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize();
+
+    this.orbitControls.target.copy(center);
+    this.viewCamera.position.copy(center).addScaledVector(dir, radius * 3);
+    this.orbitControls.update();
+  }
+
+  getToolState(): InspectorToolState {
+    return { grid: this.gridVisible, helpers: this.helpersVisible, snap: this.snapEnabled, space: this.transformControls.space as "local" | "world" };
+  }
+
+  /** Notified whenever grid/helpers/snap/space change, by keyboard shortcut or toolbar click alike — same reasoning as addModeChangeListener. */
+  addStateChangeListener(cb: (state: InspectorToolState) => void): void {
+    this.onStateChange.add(cb);
+  }
+
+  private emitStateChange(): void {
+    const state = this.getToolState();
+    for (const cb of this.onStateChange) cb(state);
+  }
+
   dispose(): void {
     this.renderer.domElement.removeEventListener("pointerdown", this.onPointerDown);
     this.renderer.domElement.removeEventListener("pointerup", this.onPointerUp);
@@ -161,6 +247,7 @@ export class SceneInspector {
     this.hierarchyEl.innerHTML = "";
     this.inspectorEl.innerHTML = "";
     this.onModeChange.clear();
+    this.onStateChange.clear();
   }
 
   private makeLightHelper(obj: THREE.Object3D): THREE.Object3D | undefined {
@@ -181,6 +268,11 @@ export class SceneInspector {
     else if (key === "e") this.setMode("rotate");
     else if (key === "r") this.setMode("scale");
     else if (key === "escape") this.deselect();
+    else if (key === "f") this.frameSelected();
+    else if (key === "g") this.toggleGrid();
+    else if (key === "h") this.toggleHelpers();
+    else if (key === "x") this.toggleSnap();
+    else if (key === "c") this.toggleSpace();
   };
 
   private onPointerDown = (event: PointerEvent): void => {
@@ -210,9 +302,18 @@ export class SceneInspector {
     this.selectedRow?.classList.remove("selected");
     this.selected = obj;
 
-    if (this.selectionHelper) this.scene.remove(this.selectionHelper);
+    if (this.selectionHelper) {
+      this.scene.remove(this.selectionHelper);
+      this.ownedHelpers.delete(this.selectionHelper);
+    }
     this.selectionHelper = new THREE.BoxHelper(obj, 0xffe066);
     this.scene.add(this.selectionHelper);
+    // Pre-existing bug this fixes: without this, the yellow outline itself
+    // was a pickable scene child (the raycast filter in onPointerUp only
+    // excludes ownedHelpers) — clicking it attached TransformControls to
+    // the BoxHelper instead of the real object, which then crashes the
+    // gizmo's own render (it expects a normal scene-graph parent).
+    this.ownedHelpers.add(this.selectionHelper);
 
     if (this.mode !== "none") this.transformControls.attach(obj);
 
@@ -229,6 +330,7 @@ export class SceneInspector {
     this.selected = undefined;
     if (this.selectionHelper) {
       this.scene.remove(this.selectionHelper);
+      this.ownedHelpers.delete(this.selectionHelper);
       this.selectionHelper = undefined;
     }
     this.transformControls.detach();

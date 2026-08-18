@@ -98,14 +98,14 @@ export class UILayout {
     // here — an inline style always wins over a stylesheet rule, so
     // hardcoding "fixed" would silently override a container meant to sit
     // relative to something other than the real viewport (e.g. the dev
-    // device-frame simulator's letterboxed box in public/index.html).
+    // device-frame simulator's letterboxed box in index.html).
     // Production's #custom-ui-layer/#endcard-layer use position:fixed in
     // their own CSS and are unaffected either way.
     this.container.style.pointerEvents = "none";
     // Idempotent: a fresh page load's container is already empty, so this
     // is a no-op there. It matters when a new Game instance is built into
     // the *same*, persisting DOM — the dev preview's in-place reload after
-    // a Save (see public/index.html/main.ts) never navigates, so without
+    // a Save (see index.html/main.ts) never navigates, so without
     // this every save-triggered rebuild would stack a second full set of
     // wrappers (score, drag-hint, cta-button, endcard-title, ...) on top of
     // whatever the previous Game instance already built here.
@@ -149,7 +149,7 @@ export class UILayout {
    * `container.getBoundingClientRect()` itself — deliberately, not for
    * consistency's sake alone: `#device-frame` (the dev device-frame
    * simulator's letterboxed box, `#custom-ui-layer`'s real containing
-   * block there — see public/index.html) animates its own width/height
+   * block there — see index.html) animates its own width/height
    * over a 150ms CSS transition. Measuring the DOM synchronously, in the
    * same tick `resizeTo()` sets the new target size, reads the box
    * *before* that transition has moved at all — capturing and baking in

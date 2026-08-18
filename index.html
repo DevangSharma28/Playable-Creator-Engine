@@ -379,12 +379,15 @@
       text-align: center;
     }
 
-    /* Exit-3D-View: the only thing shown top-right while freecam is active
-       (#engine-room itself hides — see script section). Deliberately a
-       different look from the rest of the dev chrome so it reads as "you
-       are in a special mode," not just another panel button. */
+    /* Exit (3D Viewer/Editor): the only thing shown top-right while
+       freecam is active (#engine-room itself hides — see script section).
+       Deliberately a different look from the rest of the dev chrome so it
+       reads as "you are in a special mode," not just another panel
+       button. Stays in this exact spot regardless of anything else this
+       mode changes (device-topbar hiding, panel contents, ...) — it's the
+       one fixed anchor you can always find to get back out. */
     #er-exit-3d {
-      display: none;
+      display: flex;
       position: fixed;
       top: 54px;
       right: 10px;
@@ -400,12 +403,24 @@
       border-radius: var(--eng-radius);
       padding: 9px 15px;
       cursor: pointer;
-      pointer-events: auto;
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
+      /* Scales in rather than sliding — it's the one control here treated
+         as "you just entered a special mode" (see the comment above), so
+         it announces itself differently from the panels that just dock
+         into place. */
+      transform: scale(0.9);
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 18px rgba(255, 224, 102, 0.15);
+      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
     }
 
     #er-exit-3d.visible {
-      display: flex;
+      pointer-events: auto;
+      visibility: visible;
+      opacity: 1;
+      transform: scale(1);
+      transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
     #er-exit-3d:hover {
@@ -419,13 +434,16 @@
       animation: eng-pulse 1.4s ease-in-out infinite;
     }
 
-    /* Builder — a small centered modal the 🛠 Builder button opens,
-       reporting dist/index.html's final size against the ~5MB budget most
-       ad networks enforce for a single-file upload. The bar fills from 0
-       to the real measured percentage once the build actually finishes
-       (see the click handler below) — there's no true incremental
-       progress to report mid-build, so this is an honest "here's the
-       result" reveal, not a fake progress simulation. */
+    /* Builder — a centered modal the 🛠 Builder button opens (without
+       building anything yet — see the script section's refreshEstimate).
+       It shows dist/index.html's size as of the *last* real build against
+       the ~5MB budget most ad networks enforce for a single-file upload,
+       flagged fresh/stale by the badge above the bar; the 🚀 Build Now
+       button inside actually runs build.sh and swaps in the real,
+       just-measured number. Room to grow: this is one labeled section
+       (.builder-section) plus an Actions section with one button today —
+       a second option (asset breakdown, a target-network preset, ...)
+       is another .builder-section, not a redesign. */
     #builder-modal-backdrop {
       display: none;
       position: fixed;
@@ -441,7 +459,7 @@
     }
 
     #builder-modal {
-      width: 300px;
+      width: 380px;
       background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
       border: 1px solid var(--eng-border);
       border-radius: var(--eng-radius);
@@ -481,7 +499,73 @@
     }
 
     #builder-modal-body {
-      padding: 20px 18px 18px;
+      padding: 18px 18px 20px;
+    }
+
+    /* A labeled group within the panel — the estimate readout is one, the
+       Build action is another; laid out so a third (asset breakdown,
+       target-network presets, whatever's next) drops in the same way
+       without restructuring anything around it. */
+    .builder-section {
+      margin-bottom: 16px;
+    }
+
+    .builder-section-label {
+      font-family: var(--eng-mono);
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--eng-text-faint);
+      margin-bottom: 9px;
+    }
+
+    /* Freshness badge — tells you *before* you build whether the number
+       below is a live measurement or last build's, since this panel now
+       shows a size before you've actually clicked Build (see
+       openBuilderModal/refreshEstimate in the script below). */
+    #builder-freshness {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--eng-mono);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+      padding: 3px 8px 3px 7px;
+      border-radius: 999px;
+      background: var(--eng-panel-3);
+      border: 1px solid var(--eng-border);
+      color: var(--eng-text-dim);
+      margin-bottom: 12px;
+    }
+
+    #builder-freshness .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--eng-text-faint);
+      flex-shrink: 0;
+    }
+
+    #builder-freshness.fresh {
+      color: var(--eng-ok);
+      border-color: rgba(74, 222, 128, 0.35);
+      background: rgba(74, 222, 128, 0.08);
+    }
+    #builder-freshness.fresh .dot {
+      background: var(--eng-ok);
+      box-shadow: 0 0 6px 1px rgba(74, 222, 128, 0.8);
+    }
+
+    #builder-freshness.stale {
+      color: var(--eng-warn);
+      border-color: rgba(255, 204, 77, 0.35);
+      background: rgba(255, 204, 77, 0.08);
+    }
+    #builder-freshness.stale .dot {
+      background: var(--eng-warn);
+      box-shadow: 0 0 6px 1px rgba(255, 204, 77, 0.8);
     }
 
     #builder-status {
@@ -514,6 +598,15 @@
       box-shadow: 0 0 10px 1px rgba(255, 82, 82, 0.65), 0 0 3px rgba(255, 82, 82, 0.9);
     }
 
+    #builder-bar-fill.estimate {
+      /* Pre-build (last-known or never-built) reading — a duller,
+         un-glowing fill so the *real*, post-build glow-up in
+         over-budget/normal above reads as a distinct, earned state
+         change, not just a color swap. */
+      background: repeating-linear-gradient(135deg, #4a4f58 0 8px, #565c66 8px 16px);
+      box-shadow: none;
+    }
+
     #builder-size-label {
       margin-top: 11px;
       text-align: center;
@@ -537,15 +630,137 @@
       min-height: 14px;
     }
 
+    /* The Build button — deliberately the loudest thing in this panel
+       (everything else here is calm, mono-font, low-saturation Engine
+       Room chrome on purpose; this is the one control that actually
+       ships bytes, so it earns being the one that doesn't sit quietly).
+       An animated aurora sweep through the panel's own accent/ok/audio
+       hues (never a color outside that existing palette, just all of
+       them moving at once) plus a slow idle breathing glow — settles
+       down (see .building/.done/.failed below) the instant it's
+       actually doing something, so the flourish reads as "ready, and a
+       little excited about it," not as noise fighting the result. */
+    #builder-build-btn {
+      position: relative;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 9px;
+      padding: 13px 16px;
+      margin-top: 2px;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      font-family: var(--eng-sans);
+      font-size: 14px;
+      font-weight: 800;
+      letter-spacing: 0.02em;
+      color: #0a0b0d;
+      background: linear-gradient(120deg, var(--eng-ok), var(--eng-audio), var(--eng-accent), var(--eng-ok));
+      background-size: 300% 100%;
+      animation: builder-aurora 5s linear infinite;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset, 0 6px 20px -4px rgba(185, 140, 247, 0.55), 0 6px 20px -4px rgba(74, 222, 128, 0.35);
+      transition: transform 0.15s ease, box-shadow 0.25s ease, filter 0.2s ease;
+    }
+
+    #builder-build-btn .icon {
+      font-size: 16px;
+      display: inline-block;
+      transform-origin: 60% 60%;
+    }
+
+    #builder-build-btn:hover:not(:disabled) {
+      transform: translateY(-1px) scale(1.015);
+      filter: brightness(1.08);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.28) inset, 0 10px 26px -4px rgba(185, 140, 247, 0.7), 0 10px 26px -4px rgba(74, 222, 128, 0.5);
+    }
+
+    #builder-build-btn:hover:not(:disabled) .icon {
+      animation: builder-icon-wobble 0.5s ease-in-out infinite;
+    }
+
+    #builder-build-btn:active:not(:disabled) {
+      transform: translateY(0) scale(0.985);
+    }
+
+    #builder-build-btn:disabled {
+      cursor: default;
+    }
+
+    /* Mid-build: the aurora sweep speeds into a tight, focused spin
+       instead of a leisurely drift — reads as "working," not "idle." */
+    #builder-build-btn.building {
+      animation: builder-aurora 1.1s linear infinite;
+      color: var(--eng-text);
+    }
+
+    #builder-build-btn.building .icon {
+      animation: builder-icon-spin 0.9s linear infinite;
+    }
+
+    #builder-build-btn.done {
+      animation: none;
+      background: linear-gradient(120deg, #2fbf5f, var(--eng-ok));
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset, 0 0 24px -2px rgba(74, 222, 128, 0.6);
+    }
+
+    #builder-build-btn.failed {
+      animation: none;
+      background: linear-gradient(120deg, #dc4545, var(--eng-danger));
+      color: #fff;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset, 0 0 24px -2px rgba(255, 82, 82, 0.6);
+    }
+
+    @keyframes builder-aurora {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 300% 50%; }
+    }
+
+    @keyframes builder-icon-wobble {
+      0%, 100% { transform: rotate(0deg) translateY(0); }
+      50% { transform: rotate(-14deg) translateY(-1px); }
+    }
+
+    @keyframes builder-icon-spin {
+      from { transform: rotate(0deg); }
+      to { transform: rotate(360deg); }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #builder-build-btn,
+      #builder-build-btn.building,
+      #builder-build-btn .icon,
+      #builder-build-btn:hover:not(:disabled) .icon,
+      #builder-build-btn.building .icon,
+      #si-hierarchy,
+      #si-inspector,
+      #si-hierarchy.visible,
+      #si-inspector.visible,
+      #si-gizmo-toolbar,
+      #si-gizmo-toolbar.visible,
+      #er-exit-3d,
+      #er-exit-3d.visible {
+        animation: none;
+        transition: opacity 0.001s linear, visibility 0s linear;
+      }
+    }
+
     /* Scene hierarchy + inspector: dev-only, only meaningful while freecam
        is active (see script section) — same visual language as the Engine
        Room panel, just repositioned so they don't collide with it (which
        is hidden anyway while these show). SceneInspector.ts writes directly
        into these elements' innerHTML, so any static header lives in CSS
-       (::before), not real DOM, or it would be wiped on every rebuild. */
+       (::before), not real DOM, or it would be wiped on every rebuild.
+       Entrance is opacity+slide, not a hard display swap — visibility
+       (not display) is what actually removes them from hit-testing while
+       hidden, so the transition has something to animate instead of
+       snapping instantly. Each panel slides in from whichever screen edge
+       it's docked to (hierarchy from the left, inspector from the right),
+       so the motion reads as "sliding into its own dock," not a generic
+       fade every floating panel in this app would use. */
     #si-hierarchy,
     #si-inspector {
-      display: none;
       position: fixed;
       z-index: 70;
       background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
@@ -554,13 +769,28 @@
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
       font-size: 11px;
       color: var(--eng-text);
-      pointer-events: auto;
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
       backdrop-filter: blur(8px);
+      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+    }
+
+    #si-hierarchy {
+      transform: translateX(-14px);
+    }
+
+    #si-inspector {
+      transform: translateX(14px);
     }
 
     #si-hierarchy.visible,
     #si-inspector.visible {
-      display: block;
+      pointer-events: auto;
+      visibility: visible;
+      opacity: 1;
+      transform: translateX(0);
+      transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
     #si-hierarchy::before,
@@ -578,6 +808,38 @@
       background: rgba(255, 255, 255, 0.015);
       border-radius: var(--eng-radius) var(--eng-radius) 0 0;
       margin: -1px -1px 6px -1px;
+    }
+
+    /* Live object count, no JS involved — a pure CSS counter, incremented
+       once per .si-row SceneInspector.ts renders anywhere inside this
+       panel (nested rows included, `counter-increment` doesn't care about
+       DOM depth) and reset back to 0 on this panel itself, so it stays in
+       sync automatically every time renderHierarchy() rebuilds the rows,
+       without SceneInspector needing to know this badge exists at all.
+       Rendered via ::after, not ::before — a counter's value at any point
+       reflects every counter-increment that precedes it in tree order,
+       and ::before is generated *before* the real .si-row children it
+       would be counting (so it'd always read back the reset value, 0);
+       ::after comes after all of them, so by the time its content is
+       evaluated every row has already been counted. Position:absolute
+       (against #si-hierarchy's own position:fixed, its nearest positioned
+       ancestor) pulls it back up into the header corner despite being
+       last in the actual DOM/tree order — paint position and counter
+       order are independent, only the latter cares about tree order. */
+    #si-hierarchy {
+      counter-reset: si-row-count;
+    }
+
+    #si-hierarchy::after {
+      content: counter(si-row-count);
+      position: absolute;
+      top: 8px;
+      right: 10px;
+      font-family: var(--eng-mono);
+      font-size: 9.5px;
+      font-weight: 800;
+      color: var(--eng-text-faint);
+      font-variant-numeric: tabular-nums;
     }
 
     #si-hierarchy::before {
@@ -600,6 +862,7 @@
     }
 
     .si-row {
+      counter-increment: si-row-count;
       margin: 0 6px 1px;
       padding: 4px 7px;
       border-radius: var(--eng-radius-sm);
@@ -761,11 +1024,10 @@
        keeps the mode discoverable/mouse-reachable too, and stays in sync
        with the keyboard shortcuts via __onGizmoModeChanged. */
     #si-gizmo-toolbar {
-      display: none;
+      display: flex;
       position: fixed;
       bottom: 16px;
       left: 50%;
-      transform: translateX(-50%);
       z-index: 70;
       gap: 2px;
       padding: 4px;
@@ -773,11 +1035,23 @@
       border: 1px solid var(--eng-border);
       border-radius: var(--eng-radius);
       box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
-      pointer-events: auto;
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
+      /* Slides up from just below its own resting spot — the other panels
+         each animate in from the screen edge they're docked to; this one
+         has no edge of its own (bottom-center), so "rising into place"
+         reads the same way. */
+      transform: translate(-50%, 10px);
+      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
     }
 
     #si-gizmo-toolbar.visible {
-      display: flex;
+      pointer-events: auto;
+      visibility: visible;
+      opacity: 1;
+      transform: translate(-50%, 0);
+      transition: opacity 0.2s ease 0.05s, transform 0.2s ease 0.05s;
     }
 
     #si-gizmo-toolbar button {
@@ -803,6 +1077,32 @@
       border-color: var(--eng-accent-hover);
       color: #1a1204;
       box-shadow: 0 0 0 1px rgba(232, 150, 30, 0.35), 0 2px 10px rgba(232, 150, 30, 0.4);
+    }
+
+    /* Divider between the Select/Move/Rotate/Scale mode buttons and the
+       Grid/Helpers/Snap/Space/Frame toggles — same row, but the second
+       group isn't a mutually-exclusive mode like the first, so it reads
+       better as a visually separate cluster rather than one undifferentiated
+       row of eight buttons. */
+    .si-toolbar-sep {
+      width: 1px;
+      align-self: stretch;
+      margin: 3px 3px;
+      background: var(--eng-border);
+    }
+
+    /* Wraps just the Select/Move/Rotate/Scale buttons — kept as a distinct
+       flex group (not flattened into #si-gizmo-toolbar's own children) so
+       the mode-select click handler below can query ".si-gizmo-modes
+       button" instead of "#si-gizmo-toolbar button": querying the parent
+       would also sweep up the Grid/Helpers/Snap/Space/Frame buttons added
+       alongside it, each missing the data-gizmo attribute that handler
+       reads — calling __setGizmoMode(undefined) crashes TransformControls'
+       gizmo on the next render (it indexes an internal lookup table by
+       mode name). */
+    .si-gizmo-modes {
+      display: flex;
+      gap: 2px;
     }
 
     #engine-room-stats {
@@ -1258,6 +1558,17 @@
       display: none;
     }
 
+    /* 3D Viewer/Editor: hidden entirely rather than just forced to "Real"
+       (see setFreecamUI) — a letterboxed device-frame preview is
+       meaningless while orbiting the scene with a free camera, so the bar
+       itself would just be dead chrome sitting there. currentInsets()
+       reclaims the top space this normally reserves while freecam is
+       active, so the 3D viewport actually uses it instead of leaving a
+       blank strip. */
+    #device-topbar.hidden-for-3d {
+      display: none;
+    }
+
     #device-topbar .label {
       font-size: 9.5px;
       font-weight: 800;
@@ -1346,9 +1657,9 @@
     <div id="engine-room-body">
       <div id="engine-room-actions">
         <button id="er-btn-editor" title="Open the UI layout editor">✏️ Editor</button>
-        <button id="er-btn-build" class="primary" title="Run the production build (build.sh)">🛠 Builder</button>
+        <button id="er-btn-build" class="primary" title="Open the Builder panel">🛠 Builder</button>
       </div>
-      <button id="er-btn-viewer" title="Orbit-inspect the live gameplay scene">🧭 3D View</button>
+      <button id="er-btn-viewer" title="Orbit, select, and edit objects in the live gameplay scene">🧭 3D Viewer/Editor</button>
       <button id="er-btn-audio" title="Audio Reactor — coming soon">🎧 Audio Reactor</button>
       <div id="engine-room-stats">
         <span>FPS</span><span class="val" id="er-fps">--</span>
@@ -1389,16 +1700,24 @@
         <button type="button" id="builder-modal-close" title="Close">✕</button>
       </div>
       <div id="builder-modal-body">
-        <div id="builder-status">Building…</div>
-        <div id="builder-bar-track">
-          <div id="builder-bar-fill"></div>
+        <div class="builder-section">
+          <div class="builder-section-label">Single-file size</div>
+          <div id="builder-freshness"><span class="dot"></span><span id="builder-freshness-text">Checking…</span></div>
+          <div id="builder-status">—</div>
+          <div id="builder-bar-track">
+            <div id="builder-bar-fill" class="estimate"></div>
+          </div>
+          <div id="builder-size-label">— <span class="dim">/ 5 MB budget</span></div>
+          <div id="builder-detail"></div>
         </div>
-        <div id="builder-size-label">0.00 MB <span class="dim">/ 5 MB budget</span></div>
-        <div id="builder-detail"></div>
+        <div class="builder-section" style="margin-bottom: 0;">
+          <div class="builder-section-label">Actions</div>
+          <button type="button" id="builder-build-btn"><span class="icon">🚀</span><span id="builder-build-btn-text">Build Now</span></button>
+        </div>
       </div>
     </div>
   </div>
-  <button id="er-exit-3d" title="Exit 3D View">Exit 3D View</button>
+  <button id="er-exit-3d" title="Exit 3D Viewer/Editor">Exit Editor</button>
   <div id="si-hierarchy"></div>
   <div id="si-inspector"></div>
   <div id="audio-reactor" class="eng-panel">
@@ -1410,10 +1729,18 @@
     <div id="audio-reactor-body">Nothing here yet.</div>
   </div>
   <div id="si-gizmo-toolbar">
-    <button data-gizmo="none" title="Select (Q) — click objects without transforming them">🖐</button>
-    <button data-gizmo="translate" class="active" title="Move (W)">↔</button>
-    <button data-gizmo="rotate" title="Rotate (E)">↻</button>
-    <button data-gizmo="scale" title="Scale (R)">⤡</button>
+    <div class="si-gizmo-modes">
+      <button data-gizmo="none" title="Select (Q) — click objects without transforming them">🖐</button>
+      <button data-gizmo="translate" class="active" title="Move (W)">↔</button>
+      <button data-gizmo="rotate" title="Rotate (E)">↻</button>
+      <button data-gizmo="scale" title="Scale (R)">⤡</button>
+    </div>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-tool-grid" title="Toggle grid (G)">▦</button>
+    <button id="si-tool-helpers" class="active" title="Toggle camera/light helpers (H)">💡</button>
+    <button id="si-tool-snap" title="Toggle snapping (X)">🧲</button>
+    <button id="si-tool-space" title="Toggle local/world space (C)">🌐</button>
+    <button id="si-tool-frame" title="Frame selected (F)">🎯</button>
   </div>
   <div id="device-topbar">
     <span class="label">Device Preview</span>
@@ -1431,36 +1758,29 @@
     </div>
   </div>
 
-  <script id="bundle-script" src="bundle.js"></script>
+  <script type="module" src="/src/main.ts"></script>
   <script>
-    // esbuild live-reload client (dev only — not present in the production
-    // build) — swaps in the freshly-rebuilt bundle.js in place rather than
-    // location.reload()'ing the whole page. A full reload used to wipe out
-    // the UI editor overlay's entire in-memory session (undo history,
-    // unsaved edits, which project folder it's connected to) every single
-    // time you hit Save, since the editor iframe is part of *this*
-    // document — a real navigation tears it down and reboots it from
-    // scratch along with everything else. Re-running just the bundle
-    // script leaves this document (and the iframe inside it) completely
-    // untouched. main.ts's own __disposeGame/__gameInstanceGeneration hooks
-    // (see its doc comment) handle cleanly retiring the old running Game
-    // instance so the two bundle executions never render into the canvas
-    // at the same time.
-    new EventSource("/esbuild").addEventListener("change", () => {
-      const old = document.getElementById("bundle-script");
-      const script = document.createElement("script");
-      script.id = "bundle-script";
-      script.src = "bundle.js?t=" + Date.now(); // cache-bust — same path esbuild just rewrote, but the browser doesn't know that without a new URL
-      script.onload = () => {
-        // The fresh bundle execution boots with freecam off by default (see
-        // main.ts) since it has no way to know this page's own freecamActive
-        // was already true — hand it back if 3D View was active going into
-        // this reload, so it doesn't silently drop out from under you.
-        if (freecamActive) window.__setFreecamActive?.(true);
-      };
-      old?.remove();
-      document.body.appendChild(script);
-    });
+    // Hot reload (dev only — not present in the production build): Vite's
+    // own HMR replaces esbuild's old EventSource-based bundle-swap here —
+    // main.ts self-accepts its own updates (see its doc comment) so a
+    // source/layout-JSON save re-executes just that module in place
+    // instead of Vite's default full-page-reload fallback. A full reload
+    // would wipe out the UI editor overlay's entire in-memory session
+    // (undo history, unsaved edits, which project folder it's connected
+    // to) every single time you hit Save, since the editor iframe is part
+    // of *this* document — a real navigation tears it down and reboots it
+    // from scratch along with everything else. main.ts's own
+    // __disposeGame/__gameInstanceGeneration hooks (see IonEngine.ts's doc
+    // comment) handle cleanly retiring the old running Game instance so
+    // the two module executions never render into the canvas at the same
+    // time.
+    //
+    // Freecam is real 3D-scene state (OrbitControls over the live
+    // gameplay scene) a fresh IonEngine.boot() has no way to know was
+    // already active — main.ts's own hot-accept handler reads this getter
+    // to hand it back after reboot, the same handoff the old esbuild-based
+    // reload made.
+    window.__wasFreecamActive = () => freecamActive;
 
     // Edit UI: toggles the same-origin editor iframe over the running game
     // and pauses gameplay (see main.ts) while it's open, so drag gestures
@@ -1513,15 +1833,19 @@
     const rootStyle = document.documentElement.style;
     let simMode = "portrait";
     let freecamActive = false;
+    /** simMode as it was right before the 3D Viewer/Editor forced it to "real" — see setFreecamUI — so exiting hands the device-preview bar back exactly as it was left, not always reset to Portrait. */
+    let preFreecamSimMode = null;
 
     /** Which dev chrome is currently reserving real screen space, as insets from each edge. */
     function currentInsets() {
       if (editorFrame.style.display === "block") return EDITOR_INSETS;
-      // #device-topbar itself stays docked in every mode (including
-      // freecam and editor-open — it floats above the editor there, same
-      // as before this became a full bar); only the Engine Room side dock
-      // comes and goes with freecam.
-      return { top: TOP_BAR_HEIGHT, left: 0, right: freecamActive ? 0 : ENGINE_ROOM_WIDTH };
+      // #device-topbar stays docked (reserving its own top strip) in every
+      // mode except the 3D Viewer/Editor — it's hidden entirely there (see
+      // setFreecamUI/#device-topbar.hidden-for-3d), so nothing needs to
+      // reserve the space it would have used; the freecam viewport gets
+      // the full height instead of leaving a blank strip where the bar
+      // used to be.
+      return { top: freecamActive ? 0 : TOP_BAR_HEIGHT, left: 0, right: freecamActive ? 0 : ENGINE_ROOM_WIDTH };
     }
 
     function applyDeviceFrame() {
@@ -1563,6 +1887,33 @@
       deviceFrame.style.height = h + "px";
       window.__resizeGameTo && window.__resizeGameTo(w, h);
       broadcastDeviceFrame(left, top, w, h);
+    }
+
+    /**
+     * Same as applyDeviceFrame(), but skips #device-frame's own 150ms
+     * left/top/width/height transition instead of letting it animate.
+     * That transition is a deliberate, nice touch for a *manual*
+     * Portrait/Landscape/Real tab click — but window.__resizeGameTo above
+     * always sets the renderer/camera to the *target* size immediately
+     * (see Game.ts's resizeTo — it takes the target size explicitly for
+     * exactly this reason, not a DOM re-measure), while the CSS box
+     * itself would still be mid-animation toward that same size for the
+     * next 150ms. The live WebGL frame — already rendering at the new,
+     * final aspect ratio — visibly stretches/squishes to fit the
+     * still-transitioning box until it catches up. setFreecamUI calls
+     * this instead of applyDeviceFrame() specifically because entering/
+     * exiting the 3D Viewer/Editor forces a real mode change (to/from
+     * "real") as a side effect of a click that has nothing to do with
+     * the device-frame tabs themselves — the animation reads as a
+     * glitch there, not a flourish.
+     */
+    function applyDeviceFrameInstant() {
+      const prevTransition = deviceFrame.style.transition;
+      deviceFrame.style.transition = "none";
+      void deviceFrame.offsetHeight; // commits "none" before the box actually moves below, or the browser may still animate this same change
+      applyDeviceFrame();
+      void deviceFrame.offsetHeight; // commits the instant jump before restoring the normal transition, so it can't retroactively animate anything
+      deviceFrame.style.transition = prevTransition;
     }
 
     // Takes the values applyDeviceFrame just computed and assigned, rather
@@ -1632,85 +1983,145 @@
         el.title = "Build API offline — start with `npm run dev`";
       });
 
-    // Engine Room: Builder — POSTs to the local build-trigger API
-    // (scripts/dev-build-api.js, started alongside this dev server by
-    // scripts/dev.js) which runs the real build.sh (now inlining every
-    // asset as base64 — see build.sh's own comments — so dist/index.html
-    // is a genuinely self-contained single file) and reports back the
-    // exact byte size it just measured. The modal's bar reflects that
-    // real number against a 5MB budget — most ad networks' single-file
-    // upload cap — it never fakes incremental progress mid-build.
+    // Engine Room: Builder panel. The 🛠 Builder button (top of Engine
+    // Room) only *opens* this now — it used to kick off a real build the
+    // instant you clicked it, with the modal purely narrating the result.
+    // Building is real work (a full Vite production build, base64-inlining
+    // every asset — see build.sh) that you might not want to trigger just
+    // to check the current size, so opening the panel now shows the size
+    // as of the *last* real build on disk (GET /estimate-size) — instant,
+    // free, no build.sh run — with a freshness badge honestly flagging
+    // whether anything's changed since then. The 🚀 Build Now button
+    // inside is the only thing that actually runs build.sh, via POST
+    // /build, same as before; its result replaces the estimate with the
+    // real, just-measured number and flips the badge back to fresh.
+    // Both talk to scripts/dev-build-api.js (started alongside this dev
+    // server by scripts/dev.js).
+    const ESTIMATE_API = "http://127.0.0.1:8001/estimate-size";
     const BUILD_API = "http://127.0.0.1:8001/build";
     const BUILD_BUDGET_BYTES = 5 * 1024 * 1024;
-    const buildBtn = document.getElementById("er-btn-build");
+    const openBuilderBtn = document.getElementById("er-btn-build");
     const builderBackdrop = document.getElementById("builder-modal-backdrop");
     const builderClose = document.getElementById("builder-modal-close");
+    const builderFreshness = document.getElementById("builder-freshness");
+    const builderFreshnessText = document.getElementById("builder-freshness-text");
     const builderStatus = document.getElementById("builder-status");
     const builderFill = document.getElementById("builder-bar-fill");
     const builderSizeLabel = document.getElementById("builder-size-label");
     const builderDetail = document.getElementById("builder-detail");
+    const builderBuildBtn = document.getElementById("builder-build-btn");
+    const builderBuildBtnText = document.getElementById("builder-build-btn-text");
+
+    /** Paints the bar/label/status from a byte count — shared by the pre-build estimate and the real post-build result, `isEstimate` only changes the bar's texture (see .estimate in the CSS) and the status wording. */
+    function paintSize(sizeBytes, isEstimate) {
+      const mb = sizeBytes / (1024 * 1024);
+      const pct = Math.min(100, (sizeBytes / BUILD_BUDGET_BYTES) * 100);
+      const over = sizeBytes > BUILD_BUDGET_BYTES;
+      builderFill.classList.toggle("over-budget", over && !isEstimate);
+      builderFill.classList.toggle("estimate", isEstimate);
+      builderFill.style.width = pct + "%";
+      builderSizeLabel.innerHTML = mb.toFixed(2) + ' MB <span class="dim">/ 5 MB budget</span>';
+      if (isEstimate) {
+        builderStatus.textContent = "As of last build";
+        builderDetail.textContent = over ? "Was over budget last time — rebuild to confirm" : "Click Build Now for the exact current size";
+      } else {
+        builderStatus.textContent = over ? "Build complete — over budget" : "Build complete";
+        builderDetail.textContent = over
+          ? "Over the single-file budget by " + (mb - 5).toFixed(2) + " MB"
+          : "Single self-contained file — dist/index.html";
+      }
+    }
+
+    function setFreshness(state, text) {
+      builderFreshness.classList.remove("fresh", "stale");
+      if (state) builderFreshness.classList.add(state);
+      builderFreshnessText.textContent = text;
+    }
+
+    /** Loads the last-known size (no build triggered) — called every time the panel opens. */
+    async function refreshEstimate() {
+      setFreshness(null, "Checking…");
+      builderStatus.textContent = "—";
+      builderFill.classList.add("estimate");
+      builderFill.style.width = "0%";
+      builderSizeLabel.innerHTML = "— <span class=\"dim\">/ 5 MB budget</span>";
+      builderDetail.textContent = "";
+      try {
+        const res = await fetch(ESTIMATE_API);
+        const data = await res.json();
+        if (!data.exists) {
+          setFreshness(null, "Never built");
+          builderStatus.textContent = "No build yet";
+          builderDetail.textContent = "Click Build Now to generate dist/index.html";
+          return;
+        }
+        setFreshness(data.stale ? "stale" : "fresh", data.stale ? "Source changed since" : "Up to date");
+        paintSize(data.sizeBytes, true);
+      } catch (err) {
+        setFreshness(null, "API offline");
+        builderStatus.textContent = "Build API offline";
+        builderDetail.textContent = "Is `npm run dev` still running?";
+        console.error("Build API unreachable — is `npm run dev` still running?", err);
+      }
+    }
 
     function openBuilderModal() {
       builderBackdrop.classList.add("visible");
-      builderStatus.textContent = "Building…";
-      builderFill.classList.remove("over-budget");
-      builderFill.style.width = "0%";
-      builderSizeLabel.innerHTML = '0.00 MB <span class="dim">/ 5 MB budget</span>';
-      builderDetail.textContent = "";
+      refreshEstimate();
     }
 
     function closeBuilderModal() {
       builderBackdrop.classList.remove("visible");
     }
 
+    openBuilderBtn.addEventListener("click", openBuilderModal);
     builderClose.addEventListener("click", closeBuilderModal);
     builderBackdrop.addEventListener("click", (e) => {
       if (e.target === builderBackdrop) closeBuilderModal();
     });
 
-    buildBtn.addEventListener("click", async () => {
-      const originalText = buildBtn.textContent;
-      buildBtn.disabled = true;
-      buildBtn.textContent = "Building…";
-      openBuilderModal();
+    builderBuildBtn.addEventListener("click", async () => {
+      builderBuildBtn.disabled = true;
+      builderBuildBtn.classList.remove("done", "failed");
+      builderBuildBtn.classList.add("building");
+      builderBuildBtnText.textContent = "Building…";
+      builderStatus.textContent = "Building…";
+      setFreshness(null, "Building…");
       try {
         const res = await fetch(BUILD_API, { method: "POST" });
         const data = await res.json();
+        builderBuildBtn.classList.remove("building");
         if (data.ok) {
-          buildBtn.textContent = "✅ Built";
+          builderBuildBtn.classList.add("done");
+          builderBuildBtnText.textContent = "Built ✓";
           if (typeof data.sizeBytes === "number") {
-            const mb = data.sizeBytes / (1024 * 1024);
-            const pct = Math.min(100, (data.sizeBytes / BUILD_BUDGET_BYTES) * 100);
-            const over = data.sizeBytes > BUILD_BUDGET_BYTES;
-            builderStatus.textContent = over ? "Build complete — over budget" : "Build complete";
-            // Fill starts from 0% (set in openBuilderModal, already painted
-            // a frame ago) — this width change is what the CSS transition
-            // above actually animates.
-            builderFill.classList.toggle("over-budget", over);
-            builderFill.style.width = pct + "%";
-            builderSizeLabel.innerHTML = mb.toFixed(2) + ' MB <span class="dim">/ 5 MB budget</span>';
-            builderDetail.textContent = over
-              ? "Over the single-file budget by " + (mb - 5).toFixed(2) + " MB"
-              : "Single self-contained file — dist/index.html";
+            setFreshness("fresh", "Just built");
+            paintSize(data.sizeBytes, false);
           } else {
             builderStatus.textContent = "Build complete";
             builderDetail.textContent = "(size unavailable)";
           }
         } else {
-          buildBtn.textContent = "❌ Failed";
+          builderBuildBtn.classList.add("failed");
+          builderBuildBtnText.textContent = "Failed";
+          setFreshness(null, "Build failed");
           builderStatus.textContent = "Build failed";
           builderDetail.textContent = data.error || "See console for details";
           console.error("Build failed:", data.error, "\n" + data.stderr);
         }
       } catch (err) {
-        buildBtn.textContent = "❌ API offline";
+        builderBuildBtn.classList.remove("building");
+        builderBuildBtn.classList.add("failed");
+        builderBuildBtnText.textContent = "API offline";
+        setFreshness(null, "API offline");
         builderStatus.textContent = "Build API offline";
         builderDetail.textContent = "Is `npm run dev` still running?";
         console.error("Build API unreachable — is `npm run dev` still running?", err);
       }
       setTimeout(() => {
-        buildBtn.disabled = false;
-        buildBtn.textContent = originalText;
+        builderBuildBtn.disabled = false;
+        builderBuildBtn.classList.remove("done", "failed");
+        builderBuildBtnText.textContent = "Build Now";
       }, 2200);
     });
 
@@ -1734,7 +2145,7 @@
     // 💾 Save writes the live value of every currently-editable field back
     // into the script's own source (POST /save-inspectable-values below) —
     // a regex-scoped patch of just that field's declaration, not a full
-    // rewrite. Saving touches a watched source file, so esbuild's dev
+    // rewrite. Saving touches a watched source file, so Vite's dev
     // watcher rebuilds and the game hot-reloads, same as any other save.
     (() => {
       const LOCAL_API_ORIGIN = "http://127.0.0.1:8001";
@@ -1978,14 +2389,18 @@
       }
     })();
 
-    // Engine Room: 3D View — toggles freecam (OrbitControls) over the live
-    // gameplay scene via main.ts's __setFreecamActive hook, which also
-    // pauses update() so the player/camera don't fight the orbit drag.
-    // While active, #engine-room hides entirely (its own #er-btn-viewer is
-    // unreachable then anyway) and is replaced by just #er-exit-3d, plus
-    // the scene hierarchy/inspector panels light up. The editor can't be
-    // open when this fires — #er-btn-viewer lives inside #engine-room,
-    // which the editor-open handler above already hides.
+    // Engine Room: 3D Viewer/Editor — toggles freecam (OrbitControls) over
+    // the live gameplay scene via main.ts's __setFreecamActive hook, which
+    // also pauses update() so the player/camera don't fight the orbit
+    // drag. While active: #engine-room hides entirely (its own
+    // #er-btn-viewer is unreachable then anyway) and is replaced by just
+    // #er-exit-3d; the device-preview bar hides too (a letterboxed
+    // Portrait/Landscape frame is meaningless for a free camera) and its
+    // mode is forced to "Real" for the duration, restored on exit; and the
+    // scene hierarchy (left) / inspector (right) panels light up — see
+    // setFreecamUI below for all of it. The UI editor can't be open when
+    // this fires — #er-btn-viewer lives inside #engine-room, which the
+    // editor-open handler above already hides.
     const viewerBtn = document.getElementById("er-btn-viewer");
     const exitViewerBtn = document.getElementById("er-exit-3d");
     const hierarchyPanel = document.getElementById("si-hierarchy");
@@ -1999,8 +2414,22 @@
       hierarchyPanel.classList.toggle("visible", on);
       inspectorPanel.classList.toggle("visible", on);
       gizmoToolbar.classList.toggle("visible", on);
+      deviceTopbar.classList.toggle("hidden-for-3d", on);
+      // The 3D Viewer/Editor always orbits the full window — a letterboxed
+      // Portrait/Landscape preview means nothing for a free camera — so
+      // force "Real" on entry, remembering whatever mode was actually
+      // active so exiting hands it back exactly as you left it.
+      if (on) {
+        preFreecamSimMode = simMode;
+        simMode = "real";
+        document.querySelectorAll("#device-topbar button").forEach((b) => b.classList.toggle("active", b.dataset.sim === "real"));
+      } else if (preFreecamSimMode) {
+        simMode = preFreecamSimMode;
+        document.querySelectorAll("#device-topbar button").forEach((b) => b.classList.toggle("active", b.dataset.sim === simMode));
+        preFreecamSimMode = null;
+      }
       window.__setFreecamActive && window.__setFreecamActive(on);
-      applyDeviceFrame(); // Engine Room just showed/hid — the game view's available width changed with it
+      applyDeviceFrameInstant(); // Engine Room/device-topbar just showed/hid, and simMode may have just changed — the game view's available width and shape changed with it. Instant, not animated — see its own doc comment for why this specific jump can't use the normal transition.
     }
 
     viewerBtn.addEventListener("click", () => setFreecamUI(true));
@@ -2022,14 +2451,56 @@
     // listens for __onGizmoModeChanged so the W/E/R/Q keyboard shortcuts
     // (handled inside SceneInspector, not here) keep these buttons' active
     // state in sync instead of only ever reacting to being clicked directly.
-    document.querySelectorAll("#si-gizmo-toolbar button").forEach((btn) => {
+    document.querySelectorAll(".si-gizmo-modes button").forEach((btn) => {
       btn.addEventListener("click", () => {
         window.__setGizmoMode && window.__setGizmoMode(btn.dataset.gizmo);
-        document.querySelectorAll("#si-gizmo-toolbar button").forEach((b) => b.classList.toggle("active", b === btn));
+        document.querySelectorAll(".si-gizmo-modes button").forEach((b) => b.classList.toggle("active", b === btn));
       });
     });
     window.__onGizmoModeChanged = (mode) => {
-      document.querySelectorAll("#si-gizmo-toolbar button").forEach((b) => b.classList.toggle("active", b.dataset.gizmo === mode));
+      document.querySelectorAll(".si-gizmo-modes button").forEach((b) => b.classList.toggle("active", b.dataset.gizmo === mode));
+    };
+
+    // Grid / Helpers / Snap / Space / Frame — same passthrough shape as the
+    // gizmo-mode buttons above, via IonEngine's __toggleGrid/__toggleHelpers/
+    // __toggleSnap/__toggleSpace/__frameSelected hooks. The four toggles
+    // paint their own active state off the return value immediately;
+    // __onInspectorStateChanged (registered once, below) is what keeps them
+    // in sync when the same toggles fire from SceneInspector's F/G/H/X/C
+    // keyboard shortcuts instead of a click here.
+    const toolGridBtn = document.getElementById("si-tool-grid");
+    const toolHelpersBtn = document.getElementById("si-tool-helpers");
+    const toolSnapBtn = document.getElementById("si-tool-snap");
+    const toolSpaceBtn = document.getElementById("si-tool-space");
+    const toolFrameBtn = document.getElementById("si-tool-frame");
+
+    toolGridBtn.addEventListener("click", () => {
+      const on = window.__toggleGrid && window.__toggleGrid();
+      toolGridBtn.classList.toggle("active", !!on);
+    });
+    toolHelpersBtn.addEventListener("click", () => {
+      const on = window.__toggleHelpers && window.__toggleHelpers();
+      toolHelpersBtn.classList.toggle("active", !!on);
+    });
+    toolSnapBtn.addEventListener("click", () => {
+      const on = window.__toggleSnap && window.__toggleSnap();
+      toolSnapBtn.classList.toggle("active", !!on);
+    });
+    toolSpaceBtn.addEventListener("click", () => {
+      const space = window.__toggleSpace && window.__toggleSpace();
+      toolSpaceBtn.classList.toggle("active", space === "local");
+      toolSpaceBtn.title = "Toggle local/world space (C) — currently " + (space || "world");
+    });
+    toolFrameBtn.addEventListener("click", () => {
+      window.__frameSelected && window.__frameSelected();
+    });
+
+    window.__onInspectorStateChanged = (state) => {
+      toolGridBtn.classList.toggle("active", state.grid);
+      toolHelpersBtn.classList.toggle("active", state.helpers);
+      toolSnapBtn.classList.toggle("active", state.snap);
+      toolSpaceBtn.classList.toggle("active", state.space === "local");
+      toolSpaceBtn.title = "Toggle local/world space (C) — currently " + state.space;
     };
 
     // Engine Room: live FPS/draw calls/triangles, fed by main.ts's

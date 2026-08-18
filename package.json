@@ -14,9 +14,10 @@
   "license": "ISC",
   "devDependencies": {
     "@types/three": "^0.185.1",
-    "esbuild": "^0.28.1",
     "jsdom": "^30.0.0",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vite": "^8.2.1",
+    "vite-plugin-singlefile": "^2.3.3"
   },
   "dependencies": {
     "three": "^0.185.1"

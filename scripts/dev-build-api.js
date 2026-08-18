@@ -2,10 +2,10 @@
 // Tiny localhost-only HTTP API two dev-only pages talk to, since a browser
 // can't shell out to build.sh/git, read/parse TS source, or write straight
 // into the project on its own: the dev page's ION Engine panel (GET
-// /version, POST /build), and tools/ui-editor.html's Save/Set-as-Main/
+// /version, GET /estimate-size, POST /build), and tools/ui-editor.html's Save/Set-as-Main/
 // Set-as-Endcard/Load (see /save-layout, /load-layout, /list-layouts) plus
 // its read-only Scripts panel (see /list-scripts, /script-info). Runs
-// alongside esbuild's dev server (see scripts/dev.js) — never part of the
+// alongside Vite's dev server (see scripts/dev.js) — never part of the
 // production build, never listens on anything but 127.0.0.1.
 const http = require("http");
 const { exec, execSync } = require("child_process");
@@ -66,6 +66,38 @@ function walkTsFiles(dir, baseDir, into) {
       into.push(path.relative(baseDir, full).split(path.sep).join("/"));
     }
   }
+}
+
+/** Newest mtime (ms) among every file under `dir`, recursively — used by isBuildStale() below to tell whether anything's changed since the last build without needing a real diff. */
+function newestMtimeMs(dir) {
+  let newest = 0;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      newest = Math.max(newest, newestMtimeMs(full));
+    } else if (entry.isFile()) {
+      newest = Math.max(newest, fs.statSync(full).mtimeMs);
+    }
+  }
+  return newest;
+}
+
+/** Whether `src/`, `tools/ui-editor.html`, or `assets/` have anything newer than `builtAtMs` (the last dist/index.html's own mtime) — backs the Builder panel's "may be out of date" hint on its pre-build size estimate. Best-effort: a missing directory (e.g. no assets/ yet) just doesn't contribute, same as GET /estimate-size's own missing-dist handling. */
+function isBuildStale(builtAtMs) {
+  let newest = 0;
+  for (const dir of [SRC_DIR, path.join(ROOT, "assets")]) {
+    try {
+      newest = Math.max(newest, newestMtimeMs(dir));
+    } catch {
+      // missing dir — nothing to contribute
+    }
+  }
+  try {
+    newest = Math.max(newest, fs.statSync(path.join(ROOT, "tools", "ui-editor.html")).mtimeMs);
+  } catch {
+    // missing file — nothing to contribute
+  }
+  return newest > builtAtMs;
 }
 
 /** Collapses every nested {...} block (method/constructor bodies, object literals, arrow-function bodies — any depth) into a single "{…}" placeholder, so a regex scan over what's left only ever sees the class's own direct members, never a `const` inside some method mistaken for a field. */
@@ -321,7 +353,7 @@ function extractClasses(rawSourceText) {
         // does NOT count on its own; the Engine Room's Control Desk shows
         // the truthful live-assigned state once an instance actually
         // exists anyway (see renderField's `live ? value !== undefined :
-        // field.assigned` in public/index.html), this static flag is only
+        // field.assigned` in index.html), this static flag is only
         // ever a best guess for before that.
         assigned: !!initializer || marker === "?",
         kind: "field",
@@ -667,7 +699,7 @@ function writeBindings(data) {
   fs.writeFileSync(BINDINGS_FILE, JSON.stringify(data, null, 2));
 }
 
-// esbuild's dev server prints both of these as the "Local" URL depending on
+// Vite's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
 // one the tab is actually on, or the browser silently discards the
@@ -706,6 +738,27 @@ const server = http.createServer((req, res) => {
     res.setHeader("Content-Type", "application/json");
     res.writeHead(200);
     res.end(JSON.stringify({ version: PACKAGE_VERSION, ...readGitInfo() }));
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/estimate-size") {
+    // Backs the Builder panel's size bar *before* you actually click Build
+    // — the last real dist/index.html on disk (from whenever it was last
+    // built), not a guess computed from current source — so it's exact as
+    // of that build, and honestly labeled stale (see `stale` below) the
+    // moment anything under src/, tools/ui-editor.html, or assets/ changes
+    // more recently than that.
+    res.setHeader("Content-Type", "application/json");
+    const distPath = path.join(ROOT, "dist", "index.html");
+    try {
+      const stat = fs.statSync(distPath);
+      const stale = isBuildStale(stat.mtimeMs);
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, exists: true, sizeBytes: stat.size, builtAtMs: stat.mtimeMs, stale }));
+    } catch {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, exists: false }));
+    }
     return;
   }
 
@@ -835,7 +888,7 @@ const server = http.createServer((req, res) => {
 
   if (req.method === "GET" && req.url === "/list-logic-scripts") {
     // Engine Room's Control Desk — live runtime field inspector (see
-    // public/index.html). The inverse filter of /list-scripts above: only
+    // index.html). The inverse filter of /list-scripts above: only
     // src/game/ files OUTSIDE ui/ (gameplay classes — Player, CoinField,
     // World, Game itself — the things with tweakable runtime state), never
     // ui/ (that's Scripts-panel/Bindings territory, not live-tweak
@@ -1009,5 +1062,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
 });
