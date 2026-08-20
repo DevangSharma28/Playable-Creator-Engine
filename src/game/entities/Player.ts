@@ -23,6 +23,7 @@ const CROSSFADE_DURATION = 0.2;
 // - Rotation
 // ============================================================================
 
+
 export class Player {
 
   // ==========================================================================
@@ -30,7 +31,7 @@ export class Player {
   // Accessible from outside the class
   // ==========================================================================
 
-  private readonly object3D: THREE.Group;
+  private readonly player: THREE.Group;
 
 
   public me!: THREE.Group
@@ -64,13 +65,13 @@ export class Player {
     // Clone Character
     // ------------------------------------------------------------------------
 
-    this.object3D = skeletonClone(model) as THREE.Group;
+    this.player = skeletonClone(model) as THREE.Group;
 
     // ------------------------------------------------------------------------
     // Animation Mixer
     // ------------------------------------------------------------------------
 
-    this.mixer = new THREE.AnimationMixer(this.object3D);
+    this.mixer = new THREE.AnimationMixer(this.player);
 
 
     // ------------------------------------------------------------------------
@@ -98,13 +99,12 @@ export class Player {
     // Hide Unused Objects
     // ------------------------------------------------------------------------
 
-    this.object3D.traverse((child) => {
+    this.player.traverse((child) => {
       if (
-        child.name === "Main_Female_Character_Upgrade_2" ||
-        child.name === "Main_Character_Upgrade_1" ||
-        child.name === "Female_assistant" ||
-        child.name === "Male_cashier" ||
-        child.name === "Arrow"
+        child.name === "Main_Character" ||
+        child.name === "Arrow" ||
+        child.name === "Main_Female_Character_Upgrade_2"
+        // child.name === "Main_Character_Upgrade_1"
       ) {
         child.visible = false;
       }
@@ -115,7 +115,7 @@ export class Player {
     // Enable Shadow Casting
     // ------------------------------------------------------------------------
 
-    this.object3D.traverse((child) => {
+    this.player.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         child.castShadow = true;
       }
@@ -126,7 +126,7 @@ export class Player {
     // Add Player To Scene
     // ------------------------------------------------------------------------
 
-    scene.add(this.object3D);
+    scene.add(this.player);
   }
 
 
@@ -136,7 +136,7 @@ export class Player {
   // ==========================================================================
 
   get position(): THREE.Vector3 {
-    return this.object3D.position;
+    return this.player.position;
   }
 
 
@@ -186,22 +186,22 @@ export class Player {
 
     if (moving) {
 
-      this.object3D.position.x += axis.x * this.speed * dt;
-      this.object3D.position.z += axis.y * this.speed * dt;
+      this.player.position.x += axis.x * this.speed * dt;
+      this.player.position.z += axis.y * this.speed * dt;
 
 
       // ----------------------------------------------------------------------
       // Keep Player Inside Bounds
       // ----------------------------------------------------------------------
 
-      this.object3D.position.x = THREE.MathUtils.clamp(
-        this.object3D.position.x,
+      this.player.position.x = THREE.MathUtils.clamp(
+        this.player.position.x,
         -this.bound,
         this.bound
       );
 
-      this.object3D.position.z = THREE.MathUtils.clamp(
-        this.object3D.position.z,
+      this.player.position.z = THREE.MathUtils.clamp(
+        this.player.position.z,
         -this.bound,
         this.bound
       );
@@ -214,12 +214,12 @@ export class Player {
       const targetRotationY = Math.atan2(axis.x, axis.y);
 
       // Normalize angle difference to [-PI, PI]
-      let delta = targetRotationY - this.object3D.rotation.y;
+      let delta = targetRotationY - this.player.rotation.y;
 
       delta = Math.atan2(Math.sin(delta), Math.cos(delta));
 
       // Smooth rotation (frame-rate independent)
-      this.object3D.rotation.y += delta * Math.min(1, dt * 12);
+      this.player.rotation.y += delta * Math.min(1, dt * 12);
 
 
       // ----------------------------------------------------------------------
@@ -249,6 +249,6 @@ export class Player {
 }
 
 enum PlayerAnimation {
-  Idle = "idle",
-  Run = "walk"
+  Idle = "Idle",
+  Run = "Run"
 }

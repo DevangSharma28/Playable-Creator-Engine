@@ -5,15 +5,8 @@
       "category": "game",
       "path": "ui/HUD.ts",
       "className": "HUD",
-      "fieldName": "moneyIcon",
-      "uiElementName": "title"
-    },
-    {
-      "category": "game",
-      "path": "ui/HUD.ts",
-      "className": "HUD",
       "fieldName": "inGameCTA",
-      "uiElementName": "inGameCTA"
+      "uiElementName": "Play_button"
     }
   ]
 }

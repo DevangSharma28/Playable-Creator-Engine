@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DynamicJoystick } from "../engine/core/DynamicJoystick";
+import { InputManager } from "../engine/core/InputManager";
 import { CameraHandler } from "../engine/core/CameraHandler";
 import { ViewHelperWidget } from "../engine/core/ViewHelperWidget";
 import { SceneInspector, type GizmoMode, type InspectorToolState } from "../engine/core/SceneInspector";
@@ -15,16 +16,24 @@ import endcardLayoutRaw from "./ui/endcardLayout.json";
 import { AssetLoader } from "../engine/AssetLoader";
 import { MraidAdapter } from "../engine/MraidAdapter";
 import { MindworksAdapter } from "../engine/MindworksAdapter";
-import { manifest, libGlb } from "./assets";
+import { Cta } from "../engine/Cta";
+import { setCrashRecoveryUrl } from "../engine/core/CrashOverlay";
+import { SoundHandler } from "./SoundHandler";
+import { manifest, libGlb, libAudio } from "./assets";
 
 const mainLayoutData = mainLayoutRaw as UILayoutData;
 const endcardLayoutData = endcardLayoutRaw as UILayoutData;
 
 const COIN_COUNT = 6;
 const AUTO_END_MS = 15000;
-const CAMERA_OFFSET = new THREE.Vector3(0, 7.5, 7.5);
-/** Real store listing / click-through URL — swap this for the actual app before a network build. Every CTA (HUD button, endcard) routes through MraidAdapter.openStoreUrl, which uses mraid.open() inside a real ad network host and falls back to a new tab everywhere else (this dev preview included). */
+const CAMERA_OFFSET = new THREE.Vector3(0, 12, 12);
+/** Real store listing / click-through URL — swap this for the actual app before a network build. Every CTA (HUD button, endcard) routes through Cta.open(), which picks the right network API automatically and falls back to a new tab in a plain browser (this dev preview included). Only consulted on the paths that actually take a URL — network-owned handlers redirect to the listing the network itself has configured; see src/engine/Cta.ts. */
 const STORE_URL = "https://devangsharma28.github.io/portfolio/";
+// Same URL the CTA buttons use, registered once at module load so
+// IonEngine's crash-recovery overlay's own CTA still works if gameplay
+// ever throws mid-frame — see CrashOverlay.ts's own doc comment for why
+// this is self-registered rather than threaded through IonEngine.boot().
+setCrashRecoveryUrl(STORE_URL);
 
 export class Game {
   private readonly scene: THREE.Scene;
@@ -35,8 +44,11 @@ export class Game {
   private readonly player: Player;
   private readonly coinField: CoinField;
   private readonly input: DynamicJoystick;
+  /** Keyboard (WASD/arrows) fallback for the joystick's own movement axis — desktop dev-preview testing without a touchscreen. See update()'s combineAxes. */
+  private readonly keyboardInput: InputManager;
   private readonly cameraHandler: CameraHandler;
   private readonly hud: HUD;
+  private readonly soundHandler: SoundHandler;
   private readonly mainUI: UILayout;
   private readonly endcardUI: UILayout;
   private readonly assetLoader: AssetLoader;
@@ -63,13 +75,14 @@ export class Game {
   /** Dev-only: class-name -> live instance lookup for the Engine Room's Control Desk panel (see IonEngine.installDevHooks' __getInspectable hook). Explicit, hand-picked entries — same reasoning as Bindings.ts's explicit field wiring, not a reflective registry that auto-discovers every object the game happens to construct. */
   private readonly inspectables: Map<string, object>;
 
-  private constructor(canvas: HTMLCanvasElement, model: THREE.Group, clips: THREE.AnimationClip[]) {
+  private constructor(canvas: HTMLCanvasElement, model: THREE.Group, clips: THREE.AnimationClip[], sceneModel: THREE.Group, musicBuffer: AudioBuffer) {
     this.assetLoader = new AssetLoader();
 
     this.scene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 1000);
     this.camera.lookAt(0, 0, 0);
+    this.soundHandler = new SoundHandler(this.camera, musicBuffer);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -79,6 +92,20 @@ export class Game {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.world = new World(this.scene);
+
+    // Cinema_World.glb — a designed environment dropped in alongside World's
+    // procedural ground/walls (not replacing them; World.bound below still
+    // drives gameplay's play-area clamp regardless of what this model looks
+    // like). Shadow flags aren't baked into the GLB export, so set them the
+    // same way Player does for its own mesh.
+    sceneModel.traverse((child) => {
+      if ((child as THREE.Mesh).isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+      }
+    });
+    this.scene.add(sceneModel);
+
     this.player = new Player(this.scene, this.world.bound, model, clips);
     this.coinField = new CoinField(this.scene, COIN_COUNT, this.world.bound);
     this.inspectables = new Map<string, object>([
@@ -86,6 +113,7 @@ export class Game {
       ["World", this.world],
       ["Player", this.player],
       ["CoinField", this.coinField],
+      ["SoundHandler", this.soundHandler],
     ]);
 
     this.mainLayer = document.getElementById("custom-ui-layer") as HTMLElement;
@@ -93,34 +121,22 @@ export class Game {
     this.mainUI = new UILayout(this.mainLayer, mainLayoutData);
     this.endcardUI = new UILayout(endcardLayer, endcardLayoutData);
 
+    let wa = this.scene.getObjectByName("walkablearea") as THREE.Object3D
+    (this.scene.getObjectByName("cinemafloor") as THREE.Mesh).visible = false;
+    (this.scene.getObjectByName("Colliders") as THREE.Object3D).visible = false;
+    wa.visible = false
     // HUD wires up its own editor-assigned fields (e.g. moneyIcon) in its
     // own constructor — see src/game/ui/HUD.ts and src/engine/Bindings.ts.
     this.hud = new HUD(this.mainUI, this.endcardUI);
     this.hud.setScore(0, this.coinField.total);
-    // Not window.open()/alert() — most ad-network WebViews (Mintegral's
-    // Mindworks included) block or silently swallow plain navigation, and
-    // alert() specifically can no-op or hang the JS thread depending on
-    // the host's WebView build. Mindworks' own review doc is explicit
-    // that a playable must never redirect on its own when its interface
-    // is present — window.install() must be the *only* thing a CTA click
-    // does then — so that branch is checked first and taken exclusively;
-    // MraidAdapter (real MRAID host, or a plain new-tab open in this dev
-    // preview) is only the fallback for hosts that don't define it.
-    this.hud.onCtaClick(() => {
-      if (MindworksAdapter.isPresent) {
-        MindworksAdapter.install();
-      } else {
-        MraidAdapter.openStoreUrl(STORE_URL);
-      }
-    });
-
-    this.hud.onInGameCtaClick(() => {
-      if (MindworksAdapter.isPresent) {
-        MindworksAdapter.install();
-      } else {
-        MraidAdapter.openStoreUrl(STORE_URL);
-      }
-    })
+    // Every CTA routes through this one call — never window.open()/alert()
+    // directly. Which network API actually handles the click (Mindworks'
+    // install(), Meta's FbPlayableAd, Google's ExitApi, ironSource's DAPI,
+    // MRAID, or a plain new tab in this dev preview) is entirely Cta's
+    // problem; see src/engine/Cta.ts for the ordering and why exactly one
+    // handler may ever run.
+    this.hud.onCtaClick(() => Cta.open(STORE_URL));
+    this.hud.onInGameCtaClick(() => Cta.open(STORE_URL));
 
     // The joystick is a real, editable layout element (type: "joystick",
     // named "joystick") — not hardcoded HTML — so DynamicJoystick reuses
@@ -133,7 +149,19 @@ export class Game {
     if (!joystick) {
       throw new Error('Game: mainLayout.json is missing a "joystick" element — add one in the UI editor (Properties panel names it "joystick" by default) and Set Active.');
     }
-    this.input = new DynamicJoystick(this.mainLayer, joystick.base, joystick.knob, 45, () => this.hud.hideDragHint());
+    // First real user gesture in the whole playable — also what unlocks
+    // audio (see SoundHandler's own doc comment: a browser AudioContext
+    // stays suspended, and .play() silently no-ops, until one of these).
+    this.input = new DynamicJoystick(this.mainLayer, joystick.base, joystick.knob, 45, () => {
+      this.hud.hideDragHint();
+      this.soundHandler.playMusic();
+    });
+    // Same first-input unlock as the joystick above (see its own comment) —
+    // a keyboard-only desktop tester needs it too, or music never starts for them.
+    this.keyboardInput = new InputManager(window, () => {
+      this.hud.hideDragHint();
+      this.soundHandler.playMusic();
+    });
 
     this.cameraHandler = new CameraHandler(this.camera, CAMERA_OFFSET);
 
@@ -180,13 +208,16 @@ export class Game {
     const path = libGlb.player;
     const model = loader.getGlb(path).scene;
     const clips = loader.getAnimations(path);
+    const sceneModel = loader.getGlb(libGlb.sceneGLB).scene;
+    const musicBuffer = loader.getAudio(libAudio.MainMusic);
 
-    const game = new Game(canvas, model, clips);
+    const game = new Game(canvas, model, clips, sceneModel, musicBuffer);
     // Every asset is loaded and the game is fully constructed — Mindworks'
     // own loading overlay waits for this before it'll consider the
     // playable loaded at all (see MindworksAdapter.gameReady's own doc
     // comment); a no-op everywhere else.
     MindworksAdapter.gameReady();
+
     return game;
   }
 
@@ -316,10 +347,26 @@ export class Game {
     return this.inspectables.get(className);
   }
 
+  /** Dev-only: Engine Room "Audio Reactor" panel — a thin passthrough since the analyser itself is lazily built inside SoundHandler and only ever touched from here. */
+  getAudioAnalyser(): THREE.AudioAnalyser {
+    return this.soundHandler.getAnalyser();
+  }
+
+  /** Dev-only: lets the Audio Reactor panel show Playing/Stopped without also needing __getAudioAnalyser to just answer that. */
+  isMusicPlaying(): boolean {
+    return this.soundHandler.isPlaying;
+  }
+
+  /** Joystick wins whenever it's actively held; keyboard only fills in while the joystick is neutral — so a touch drag can never fight a stale held key, and vice versa. Same {x,y} shape either way (see InputManager.ts's own doc comment on why keyboardAxis matches DynamicJoystick.axis's sign convention exactly), so Player.update needs no changes to accept either. */
+  private combinedAxis(): { x: number; y: number } {
+    const joy = this.input.axis;
+    return joy.x !== 0 || joy.y !== 0 ? joy : this.keyboardInput.keyboardAxis;
+  }
+
   /** Advance all systems by one frame. Call once per requestAnimationFrame tick. */
   update(dt: number, elapsed: number): void {
     if (!this.ended) {
-      this.player.update(dt, elapsed, this.input.axis);
+      this.player.update(dt, elapsed, this.combinedAxis());
 
       this.playTimeMs += dt * 1000;
       if (this.playTimeMs >= AUTO_END_MS) {
@@ -336,6 +383,7 @@ export class Game {
     });
 
     this.cameraHandler.update(this.player.position, dt);
+    this.soundHandler.update(); // applies volume/muted — see SoundHandler.update's own doc comment for why this is a poll, not a setter
   }
 
   render(): void {
@@ -367,6 +415,8 @@ export class Game {
   dispose(): void {
     window.removeEventListener("resize", this.onWindowResize);
     this.input.dispose();
+    this.keyboardInput.dispose();
+    this.soundHandler.dispose();
     this.renderer.dispose();
   }
 

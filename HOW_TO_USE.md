@@ -72,11 +72,59 @@ public speed: number = 5;
 
 Everything below that comment (down to the next `Header(...)` or the end of the class) shows grouped under a **"Player settings"** divider in Control Desk. Add as many as you want, wherever you want — it's read straight from source, no registration step.
 
-## 6. Ship it
+## 6. Debug audio (Audio Reactor)
 
-**🛠 Builder** (top of Engine Room) runs `build.sh`: bundles `src/main.ts` with Vite, inlines the JS directly into `src/index.template.html` (`vite-plugin-singlefile`), then base64-inlines every real asset (textures, models, audio) straight into that same file — one genuinely self-contained `dist/index.html`, no `dist/assets/` folder, nothing else to upload. It opens directly via `file://` and works on any ad network that only accepts a single file. None of the Engine Room/dev-only code above is included in it; the production template never references any of it.
+**🎧 Audio Reactor** (Engine Room, below 3D View) shows a live frequency-spectrum bar graph of whatever background music is actually playing — confirms a track is really running (not just "should be"), and lets you eyeball levels while tuning volume.
 
-Clicking Builder opens a small modal with a glowing progress bar showing the final file size against the ~5MB budget most ad networks enforce for a single-file upload.
+1. Click **🎧 Audio Reactor** to open the panel (bottom-left).
+2. The status dot + text reads **Playing** (green, pulsing) or **Stopped — tap the game to start music** — browsers block audio until a real tap/click/keypress happens, so this is usually the first sign something's wrong if music won't start.
+3. The bar graph and the level readout (e.g. `42 / 255`) only animate while music is actually playing — a flat line with the panel open means nothing's loaded, or nothing's unlocked audio yet.
+
+Dev-only readout, same as 3D View and Control Desk — nothing here ships in the real playable.
+
+## 7. Write gameplay code with Ion
+
+Everything above is the visual tools. This is for writing actual gameplay logic — timed beats, tweens, cross-system events — without hand-rolling timers or holding direct references between classes.
+
+Import `Ion` from `src/engine/Ion.ts` in any gameplay class:
+
+```ts
+import { Ion, Easing } from "../engine/Ion";
+
+Ion.after(3, () => hud.showHook());                     // once, 3s from now
+Ion.every(0.5, () => spawner.tick());                    // repeating
+Ion.sequence([                                           // back-to-back beats
+  { wait: 0.5, then: () => coin.pop() },
+  { wait: 0.2, then: () => hud.bumpScore() },
+]);
+Ion.tween(mesh.scale, { x: 1.4, y: 1.4, z: 1.4 }, 0.25, { easing: Easing.Back.Out });
+
+Ion.on("coin-collected", (p) => hud.setScore(p.total));  // subscribe
+Ion.emit("coin-collected", { total: 5 });                // fire, from anywhere else
+
+Ion.cta(STORE_URL);                                        // a CTA button's click handler
+```
+
+Worth knowing:
+- Everything on `Ion` runs on **game time**, not wall-clock — it automatically pauses while the UI editor or 3D View is open and resumes exactly where it left off. No extra code needed.
+- Call `Ion.*` from a constructor, `update()`, or an event handler — not a file's top-level module code. `Ion` only exists once `IonEngine.boot()` has actually created a game; calling it too early throws a clear error saying exactly that.
+- `Ion.on`/`Ion.emit` don't need event names declared anywhere — use the same string on both sides. Type the payload at the call site if you want it checked: `Ion.on<{total: number}>("coin-collected", fn)`.
+
+Movement input also has a desktop fallback now: **WASD or arrow keys** move the player alongside the joystick automatically — no setup, useful for testing at a desk without touching the canvas.
+
+See [ENGINE.md](ENGINE.md)'s `Ion.ts` / `core/Scheduler.ts` / `core/EventBus.ts` / `core/InputManager.ts` sections for the full API and the reasoning behind each piece.
+
+## 8. Ship it
+
+**🛠 Builder** (top of Engine Room) runs `build.sh`: compresses every model/audio asset, bundles `src/main.ts` with Vite, inlines the JS directly into `src/index.template.html` (`vite-plugin-singlefile`), then base64-inlines every real asset straight into that same file — one genuinely self-contained `dist/index.html`, no `dist/assets/` folder, nothing else to upload. It opens directly via `file://` and works on any ad network that only accepts a single file, including the exact syntax/module checks Mintegral's Mindworks review enforces (build.sh checks for those automatically on every build — see 📊 Build Report below). None of the Engine Room/dev-only code above is included in it; the production template never references any of it.
+
+Clicking Builder opens a modal with:
+- A glowing progress bar showing the final file size against the ~5MB budget most ad networks enforce.
+- **Half Float mesh compression** checkbox (on by default) — extra geometry compression at no visual cost. Leave it on unless you have a specific reason not to.
+- **🚀 Build Now** — runs the real build.
+- **📊 Build Report** — enabled once a build exists (this session's, or a teammate's `npm run build` from the CLI). Opens a full breakdown of what actually shipped: size composition by asset, before/after compression per model/audio file (dimensions, triangle count, texture sizes), any files sitting unused in `assets/` that never got referenced, and — most importantly — a red banner if the build somehow still contains something ad-network review would reject. Check this before uploading anywhere.
+
+If gameplay ever throws an unhandled error mid-session in the shipped build, players see a minimal "Continue" screen with a working install button instead of a dead frame — the ad spend isn't a total loss even if something breaks. Nothing to configure, it's automatic (see ENGINE.md's crash-guard note under the Boot sequence section for the details).
 
 You can also run it from the terminal:
 
@@ -96,6 +144,11 @@ bash build.sh
 | Group related fields in Control Desk | `// Header("Name")` comment above the first field in the group |
 | See private fields for debugging | **🐞 Debug** toggle (Scripts panel *or* Control Desk — separate toggles) |
 | See the actual running 3D scene / move the camera | **🧭 3D View** button |
+| Toggle grid/helpers/snap/local-world/frame-selected in 3D View | Buttons in the 3D View toolbar, or keys **G/H/X/C/F** |
+| Test movement without a touchscreen | Hold **WASD** or arrow keys — works alongside the joystick automatically |
+| Check whether music is actually playing | **🎧 Audio Reactor** button |
+| Write a timed beat, tween, or cross-system event in code | `Ion.after/every/sequence/tween/on/emit` — see step 7 |
+| Check a build for ad-network rejects before uploading | **📊 Build Report**, inside the Builder modal, after a build |
 | Produce the final ad file | **🛠 Builder** button, or `bash build.sh` |
 
 ## Where things live

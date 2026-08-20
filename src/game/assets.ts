@@ -19,9 +19,11 @@ export namespace libTex {
 
 export namespace libGlb {
   export const player: string = "./assets/models/MainCharacter.glb";
+  export const sceneGLB: string = "./assets/models/Cinema_World.glb";
 }
 
 export namespace libAudio {
+  export const MainMusic: string = "./assets/sounds/BG.ogg"
 }
 
 export namespace libFont {
@@ -35,4 +37,6 @@ export namespace libFont {
  */
 export const manifest: AssetEntry[] = [
   { kind: "glb", path: libGlb.player },
+  { kind: "glb", path: libGlb.sceneGLB },
+  { kind: "audio", path: libAudio.MainMusic },
 ];

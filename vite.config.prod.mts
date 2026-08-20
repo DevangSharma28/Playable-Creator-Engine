@@ -26,8 +26,38 @@ export default defineConfig({
   build: {
     outDir: path.resolve(import.meta.dirname, "dist"),
     emptyOutDir: true,
+    // Vite's own default target ("baseline-widely-available") assumes a
+    // real modern browser and leaves plenty of recent syntax untouched —
+    // class static {} blocks (ES2022), optional catch binding `catch {}`
+    // (ES2019), optional chaining `?.`/nullish coalescing `??` (ES2020)
+    // all showed up as-is in a build against that default (verified: grep
+    // for `static{`/`catch{` in a built dist/index.html found real
+    // matches, including inside three.js's own source, not just this
+    // project's). Mindworks' review WebView can't parse any of that —
+    // "SyntaxError: Unexpected token '{'" is exactly what an engine
+    // without static-block support throws on `static{...}`. es2015 tells
+    // esbuild (Vite's minifier/transformer) to down-level all of the
+    // above into older equivalent syntax across every module it touches,
+    // including node_modules dependencies like three.js — not just this
+    // project's own TypeScript.
+    target: "es2015",
     rollupOptions: {
       input: path.resolve(import.meta.dirname, "src/index.template.html"),
+      output: {
+        // Vite's default output is a real ES module (<script type="module">,
+        // plus any import/export keywords Rollup can't fully inline away) —
+        // ad-network review tools (Mintegral's Mindworks among them; see
+        // its own explicit rule: "Do not use crossorigin, type='module',
+        // import or export in local files") reject that outright, since
+        // some WebViews used for validation don't support ES modules at
+        // all, and file:// itself blocks module script loading via CORS
+        // regardless. IIFE is a single self-executing classic <script> —
+        // zero import/export syntax, no type="module" needed — safe here
+        // because this app has no dynamic import() calls to code-split
+        // (verified: nothing in src/ uses one), so there's nothing an IIFE
+        // bundle can't inline into one file anyway.
+        format: "iife",
+      },
     },
     // vite-plugin-singlefile needs every genuinely-imported asset inlined
     // regardless of size, or it can't fold them into the single output

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader, GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 
 /** Which loader (see AssetLoader.preload below) a manifest entry needs. Generic — lives here, not in a specific game's assets.ts, since it describes the loader's own shape, not any particular game's content. */
 export type AssetKind = "texture" | "glb" | "audio";
@@ -26,6 +27,17 @@ export class AssetLoader {
   private textureLoader = new THREE.TextureLoader();
   private gltfLoader = new GLTFLoader();
   private audioLoader = new THREE.AudioLoader();
+
+  constructor() {
+    // Lets GLTFLoader decode EXT_meshopt_compression (the Builder's "Half
+    // Float" option, see build.sh's compress-assets step) without any
+    // extra network request — the decoder's WASM is inlined as a base64
+    // byte array inside this module (see its own source), so it bundles
+    // into the app the same as any other import instead of needing a
+    // separately-hosted .wasm file. Harmless to set unconditionally: a GLB
+    // that was never meshopt-compressed just never triggers this path.
+    this.gltfLoader.setMeshoptDecoder(MeshoptDecoder);
+  }
 
   private textures = new Map<string, THREE.Texture>();
   private glbs = new Map<string, GLTF>();

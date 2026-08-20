@@ -3463,22 +3463,14 @@
         });
       }
 
-      document.getElementById("btn-add-image").addEventListener("click", () => {
-        document.getElementById("file-image-input").click();
-      });
-
-      document.getElementById("file-image-input").addEventListener("change", async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+      /** Shared by both pick paths below — turns a picked File into a new image element sized 1:1 to its natural pixels (not a % of the canvas, which used to make the same image render at a different on-screen size on every device). */
+      async function addImageFromFile(file) {
         const src = await fileToDataUrl(file);
         const img = new Image();
         img.onerror = () => {
           alert("Couldn't read that image file — try a different PNG/JPG.");
         };
         img.onload = () => {
-          // Exact 1:1 — a 101x101 source image becomes a 101x101 PX
-          // element, not a % of the canvas (which used to make the same
-          // image render at a different on-screen size on every device).
           addElement(
             Object.assign(baseNewElement("image"), pxSizeFields(img.naturalWidth, img.naturalHeight), {
               name: file.name.replace(/\.[a-z0-9]+$/i, ""),
@@ -3487,7 +3479,39 @@
           );
         };
         img.src = src;
+      }
+
+      document.getElementById("btn-add-image").addEventListener("click", async () => {
+        // Legacy <input type=file> has no per-input identity — every
+        // unlabeled file input on this origin (this one, "Replace image" in
+        // the Properties panel, ...) shares one remembered "last folder",
+        // which is why this kept reopening wherever any of them last
+        // pointed (e.g. public/assets/image) instead of somewhere useful.
+        // showOpenFilePicker's `id` gives Add Image its own remembered
+        // folder, isolated from those; `startIn` only seeds it the very
+        // first time (before it has a memory of its own).
+        if (typeof window.showOpenFilePicker === "function") {
+          try {
+            const [handle] = await window.showOpenFilePicker({
+              id: "playable-ui-add-image",
+              startIn: "pictures",
+              types: [{ description: "Images", accept: { "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"] } }],
+            });
+            addImageFromFile(await handle.getFile());
+            return;
+          } catch (err) {
+            if (err.name === "AbortError") return; // user closed the picker — not an error, and don't fall back into a second dialog
+            console.warn("showOpenFilePicker failed, falling back to <input type=file>:", err);
+          }
+        }
+        document.getElementById("file-image-input").click();
+      });
+
+      document.getElementById("file-image-input").addEventListener("change", async (e) => {
+        const file = e.target.files[0];
         e.target.value = "";
+        if (!file) return;
+        addImageFromFile(file);
       });
 
       document.getElementById("btn-add-text").addEventListener("click", () => {

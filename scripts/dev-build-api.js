@@ -70,7 +70,13 @@ function walkTsFiles(dir, baseDir, into) {
 
 /** Newest mtime (ms) among every file under `dir`, recursively — used by isBuildStale() below to tell whether anything's changed since the last build without needing a real diff. */
 function newestMtimeMs(dir) {
-  let newest = 0;
+  // The directory's own mtime, not just its children's — a plain file-mtime
+  // scan never notices a *deletion* (removing a file changes nothing about
+  // any file that's still there), so renaming/removing an asset silently
+  // failed to mark a build stale. A directory's mtime does update when an
+  // entry is added or removed (verified on this project's filesystem), so
+  // folding it in here catches that case the same way an edited file would.
+  let newest = fs.statSync(dir).mtimeMs;
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -762,26 +768,70 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (req.method === "POST" && req.url === "/build") {
-    // Fixed, version-controlled command — never anything from the request
-    // itself — so there's no injection surface regardless of who can reach
-    // this port.
-    exec("bash build.sh", { cwd: ROOT, timeout: 120000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-      res.setHeader("Content-Type", "application/json");
-      if (err) {
-        res.writeHead(500);
-        res.end(JSON.stringify({ ok: false, error: err.message, stdout, stderr }));
-        return;
-      }
-      // build.sh prints this on its own final line once dist/index.html is
-      // written — parsed straight from stdout rather than re-stat-ing the
-      // file here so the reported size is exactly the bytes build.sh itself
-      // just measured, not a second, possibly-racy read.
-      const sizeMatch = stdout.match(/BUILD_SIZE_BYTES=(\d+)/);
-      const sizeBytes = sizeMatch ? Number(sizeMatch[1]) : null;
+  if (req.method === "GET" && req.url === "/build-report") {
+    // dist/build-report.json is written by build.sh's own final python
+    // block (merging scripts/compress-assets.mjs's per-asset compression
+    // stats with the real inlined/gzip/total sizes) — this just hands that
+    // file to the Builder panel's "📊 Build Report" button as-is. Same
+    // stale/exists shape as /estimate-size above, for the same reason: the
+    // panel needs to tell "no build yet" apart from "built, but source has
+    // changed since."
+    res.setHeader("Content-Type", "application/json");
+    const reportPath = path.join(ROOT, "dist", "build-report.json");
+    try {
+      const stat = fs.statSync(reportPath);
+      const report = JSON.parse(fs.readFileSync(reportPath, "utf8"));
       res.writeHead(200);
-      res.end(JSON.stringify({ ok: true, stdout, stderr, sizeBytes }));
-    });
+      res.end(JSON.stringify({ ok: true, exists: true, stale: isBuildStale(stat.mtimeMs), report }));
+    } catch {
+      res.writeHead(200);
+      res.end(JSON.stringify({ ok: true, exists: false }));
+    }
+    return;
+  }
+
+  if (req.method === "POST" && req.url === "/build") {
+    // The command itself is fixed, version-controlled, never built from the
+    // request — no injection surface regardless of who can reach this port.
+    // The Builder panel's "Half Float" checkbox is the one build parameter
+    // the request body carries, and it only ever reaches build.sh through
+    // `env` below (a value, not shell text) — see
+    // scripts/compress-assets.mjs for what it actually toggles.
+    readRequestBody(req, 1024)
+      .then((raw) => {
+        let halfFloat = true; // best-compression default, matching a plain `npm run build`'s own default
+        try {
+          const parsed = raw ? JSON.parse(raw) : {};
+          if (typeof parsed.halfFloat === "boolean") halfFloat = parsed.halfFloat;
+        } catch {
+          // malformed/absent body — keep the default rather than failing the build over it
+        }
+        exec(
+          "bash build.sh",
+          { cwd: ROOT, timeout: 120000, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, HALF_FLOAT: halfFloat ? "1" : "0" } },
+          (err, stdout, stderr) => {
+            res.setHeader("Content-Type", "application/json");
+            if (err) {
+              res.writeHead(500);
+              res.end(JSON.stringify({ ok: false, error: err.message, stdout, stderr }));
+              return;
+            }
+            // build.sh prints this on its own final line once dist/index.html is
+            // written — parsed straight from stdout rather than re-stat-ing the
+            // file here so the reported size is exactly the bytes build.sh itself
+            // just measured, not a second, possibly-racy read.
+            const sizeMatch = stdout.match(/BUILD_SIZE_BYTES=(\d+)/);
+            const sizeBytes = sizeMatch ? Number(sizeMatch[1]) : null;
+            res.writeHead(200);
+            res.end(JSON.stringify({ ok: true, stdout, stderr, sizeBytes }));
+          }
+        );
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
     return;
   }
 
@@ -1062,5 +1112,5 @@ const server = http.createServer((req, res) => {
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
 });

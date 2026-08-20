@@ -11,13 +11,20 @@ export class World {
 
   constructor(scene: THREE.Scene, size = 10) {
     scene.background = new THREE.Color(0x8ed1ef);
-    scene.fog = new THREE.Fog(0x8ed1ef, 14, 26);
+    // near/far tuned for this class's own 10-unit procedural arena, but
+    // Game.ts now also drops Cinema_World.glb into the same scene — a
+    // ~109×124-unit environment (measured via its own world-space AABB) —
+    // and the old far:26 fogged out almost all of it into flat sky-blue.
+    // Pushed out to actually cover that footprint; near:30 stays past the
+    // player's own gameplay-camera distance (~21 units, see CAMERA_OFFSET
+    // in Game.ts) so nothing in the immediate play area fogs.
+    scene.fog = new THREE.Fog(0x8ed1ef, 30, 180);
 
     this.addLights(scene);
-    this.addGround(scene, size);
-    this.addWalls(scene, size);
+    // this.addGround(scene, size);
+    // this.addWalls(scene, size);
 
-    this.bound = size / 2 - 0.5;
+    this.bound = size;
   }
 
   private addLights(scene: THREE.Scene): void {
@@ -28,12 +35,12 @@ export class World {
     const sun = new THREE.DirectionalLight(0xfff4d6, 1.2);
     sun.name = "Sun";
     sun.position.set(6, 12, 6);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -8;
-    sun.shadow.camera.right = 8;
-    sun.shadow.camera.top = 8;
-    sun.shadow.camera.bottom = -8;
+    sun.castShadow = false;
+    // sun.shadow.mapSize.set(1024, 1024);
+    // sun.shadow.camera.left = -20;
+    // sun.shadow.camera.right = 20;
+    // sun.shadow.camera.top = 20;
+    // sun.shadow.camera.bottom = -20;
     scene.add(sun);
 
     const fillLight = new THREE.DirectionalLight(0xbfe3ff, 0.35);

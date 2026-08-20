@@ -6,7 +6,7 @@
 ._*
 
 # Custom folder icons
-Icon
+Icon
 
 # Volume root files
 .DocumentRevisions-V100
@@ -49,6 +49,10 @@ coverage/
 # Build output
 dist/
 build/Release
+
+# Compressed-asset build cache (scripts/compress-assets.mjs) — regenerated
+# by every build, mirrors assets/ under compressed copies.
+.build-cache/
 
 # TypeScript cache
 *.tsbuildinfo

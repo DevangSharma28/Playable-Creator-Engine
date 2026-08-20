@@ -342,18 +342,19 @@
       background: var(--eng-audio-hover);
     }
 
-    /* Audio Reactor panel — dev-only, empty placeholder for now. Same
-       "eng-panel" chrome as the Engine Room dock but a free-floating panel
-       (bottom-left) rather than docked, since it isn't tied to freecam like
-       #si-hierarchy/#si-inspector are — it can open regardless of 3D View
-       state. Toggled purely by #er-btn-audio (see script section). */
+    /* Audio Reactor panel — dev-only live spectrum of the game's music (see
+       the script section's drawSpectrum). Same "eng-panel" chrome as the
+       Engine Room dock but a free-floating panel (bottom-left) rather than
+       docked, since it isn't tied to freecam like #si-hierarchy/#si-inspector
+       are — it can open regardless of 3D View state. Toggled purely by
+       #er-btn-audio. */
     #audio-reactor {
       display: none;
       position: fixed;
       left: 10px;
       bottom: 10px;
       z-index: 70;
-      width: 250px;
+      width: 264px;
     }
 
     #audio-reactor.visible {
@@ -372,11 +373,62 @@
     }
 
     #audio-reactor-body {
-      padding: 16px 14px;
+      padding: 12px 14px 14px;
+    }
+
+    #ar-empty {
       font-size: 11px;
       font-style: italic;
       color: var(--eng-text-faint);
       text-align: center;
+      padding: 4px 0;
+    }
+
+    #ar-status {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10.5px;
+      color: var(--eng-text-dim);
+      margin-bottom: 8px;
+    }
+
+    #ar-status .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--eng-text-faint);
+      flex-shrink: 0;
+    }
+
+    #ar-status.playing .dot {
+      background: var(--eng-ok);
+      box-shadow: 0 0 5px var(--eng-ok);
+      animation: eng-pulse 1.6s ease-in-out infinite;
+    }
+
+    #ar-level {
+      margin-left: auto;
+      font-family: var(--eng-mono);
+      font-size: 10px;
+      color: var(--eng-text-faint);
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* The spectrum itself — a classic vertical-bar analyzer, redrawn every
+       frame from THREE.AudioAnalyser's own getFrequencyData() (see
+       SoundHandler.getAnalyser). Canvas over individual DOM bars: 64
+       frequency bins redrawn ~60x/sec would mean 64 style writes/frame for
+       a DOM version — one canvas clear+fill is cheaper and this already
+       only runs while the panel is actually open (see the script section's
+       start/stop-on-toggle). */
+    #ar-canvas {
+      display: block;
+      width: 100%;
+      height: 72px;
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid var(--eng-border-soft);
+      border-radius: var(--eng-radius-sm);
     }
 
     /* Exit (3D Viewer/Editor): the only thing shown top-right while
@@ -518,6 +570,26 @@
       text-transform: uppercase;
       color: var(--eng-text-faint);
       margin-bottom: 9px;
+    }
+
+    .builder-checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--eng-text);
+      cursor: pointer;
+    }
+
+    .builder-checkbox-row input {
+      accent-color: var(--eng-accent);
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .builder-checkbox-row .dim {
+      color: var(--eng-text-faint);
+      font-size: 11px;
     }
 
     /* Freshness badge — tells you *before* you build whether the number
@@ -725,6 +797,479 @@
     @keyframes builder-icon-spin {
       from { transform: rotate(0deg); }
       to { transform: rotate(360deg); }
+    }
+
+    /* Secondary to Build Now's hero treatment on purpose — this only ever
+       opens a read-only report, it doesn't ship anything, so it shouldn't
+       compete for attention. Enabled the instant a report exists (on load,
+       if dist/build-report.json is already there — see refreshReportButton
+       in the script — not just right after a fresh Build Now click). */
+    #builder-report-btn {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-top: 8px;
+      padding: 10px 16px;
+      border: 1px solid var(--eng-border);
+      border-radius: 10px;
+      background: var(--eng-panel-3);
+      color: var(--eng-text);
+      font-family: inherit;
+      font-size: 12.5px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
+    }
+
+    #builder-report-btn:hover:not(:disabled) {
+      background: #2c3036;
+      border-color: #3a3e45;
+    }
+
+    #builder-report-btn:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+
+    #builder-report-btn:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    /* ===================================================================
+       Build Report — a second, wider modal (not squeezed into the Builder
+       panel's own 380px card): summary cards, a size-composition bar,
+       per-asset detail, optimization notes. Same backdrop/header/close
+       language as #builder-modal-backdrop so it reads as part of the same
+       toolset, not a bolted-on separate app.
+       =================================================================== */
+    #report-modal-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 210;
+      background: rgba(0, 0, 0, 0.6);
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    #report-modal-backdrop.visible {
+      display: flex;
+    }
+
+    #report-modal {
+      width: min(720px, 100%);
+      max-height: min(84vh, 900px);
+      display: flex;
+      flex-direction: column;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius);
+      box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0, 0, 0, 0.3);
+      overflow: hidden;
+    }
+
+    #report-modal-header {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 16px;
+      font-family: var(--eng-mono);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--eng-text-dim);
+      border-bottom: 1px solid var(--eng-border-soft);
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .report-badge {
+      display: none;
+      font-family: var(--eng-mono);
+      font-size: 9.5px;
+      font-weight: 800;
+      letter-spacing: 0.05em;
+      color: var(--eng-warn);
+      background: rgba(255, 204, 77, 0.12);
+      border: 1px solid rgba(255, 204, 77, 0.35);
+      border-radius: 999px;
+      padding: 3px 9px;
+    }
+
+    .report-badge.visible {
+      display: inline-block;
+    }
+
+    #report-modal-close {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--eng-text-faint);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1;
+      padding: 3px 5px;
+      border-radius: 4px;
+    }
+
+    #report-modal-close:hover {
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    #report-modal-body {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 18px 20px 22px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+    }
+
+    #report-modal-body::-webkit-scrollbar {
+      width: 6px;
+    }
+    #report-modal-body::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.22);
+      border-radius: 999px;
+    }
+
+    .report-empty {
+      display: none;
+      padding: 40px 10px;
+      text-align: center;
+      color: var(--eng-text-faint);
+      font-style: italic;
+      font-size: 12.5px;
+    }
+
+    .report-empty.visible {
+      display: block;
+    }
+
+    .report-content {
+      display: none;
+    }
+
+    .report-content.visible {
+      display: block;
+    }
+
+    .report-block {
+      margin-top: 22px;
+    }
+
+    .report-block-label {
+      font-family: var(--eng-mono);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--eng-text-faint);
+      margin-bottom: 10px;
+    }
+
+    /* Four stat cards — Total Size, Gzip, Duration, Compression Mode. Same
+       "quiet panel, one loud number" shape repeated four times reads faster
+       than a paragraph of prose for exactly the numbers a developer scans
+       first. */
+    #report-summary-cards {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+    }
+
+    .report-card {
+      background: var(--eng-panel-2);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 10px 12px;
+    }
+
+    .report-card-label {
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--eng-text-faint);
+      margin-bottom: 5px;
+    }
+
+    .report-card-value {
+      font-family: var(--eng-mono);
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--eng-text);
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+
+    .report-card-value.ok { color: var(--eng-ok); }
+    .report-card-value.warn { color: var(--eng-warn); }
+    .report-card-value.bad { color: var(--eng-danger); }
+
+    .report-card-sub {
+      margin-top: 3px;
+      font-size: 10px;
+      color: var(--eng-text-dim);
+    }
+
+    /* Stacked horizontal bar — each asset's share of the final dist/
+       index.html, in the exact same color used for its legend swatch and
+       its own detail card's left border, so the eye can trace one asset
+       across all three without reading labels twice. */
+    #report-composition-bar {
+      display: flex;
+      width: 100%;
+      height: 22px;
+      border-radius: 6px;
+      overflow: hidden;
+      border: 1px solid var(--eng-border);
+      background: var(--eng-panel-2);
+    }
+
+    .report-comp-seg {
+      height: 100%;
+      min-width: 2px;
+      transition: opacity 0.15s ease;
+    }
+
+    .report-comp-seg:hover {
+      opacity: 0.8;
+    }
+
+    #report-composition-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 9px;
+    }
+
+    .report-legend-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 10.5px;
+      color: var(--eng-text-dim);
+    }
+
+    .report-legend-swatch {
+      width: 9px;
+      height: 9px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* One card per asset — name/kind up top, the before->after size
+       reduction as the headline (it's the number a developer actually
+       decides things from), everything else (dimensions, counts, per-type
+       breakdown) as a quieter detail grid underneath so the card scans in
+       under a second even with six assets stacked. */
+    .report-asset-card {
+      background: var(--eng-panel-2);
+      border: 1px solid var(--eng-border);
+      border-left: 3px solid var(--eng-accent);
+      border-radius: var(--eng-radius-sm);
+      padding: 12px 14px;
+      margin-bottom: 8px;
+    }
+
+    .report-asset-head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .report-asset-name {
+      font-weight: 700;
+      font-size: 12.5px;
+      color: var(--eng-text);
+    }
+
+    .report-asset-kind {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--eng-text-faint);
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 999px;
+      padding: 1px 7px;
+    }
+
+    .report-asset-sizes {
+      margin-left: auto;
+      font-family: var(--eng-mono);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+      color: var(--eng-text-dim);
+      white-space: nowrap;
+    }
+
+    .report-asset-sizes b {
+      color: var(--eng-text);
+    }
+
+    .report-asset-pct {
+      font-weight: 800;
+      color: var(--eng-ok);
+    }
+
+    .report-asset-detail {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 6px 14px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--eng-border-soft);
+    }
+
+    .report-asset-stat {
+      font-size: 10.5px;
+      color: var(--eng-text-dim);
+    }
+
+    .report-asset-stat b {
+      display: block;
+      font-family: var(--eng-mono);
+      font-size: 12px;
+      color: var(--eng-text);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .report-asset-warn-note {
+      margin-top: 8px;
+      font-size: 10.5px;
+      color: var(--eng-warn);
+    }
+
+    #report-tips {
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+
+    .report-tip {
+      display: flex;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--eng-text-dim);
+      background: var(--eng-panel-2);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 9px 12px;
+      line-height: 1.4;
+    }
+
+    .report-tip b {
+      color: var(--eng-text);
+    }
+
+    .report-tip-empty {
+      font-size: 11.5px;
+      color: var(--eng-text-faint);
+      font-style: italic;
+    }
+
+    .report-block-label .dim {
+      text-transform: none;
+      letter-spacing: 0;
+      font-weight: 600;
+      color: var(--eng-text-faint);
+    }
+
+    /* Hidden by default (JS shows it only when unusedAssets is non-empty —
+       most builds should have nothing to show here) — amber, not the
+       neutral panel gray the Assets cards use above, so a real finding
+       (dead weight sitting on disk, never shipped) reads as something to
+       act on rather than just more inventory. */
+    #report-unused-block {
+      display: none;
+    }
+
+    /* Loudest thing in this whole modal on purpose, and always first —
+       this is the one finding that means "this build will fail ad-network
+       review," not just "here's room to optimize." Red (--eng-danger), not
+       the amber Unused block above uses, and placed before the summary
+       cards rather than down with Optimization notes — a developer should
+       see this before they even look at the size numbers. */
+    #report-compat-block {
+      display: none;
+      background: var(--eng-danger-soft);
+      border: 1px solid rgba(255, 82, 82, 0.4);
+      border-radius: var(--eng-radius-sm);
+      padding: 12px 14px;
+      margin-bottom: 18px;
+    }
+
+    #report-compat-block.visible {
+      display: block;
+    }
+
+    .report-compat-title {
+      font-weight: 800;
+      font-size: 12.5px;
+      color: var(--eng-danger);
+      margin-bottom: 8px;
+    }
+
+    .report-compat-item {
+      font-size: 11.5px;
+      color: var(--eng-text);
+      padding: 5px 0;
+      border-top: 1px solid rgba(255, 82, 82, 0.2);
+      line-height: 1.4;
+    }
+
+    .report-compat-item:first-child {
+      border-top: none;
+    }
+
+    #report-unused-block.visible {
+      display: block;
+    }
+
+    .report-unused-card {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+      background: rgba(255, 204, 77, 0.06);
+      border: 1px solid rgba(255, 204, 77, 0.3);
+      border-left: 3px solid var(--eng-warn);
+      border-radius: var(--eng-radius-sm);
+      padding: 10px 14px;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+
+    .report-unused-card .name {
+      font-weight: 700;
+      color: var(--eng-text);
+    }
+
+    .report-unused-card .path {
+      font-family: var(--eng-mono);
+      font-size: 10.5px;
+      color: var(--eng-text-faint);
+    }
+
+    .report-unused-card .size {
+      margin-left: auto;
+      font-family: var(--eng-mono);
+      font-weight: 700;
+      color: var(--eng-warn);
+    }
+
+    @media (max-width: 640px) {
+      #report-summary-cards {
+        grid-template-columns: repeat(2, 1fr);
+      }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1003,6 +1548,7 @@
       font-family: var(--eng-mono);
       font-size: 10.5px;
       padding: 5px 5px;
+      appearance: textfield;
       -moz-appearance: textfield;
     }
 
@@ -1660,7 +2206,7 @@
         <button id="er-btn-build" class="primary" title="Open the Builder panel">🛠 Builder</button>
       </div>
       <button id="er-btn-viewer" title="Orbit, select, and edit objects in the live gameplay scene">🧭 3D Viewer/Editor</button>
-      <button id="er-btn-audio" title="Audio Reactor — coming soon">🎧 Audio Reactor</button>
+      <button id="er-btn-audio" title="Live frequency-spectrum readout of the game's background music">🎧 Audio Reactor</button>
       <div id="engine-room-stats">
         <span>FPS</span><span class="val" id="er-fps">--</span>
         <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
@@ -1710,9 +2256,53 @@
           <div id="builder-size-label">— <span class="dim">/ 5 MB budget</span></div>
           <div id="builder-detail"></div>
         </div>
+        <div class="builder-section">
+          <div class="builder-section-label">Compression</div>
+          <label class="builder-checkbox-row" title="KHR_mesh_quantization + EXT_meshopt_compression — compact 16-bit-equivalent vertex precision, entropy-coded on top. Quantization bounds are computed per-mesh, so precision holds even on a huge environment. Natively supported by GLTFLoader — nothing extra to ship.">
+            <input type="checkbox" id="builder-halffloat" checked />
+            <span>Half Float mesh compression <span class="dim">— smaller GLBs, visually lossless</span></span>
+          </label>
+        </div>
         <div class="builder-section" style="margin-bottom: 0;">
           <div class="builder-section-label">Actions</div>
           <button type="button" id="builder-build-btn"><span class="icon">🚀</span><span id="builder-build-btn-text">Build Now</span></button>
+          <button type="button" id="builder-report-btn" title="Build first — nothing to show yet" disabled><span class="icon">📊</span> Build Report</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="report-modal-backdrop">
+    <div id="report-modal">
+      <div id="report-modal-header">
+        <span>📊 Build Report</span>
+        <span id="report-stale-badge" class="report-badge">STALE — SOURCE CHANGED SINCE</span>
+        <button type="button" id="report-modal-close" title="Close">✕</button>
+      </div>
+      <div id="report-modal-body">
+        <div id="report-empty" class="report-empty">No build report yet — run Build Now first.</div>
+        <div id="report-content" class="report-content">
+          <div id="report-compat-block" class="report-compat-block">
+            <div class="report-compat-title">⚠ Ad-network compatibility warnings</div>
+            <div id="report-compat-list"></div>
+          </div>
+          <div id="report-summary-cards"></div>
+          <div class="report-block">
+            <div class="report-block-label">Size composition</div>
+            <div id="report-composition-bar"></div>
+            <div id="report-composition-legend"></div>
+          </div>
+          <div class="report-block">
+            <div class="report-block-label">Assets <span class="dim">— what's actually shipped</span></div>
+            <div id="report-assets"></div>
+          </div>
+          <div id="report-unused-block" class="report-block">
+            <div class="report-block-label">🗑 Unused <span class="dim">— found in assets/, not referenced anywhere</span></div>
+            <div id="report-unused"></div>
+          </div>
+          <div class="report-block">
+            <div class="report-block-label">💡 Optimization notes</div>
+            <div id="report-tips"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -1726,7 +2316,13 @@
       <span>Audio Reactor</span>
       <span class="tag">DEV</span>
     </div>
-    <div id="audio-reactor-body">Nothing here yet.</div>
+    <div id="audio-reactor-body">
+      <div id="ar-empty">Waiting for the game to load…</div>
+      <div id="ar-live" style="display:none">
+        <div id="ar-status"><span class="dot"></span><span id="ar-status-text">Stopped</span><span id="ar-level">— / 255</span></div>
+        <canvas id="ar-canvas" width="236" height="72"></canvas>
+      </div>
+    </div>
   </div>
   <div id="si-gizmo-toolbar">
     <div class="si-gizmo-modes">
@@ -2009,6 +2605,7 @@
     const builderFill = document.getElementById("builder-bar-fill");
     const builderSizeLabel = document.getElementById("builder-size-label");
     const builderDetail = document.getElementById("builder-detail");
+    const builderHalfFloat = document.getElementById("builder-halffloat");
     const builderBuildBtn = document.getElementById("builder-build-btn");
     const builderBuildBtnText = document.getElementById("builder-build-btn-text");
 
@@ -2068,6 +2665,11 @@
     function openBuilderModal() {
       builderBackdrop.classList.add("visible");
       refreshEstimate();
+      // Defined further down (see its own doc comment) — deferred like this
+      // because a report can already exist from a build run before this
+      // page ever loaded (CLI `npm run build`, another tab, ...), not only
+      // right after this session's own Build Now click.
+      window.refreshReportButton && window.refreshReportButton();
     }
 
     function closeBuilderModal() {
@@ -2088,7 +2690,11 @@
       builderStatus.textContent = "Building…";
       setFreshness(null, "Building…");
       try {
-        const res = await fetch(BUILD_API, { method: "POST" });
+        const res = await fetch(BUILD_API, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ halfFloat: builderHalfFloat.checked }),
+        });
         const data = await res.json();
         builderBuildBtn.classList.remove("building");
         if (data.ok) {
@@ -2123,7 +2729,263 @@
         builderBuildBtn.classList.remove("done", "failed");
         builderBuildBtnText.textContent = "Build Now";
       }, 2200);
+      refreshReportButton();
     });
+
+    // Build Report — reads dist/build-report.json (written by build.sh's
+    // own final step, merging scripts/compress-assets.mjs's per-asset
+    // compression + glTF-Transform inspect() detail with the real
+    // gzip/total sizes) via GET /build-report and renders it as summary
+    // cards + a size-composition bar + per-asset detail + a few
+    // data-driven optimization notes. Entirely a read of a file build.sh
+    // already wrote — no new build step of its own.
+    (() => {
+      const REPORT_API = "http://127.0.0.1:8001/build-report";
+      const reportBtn = document.getElementById("builder-report-btn");
+      const reportBackdrop = document.getElementById("report-modal-backdrop");
+      const reportClose = document.getElementById("report-modal-close");
+      const staleBadge = document.getElementById("report-stale-badge");
+      const emptyEl = document.getElementById("report-empty");
+      const contentEl = document.getElementById("report-content");
+      const cardsEl = document.getElementById("report-summary-cards");
+      const compBarEl = document.getElementById("report-composition-bar");
+      const compLegendEl = document.getElementById("report-composition-legend");
+      const assetsEl = document.getElementById("report-assets");
+      const unusedBlockEl = document.getElementById("report-unused-block");
+      const unusedEl = document.getElementById("report-unused");
+      const tipsEl = document.getElementById("report-tips");
+      const compatBlockEl = document.getElementById("report-compat-block");
+      const compatListEl = document.getElementById("report-compat-list");
+
+      // Cycled by asset index, not chosen per-kind — this project's asset
+      // list is short enough (models + one audio track today) that a fixed
+      // per-kind palette would waste most of its own range; this way every
+      // segment in the composition bar/legend/card-border reads as a
+      // distinct color regardless of how many of each kind there are.
+      const PALETTE = ["#e8961e", "#b98cf7", "#4ade80", "#7dd3fc", "#ff8a8a", "#ffcc4d"];
+
+      function fmtBytes(n) {
+        if (n == null) return "—";
+        return n >= 1024 * 1024 ? (n / (1024 * 1024)).toFixed(2) + " MB" : (n / 1024).toFixed(1) + " KB";
+      }
+      function fmtPct(before, after) {
+        if (!before) return "0%";
+        return Math.round(((before - after) / before) * 100) + "%";
+      }
+      function fmtDuration(sec) {
+        if (sec == null) return "—";
+        if (sec < 60) return sec + "s";
+        return Math.floor(sec / 60) + "m " + (sec % 60) + "s";
+      }
+      function fmtDim(min, max) {
+        if (!min || !max) return null;
+        const size = min.map((v, i) => max[i] - v);
+        return size.map((v) => v.toFixed(1)).join(" × ") + " units";
+      }
+
+      /** Enabled the moment a report exists on disk — independent of whether *this* page session was the one that triggered the build (a teammate could have run `npm run build` from the CLI). Called on Builder-panel open and right after every Build Now, never auto-opens the modal itself. */
+      async function refreshReportButton() {
+        try {
+          const res = await fetch(REPORT_API);
+          const data = await res.json();
+          reportBtn.disabled = !(data.ok && data.exists);
+          reportBtn.title = reportBtn.disabled ? "Build first — nothing to show yet" : "View the last build's size/compression breakdown";
+        } catch {
+          reportBtn.disabled = true;
+          reportBtn.title = "Build API offline — start with `npm run dev`";
+        }
+      }
+      window.refreshReportButton = refreshReportButton; // openBuilderModal (defined above this IIFE) calls this — see its own doc comment
+
+      function renderSummaryCards(report) {
+        const overBudget = report.overBudget;
+        const pctOfBudget = Math.round((report.distBytes / report.budgetBytes) * 100);
+        cardsEl.innerHTML = [
+          card("Total Size", fmtBytes(report.distBytes), overBudget ? "bad" : pctOfBudget > 80 ? "warn" : "ok", pctOfBudget + "% of 5 MB budget"),
+          card("Gzipped", fmtBytes(report.gzipBytes), null, "as most CDNs/ad networks actually transfer it"),
+          card("Build Time", fmtDuration(report.buildDurationSec), null, "compression + bundle + inline"),
+          card("Mesh Compression", report.halfFloat ? "Half Float" : "Quantize only", report.halfFloat ? "ok" : null, report.halfFloat ? "meshopt + quantization" : "quantization only"),
+        ].join("");
+      }
+      function card(label, value, cls, sub) {
+        return (
+          '<div class="report-card"><div class="report-card-label">' + label + '</div>' +
+          '<div class="report-card-value' + (cls ? " " + cls : "") + '">' + value + "</div>" +
+          (sub ? '<div class="report-card-sub">' + sub + "</div>" : "") +
+          "</div>"
+        );
+      }
+
+      function renderComposition(report) {
+        const total = report.distBytes || 1;
+        const segBytes = (a) => a.inlinedBytes ?? a.afterBytes ?? 0;
+        const sorted = [...report.assets].sort((a, b) => segBytes(b) - segBytes(a));
+        const otherBytes = Math.max(0, total - sorted.reduce((s, a) => s + segBytes(a), 0));
+
+        compBarEl.innerHTML = sorted
+          .map((a, i) => {
+            const pct = (segBytes(a) / total) * 100;
+            return '<div class="report-comp-seg" style="width:' + pct.toFixed(2) + "%;background:" + PALETTE[i % PALETTE.length] + ';" title="' + a.name + ": " + fmtBytes(segBytes(a)) + '"></div>';
+          })
+          .join("") + (otherBytes > 0 ? '<div class="report-comp-seg" style="width:' + ((otherBytes / total) * 100).toFixed(2) + '%;background:var(--eng-text-faint);" title="Bundle/runtime code: ' + fmtBytes(otherBytes) + '"></div>' : "");
+
+        compLegendEl.innerHTML =
+          sorted.map((a, i) => legendItem(PALETTE[i % PALETTE.length], a.name, segBytes(a) / total)).join("") +
+          (otherBytes > 0 ? legendItem("var(--eng-text-faint)", "Bundle/runtime code (Three.js, game logic)", otherBytes / total) : "");
+      }
+      function legendItem(color, label, frac) {
+        return '<div class="report-legend-item"><span class="report-legend-swatch" style="background:' + color + '"></span>' + label + " — " + Math.round(frac * 100) + "%</div>";
+      }
+
+      function renderAssets(report) {
+        const segBytes = (a) => a.inlinedBytes ?? a.afterBytes ?? 0;
+        const sorted = [...report.assets].sort((a, b) => segBytes(b) - segBytes(a));
+        assetsEl.innerHTML = sorted.map((a, i) => assetCard(a, PALETTE[report.assets.indexOf(a) % PALETTE.length])).join("");
+      }
+
+      function assetCard(a, color) {
+        let detail = "";
+        let warnNote = "";
+        if (!a.compressed) {
+          warnNote = '<div class="report-asset-warn-note">⚠ Compression skipped for this asset — using the original file as-is (see the build log for why: missing dependency, unsupported format, or a failed encode).</div>';
+        }
+        if (a.kind === "model" && a.inspectAfter) {
+          const ia = a.inspectAfter;
+          const ib = a.inspectBefore;
+          const scene = ia.scenes && ia.scenes[0];
+          const dim = scene ? fmtDim(scene.bboxMin, scene.bboxMax) : null;
+          const triangles = ia.meshes.reduce((s, m) => s + (m.glPrimitives || 0), 0);
+          const trianglesBefore = ib ? ib.meshes.reduce((s, m) => s + (m.glPrimitives || 0), 0) : null;
+          detail =
+            '<div class="report-asset-detail">' +
+            stat("Dimensions", dim || "—") +
+            stat("Vertices", (scene ? scene.renderVertexCount.toLocaleString() : "—")) +
+            stat("Triangles", triangles.toLocaleString() + (trianglesBefore && trianglesBefore !== triangles ? " (from " + trianglesBefore.toLocaleString() + ")" : "")) +
+            stat("Meshes", ia.meshes.length + (ib && ib.meshes.length !== ia.meshes.length ? " (from " + ib.meshes.length + ")" : "")) +
+            stat("Materials", ia.materials.length + (ib && ib.materials.length !== ia.materials.length ? " (from " + ib.materials.length + ")" : "")) +
+            stat("Textures", ia.textures.length + (ib && ib.textures.length !== ia.textures.length ? " (from " + ib.textures.length + ")" : "")) +
+            (ia.animations.length ? stat("Animations", ia.animations.length + " (" + ia.animations.map((an) => an.name).join(", ") + ")") : "") +
+            "</div>";
+        } else if (a.kind === "audio" && a.audioBefore) {
+          const before = a.audioBefore;
+          const after = a.audioAfter;
+          detail =
+            '<div class="report-asset-detail">' +
+            stat("Duration", before.durationSec ? before.durationSec.toFixed(1) + "s" : "—") +
+            stat("Bitrate", (before.bitRate ? Math.round(before.bitRate / 1000) + " kbps" : "—") + (after && after.bitRate ? " → " + Math.round(after.bitRate / 1000) + " kbps" : "")) +
+            stat("Channels", before.channels ?? "—") +
+            stat("Sample Rate", before.sampleRate ? (before.sampleRate / 1000).toFixed(1) + " kHz" : "—") +
+            "</div>";
+        }
+        return (
+          '<div class="report-asset-card" style="border-left-color:' + color + '">' +
+          '<div class="report-asset-head">' +
+          '<span class="report-asset-name">' + a.name + "</span>" +
+          '<span class="report-asset-kind">' + a.kind + "</span>" +
+          '<span class="report-asset-sizes"><b>' + fmtBytes(a.beforeBytes) + "</b> → <b>" + fmtBytes(a.afterBytes) + '</b> <span class="report-asset-pct">-' + fmtPct(a.beforeBytes, a.afterBytes) + "</span></span>" +
+          "</div>" +
+          detail +
+          warnNote +
+          "</div>"
+        );
+      }
+      function stat(label, value) {
+        return '<div class="report-asset-stat">' + label + "<b>" + value + "</b></div>";
+      }
+
+      function renderCompatWarnings(report) {
+        const warnings = report.compatibilityWarnings || [];
+        compatBlockEl.classList.toggle("visible", warnings.length > 0);
+        if (!warnings.length) return;
+        compatListEl.innerHTML = warnings
+          .map((w) => '<div class="report-compat-item">' + w.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]) + "</div>")
+          .join("");
+      }
+
+      function renderUnused(report) {
+        const unused = report.unusedAssets || [];
+        unusedBlockEl.classList.toggle("visible", unused.length > 0);
+        if (!unused.length) return;
+        unusedEl.innerHTML = unused
+          .map(
+            (a) =>
+              '<div class="report-unused-card"><span class="name">' + a.name + '</span><span class="path">' + a.relPath + '</span><span class="size">' + fmtBytes(a.bytes) + "</span></div>"
+          )
+          .join("");
+      }
+
+      function renderTips(report) {
+        const tips = [];
+        const segBytes = (a) => a.inlinedBytes ?? a.afterBytes ?? 0;
+        const sorted = [...report.assets].sort((a, b) => segBytes(b) - segBytes(a));
+        const biggest = sorted[0];
+        const unused = report.unusedAssets || [];
+
+        if (unused.length) {
+          const unusedTotal = unused.reduce((s, a) => s + a.bytes, 0);
+          tips.push(
+            "<b>" + unused.length + " unused file" + (unused.length > 1 ? "s" : "") + "</b> found in assets/ (" + fmtBytes(unusedTotal) + " total) — not referenced anywhere in src/game/assets.ts, so none of it ships, but it's still sitting on disk. See Unused above; safe to delete."
+          );
+        }
+
+        if (report.overBudget) {
+          tips.push("<b>Over the 5 MB single-file budget</b> by " + fmtBytes(report.distBytes - report.budgetBytes) + " — most ad networks will reject this build as-is.");
+        }
+        if (biggest) {
+          tips.push("<b>" + biggest.name + "</b> is the largest asset — " + Math.round((segBytes(biggest) / report.distBytes) * 100) + "% of the final build. Start here if you need to shrink further.");
+        }
+        if (!report.halfFloat) {
+          tips.push('Half Float mesh compression is <b>off</b> for this build — turning it on gets extra size reduction on the models above at no visual cost (see the Compression checkbox).');
+        }
+        for (const a of report.assets) {
+          if (!a.compressed) {
+            tips.push("<b>" + a.name + "</b> wasn't compressed (see its card above) — the full uncompressed file is embedded.");
+          }
+          if (a.kind === "model" && a.inspectAfter) {
+            const bigTex = a.inspectAfter.textures.filter((t) => t.size > 200 * 1024);
+            for (const t of bigTex) {
+              tips.push("<b>" + a.name + "</b>'s texture \"" + (t.name || t.slots.join("/")) + "\" is still " + fmtBytes(t.size) + " (" + t.resolution + ") after compression — consider a smaller source image if it doesn't need to be that large on screen.");
+            }
+          }
+        }
+        tipsEl.innerHTML = tips.length ? tips.map((t) => '<div class="report-tip">' + t + "</div>").join("") : '<div class="report-tip-empty">Nothing stands out — this build looks lean.</div>';
+      }
+
+      function renderReport(data) {
+        const exists = data.ok && data.exists;
+        emptyEl.classList.toggle("visible", !exists);
+        contentEl.classList.toggle("visible", exists);
+        staleBadge.classList.toggle("visible", exists && data.stale);
+        if (!exists) return;
+        const report = data.report;
+        renderCompatWarnings(report);
+        renderSummaryCards(report);
+        renderComposition(report);
+        renderAssets(report);
+        renderUnused(report);
+        renderTips(report);
+      }
+
+      async function openReportModal() {
+        reportBackdrop.classList.add("visible");
+        try {
+          const res = await fetch(REPORT_API);
+          renderReport(await res.json());
+        } catch (err) {
+          renderReport({ ok: false });
+          console.error("Build Report: API unreachable", err);
+        }
+      }
+      function closeReportModal() {
+        reportBackdrop.classList.remove("visible");
+      }
+
+      reportBtn.addEventListener("click", openReportModal);
+      reportClose.addEventListener("click", closeReportModal);
+      reportBackdrop.addEventListener("click", (e) => {
+        if (e.target === reportBackdrop) closeReportModal();
+      });
+    })();
 
     // Engine Room: Control Desk — a live public-field viewer/editor for the
     // running game's own gameplay classes (Player, CoinField, World, Game
@@ -2435,14 +3297,75 @@
     viewerBtn.addEventListener("click", () => setFreecamUI(true));
     exitViewerBtn.addEventListener("click", () => setFreecamUI(false));
 
-    // Engine Room: Audio Reactor — placeholder panel, no audio system wired
-    // up yet. Independent of freecam (unlike the hierarchy/inspector panels
-    // above), so it opens/closes purely off its own button regardless of
-    // 3D View state.
+    // Engine Room: Audio Reactor — dev-only live spectrum of whatever
+    // SoundHandler is actually playing, via IonEngine's __getAudioAnalyser/
+    // __isMusicPlaying hooks (see their own doc comments — the analyser
+    // itself is never constructed game-side until this panel's first open,
+    // and this panel's own draw loop only runs while it's visible, so
+    // closing it costs nothing beyond that first construction). Independent
+    // of freecam (unlike the hierarchy/inspector panels above), so it
+    // opens/closes purely off its own button regardless of 3D View state.
     const audioBtn = document.getElementById("er-btn-audio");
     const audioPanel = document.getElementById("audio-reactor");
+    const arEmpty = document.getElementById("ar-empty");
+    const arLive = document.getElementById("ar-live");
+    const arStatus = document.getElementById("ar-status");
+    const arStatusText = document.getElementById("ar-status-text");
+    const arLevel = document.getElementById("ar-level");
+    const arCanvas = document.getElementById("ar-canvas");
+    const arCtx = arCanvas.getContext("2d");
+    let arRafId = null;
+
+    function drawSpectrum() {
+      arRafId = requestAnimationFrame(drawSpectrum);
+      const analyser = window.__getAudioAnalyser && window.__getAudioAnalyser();
+      const w = arCanvas.width;
+      const h = arCanvas.height;
+      arCtx.clearRect(0, 0, w, h);
+
+      if (!analyser) {
+        arEmpty.style.display = "";
+        arLive.style.display = "none";
+        return;
+      }
+      arEmpty.style.display = "none";
+      arLive.style.display = "";
+
+      const playing = !!(window.__isMusicPlaying && window.__isMusicPlaying());
+      arStatus.classList.toggle("playing", playing);
+      arStatusText.textContent = playing ? "Playing" : "Stopped — tap the game to start music";
+
+      const data = analyser.getFrequencyData(); // Uint8Array, one value 0-255 per frequency bin, mutated in place by three.js each call
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) sum += data[i];
+      const avg = Math.round(sum / data.length);
+      arLevel.textContent = avg + " / 255";
+
+      const barCount = data.length;
+      const gap = 1.5;
+      const barWidth = w / barCount - gap;
+      for (let i = 0; i < barCount; i++) {
+        const value = data[i] / 255; // 0..1
+        const barHeight = Math.max(1, value * h);
+        const x = i * (barWidth + gap);
+        // Amber (quiet) -> violet (loud) — same two hues as the rest of the
+        // Engine Room's own color language (--eng-accent/--eng-audio),
+        // reused here as a low/high energy gradient instead of two
+        // unrelated new colors.
+        const hue = 30 + value * 240; // ~30deg amber -> ~270deg violet
+        arCtx.fillStyle = "hsl(" + hue + ", 80%, " + (55 + value * 15) + "%)";
+        arCtx.fillRect(x, h - barHeight, barWidth, barHeight);
+      }
+    }
+
     audioBtn.addEventListener("click", () => {
-      audioPanel.classList.toggle("visible");
+      const nowVisible = audioPanel.classList.toggle("visible");
+      if (nowVisible && arRafId === null) {
+        drawSpectrum();
+      } else if (!nowVisible && arRafId !== null) {
+        cancelAnimationFrame(arRafId);
+        arRafId = null;
+      }
     });
 
     // Gizmo mode (Select/Move/Rotate/Scale) — a thin passthrough to

@@ -1,5 +1,9 @@
 import { Game } from "../game/Game";
 import type { UILayout } from "./ui/UILayout";
+import { Scheduler } from "./core/Scheduler";
+import { EventBus } from "./core/EventBus";
+import { bindIon, unbindIon, type IonContext } from "./Ion";
+import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
 
 /**
  * Dev-only hooks the Engine Room panel (index.html, the dev entry — see
@@ -66,6 +70,15 @@ import type { UILayout } from "./ui/UILayout";
  * running game share this same `window`, so the hook just hands back the
  * real object reference.
  *
+ * __getAudioAnalyser / __isMusicPlaying: the Engine Room "Audio Reactor"
+ * panel's live spectrum readout — same no-serialization reasoning as
+ * __getInspectable, just handing back a THREE.AudioAnalyser instance
+ * (structurally typed here as {getFrequencyData} rather than importing
+ * THREE into this file just for the annotation) instead of a whole object.
+ * Dev-only in every sense: the analyser itself is never constructed unless
+ * this hook is actually called (see SoundHandler.getAnalyser's own doc
+ * comment), so a production build that never wires these up pays nothing.
+ *
  * __disposeGame / __gameInstanceGeneration: in-place hot-reload itself.
  * main.ts self-accepts its own Vite HMR updates (`import.meta.hot.accept()`)
  * so a source/layout save re-executes just that module in place instead of
@@ -90,6 +103,8 @@ type EngineWindow = Window & {
   __frameSelected?: () => void;
   __onInspectorStateChanged?: (state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void;
   __getInspectable?: (className: string) => object | undefined;
+  __getAudioAnalyser?: () => { getFrequencyData: () => Uint8Array } | undefined;
+  __isMusicPlaying?: () => boolean;
   __disposeGame?: () => void;
   __gameInstanceGeneration?: number;
   __onGameReady?: () => void;
@@ -111,6 +126,50 @@ type EngineWindow = Window & {
  *   const canvas = document.getElementById("game") as HTMLCanvasElement;
  *   IonEngine.boot(canvas);
  */
+/**
+ * Optional knobs for boot(). Everything here has a default that preserves
+ * the engine's original behavior exactly — an existing playable that calls
+ * `IonEngine.boot(canvas)` with no options behaves byte-for-byte as before.
+ */
+export interface IonEngineOptions {
+  /**
+   * Run gameplay on a fixed timestep (seconds — e.g. `1/60`) instead of
+   * the default variable, frame-length dt.
+   *
+   * Off by default, because the variable path is what every existing
+   * system here was written and tuned against. Turn it on when
+   * determinism matters — anything integrating forces, resolving
+   * collisions, or otherwise accumulating state across frames will
+   * visibly jitter (or tunnel straight through a collider) on a frame
+   * spike under variable dt, because a single 50ms step is not the same
+   * as three 16ms ones.
+   *
+   * When set, update() may run several times in one animation frame to
+   * consume the accumulated time, and exactly once per fixed step —
+   * render() still runs once per frame, as usual.
+   */
+  fixedTimestep?: number;
+
+  /**
+   * update()/render() throwing mid-frame stops that RAF chain for good —
+   * not stopping it means the *next* frame throws too, forever, which is
+   * worse than doing nothing: a playable that's crashed can never earn
+   * its install click again, so continuing to burn CPU on a broken loop
+   * has no upside. IonEngine always shows a minimal, dependency-free
+   * fallback (see core/CrashOverlay.ts) with a working CTA so the ad
+   * spend isn't a total loss even though gameplay is dead.
+   *
+   * onCrash is an optional *addition* to that, not a replacement for it —
+   * for logging/analytics. Wrapped in its own try/catch: if this itself
+   * throws, it's swallowed, since the one thing that must never fail is
+   * showing the recovery UI.
+   */
+  onCrash?: (error: unknown) => void;
+}
+
+/** Guards the "spiral of death": if a single frame accumulated more steps than this (a background tab, a long GC pause, a breakpoint), drop the backlog rather than running hundreds of update()s and falling further behind on every subsequent frame. */
+const MAX_FIXED_STEPS_PER_FRAME = 5;
+
 export class IonEngine {
   private readonly win = window as EngineWindow;
 
@@ -118,8 +177,16 @@ export class IonEngine {
   private freecamActive = false;
   private fps = 0;
   private uiEditorPaused: boolean;
+  /** Timers/tweens for this instance — owned here (not by Game) because the loop is what drives it, and because teardown has to be able to retire it on an in-place reload. */
+  private readonly scheduler = new Scheduler();
+  /** Same reasoning as scheduler — owned here so teardown can drop every listener before a hot-reloaded bundle's Game classes (whose closures those listeners captured) get disposed. */
+  private readonly bus = new EventBus();
+  private readonly ionContext: IonContext = { scheduler: this.scheduler, bus: this.bus };
 
-  private constructor(private readonly canvas: HTMLCanvasElement) {
+  private constructor(
+    private readonly canvas: HTMLCanvasElement,
+    private readonly options: IonEngineOptions = {}
+  ) {
     // Derived from the real DOM, not defaulted to false — this instance is
     // recreated fresh on every in-place reload, but the editor overlay's
     // own visibility (owned by index.html, never touched by a
@@ -137,8 +204,8 @@ export class IonEngine {
    * meaningful to hand back to the caller — everything observable happens
    * through the DOM or the dev hooks above.
    */
-  static boot(canvas: HTMLCanvasElement): void {
-    new IonEngine(canvas).start();
+  static boot(canvas: HTMLCanvasElement, options?: IonEngineOptions): void {
+    new IonEngine(canvas, options).start();
   }
 
   /** Access designed sprites/text from mainLayout.json by the name given in tools/ui-editor.html. Undefined only before Game.create() resolves — not meaningfully useful to callers until then anyway. */
@@ -156,9 +223,17 @@ export class IonEngine {
     // this same canvas before creating a new one — a no-op on a real
     // first page load (nothing's registered this hook yet).
     this.win.__disposeGame?.();
+    // A crash overlay from a previous dev iteration (see the crash guard
+    // below) has nothing to do with *this* fresh instance — clear it so
+    // it doesn't linger visually over a working reload.
+    removeCrashOverlay();
 
     const activeGame = await Game.create(this.canvas);
     this.game = activeGame;
+    // Bind before installDevHooks (and therefore before __onGameReady
+    // fires) so anything reacting to "the game exists now" can already
+    // use Ion.after/tween without tripping its not-yet-booted guard.
+    bindIon(this.ionContext);
     this.installDevHooks(activeGame);
 
     // Every bundle execution bumps this and captures its own copy below —
@@ -170,6 +245,11 @@ export class IonEngine {
     const myGeneration = this.win.__gameInstanceGeneration;
 
     let lastTime = performance.now();
+    const fixedStep = this.options.fixedTimestep ?? 0;
+    /** Unconsumed real time carried between frames — fixed-timestep mode only. */
+    let accumulator = 0;
+    /** Game time in fixed mode: advances only by whole steps actually run, so it never drifts from the number of update()s. Unused in variable mode, which keeps passing wall-clock `now` exactly as before. */
+    let fixedElapsed = 0;
 
     const loop = (now: number): void => {
       if (this.win.__gameInstanceGeneration !== myGeneration) return;
@@ -181,8 +261,40 @@ export class IonEngine {
       // too much frame to frame to be readable.
       if (dt > 0) this.fps = this.fps === 0 ? 1 / dt : this.fps * 0.9 + (1 / dt) * 0.1;
 
-      if (!this.uiEditorPaused && !this.freecamActive) activeGame.update(dt, now / 1000);
-      activeGame.render();
+      try {
+        if (!this.uiEditorPaused && !this.freecamActive) {
+          if (fixedStep > 0) {
+            accumulator += dt;
+            let steps = 0;
+            while (accumulator >= fixedStep && steps < MAX_FIXED_STEPS_PER_FRAME) {
+              fixedElapsed += fixedStep;
+              activeGame.update(fixedStep, fixedElapsed);
+              this.scheduler.update(fixedStep);
+              accumulator -= fixedStep;
+              steps++;
+            }
+            // Hit the cap: real time is arriving faster than we can simulate
+            // it. Drop the backlog instead of carrying it into the next
+            // frame, where it would produce the same overrun again, forever.
+            if (steps === MAX_FIXED_STEPS_PER_FRAME) accumulator = 0;
+          } else {
+            activeGame.update(dt, now / 1000);
+            this.scheduler.update(dt);
+          }
+        }
+        activeGame.render();
+      } catch (err) {
+        // Deliberately not re-entering this loop — see IonEngineOptions.onCrash's
+        // doc comment for why a dead RAF chain is the right outcome here.
+        console.error("IonEngine: gameplay crashed — showing the fallback CTA instead of a dead frame.", err);
+        try {
+          this.options.onCrash?.(err);
+        } catch (hookErr) {
+          console.error("IonEngine: onCrash itself threw (ignored, recovery UI still shows):", hookErr);
+        }
+        showCrashOverlay();
+        return;
+      }
 
       requestAnimationFrame(loop);
     };
@@ -190,7 +302,17 @@ export class IonEngine {
   }
 
   private installDevHooks(activeGame: Game): void {
-    this.win.__disposeGame = () => activeGame.dispose();
+    this.win.__disposeGame = () => {
+      // Order matters: drop this instance's pending timers/tweens *before*
+      // the Game they close over is torn down. A surviving one-shot from
+      // the old bundle would otherwise fire into a disposed Game (or, on
+      // an in-place reload, alongside the new one) — the same class of
+      // bug __gameInstanceGeneration already guards the RAF loop against.
+      this.scheduler.clear();
+      this.bus.clear();
+      unbindIon(this.ionContext);
+      activeGame.dispose();
+    };
     activeGame.onGizmoModeChange((mode) => this.win.__onGizmoModeChanged?.(mode));
 
     this.win.__setUIEditorPaused = (paused) => {
@@ -218,6 +340,8 @@ export class IonEngine {
     this.win.__frameSelected = () => activeGame.frameSelected();
     activeGame.onInspectorStateChange((state) => this.win.__onInspectorStateChanged?.(state));
     this.win.__getInspectable = (className) => activeGame.getInspectable(className);
+    this.win.__getAudioAnalyser = () => activeGame.getAudioAnalyser();
+    this.win.__isMusicPlaying = () => activeGame.isMusicPlaying();
 
     // Must be last: __onGameReady's whole job is to trigger a resize
     // against the now-ready activeGame (see its doc comment above), so

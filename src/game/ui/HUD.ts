@@ -45,10 +45,6 @@ export class HUD {
 
   pulseMoneyIcon(): void {
     if (!this.moneyIcon) return;
-    // this.moneyIcon.style.animation = "pulse";
-    setTimeout(() => {
-      this.moneyIcon!.style.scale = "0";
-    }, 2000);
   }
 
   setScore(collected: number, total: number): void {
@@ -78,7 +74,6 @@ export class HUD {
     // setInteractive's own doc comment), but `main` is the semantically
     // correct one: an "in-game" CTA lives on the main HUD, not the
     // endcard.
-    console.log(this.inGameCTA)
     this.main.setInteractive(this.inGameCTA, handler);
   }
 }
