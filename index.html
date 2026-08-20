@@ -247,6 +247,32 @@
       color: var(--eng-warn);
     }
 
+    /* Thin, full-width, gray — deliberately the quietest button in the
+       panel (no accent color) since it opens a doc, not a panel action. */
+    #er-btn-guide {
+      flex-shrink: 0;
+      width: 100%;
+      margin-top: 12px;
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      color: var(--eng-text-dim);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 5px 0;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    #er-btn-guide:hover {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--eng-text);
+      border-color: var(--eng-text-faint);
+    }
+
     #engine-room-actions {
       display: flex;
       gap: 5px;
@@ -2237,6 +2263,7 @@
         <div class="brand">ION Engine Technology</div>
         <div id="engine-room-version" title="Local build">v…</div>
       </div>
+      <button id="er-btn-guide" title="Open the full How-To-Use guide in a new tab">Engine Guide</button>
     </div>
   </div>
   <div id="builder-modal-backdrop">
@@ -2387,6 +2414,13 @@
     const editorFrame = document.getElementById("ui-editor-frame");
     const engineRoom = document.getElementById("engine-room");
     const deviceTopbar = document.getElementById("device-topbar");
+
+    // Guide button: static HTML page (public/guide.html), same design
+    // system as the Ion Engine Guide artifact — served by Vite's own
+    // publicDir, no dev API round-trip needed.
+    document.getElementById("er-btn-guide").addEventListener("click", () => {
+      window.open("/guide.html", "_blank");
+    });
     document.getElementById("er-btn-editor").addEventListener("click", () => {
       editorFrame.style.display = "block";
       engineRoom.style.display = "none"; // its own top-right corner would otherwise sit under/behind the editor overlay

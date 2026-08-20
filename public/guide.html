@@ -1,0 +1,792 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ion Engine Guide</title>
+  <style>
+    :root {
+      --bg: #0a0b0d;
+      --surface: #16181c;
+      --surface-2: #1d2024;
+      --surface-3: #24272c;
+      --border: #2c2f35;
+      --border-soft: rgba(255, 255, 255, 0.07);
+      --accent: #e8961e;
+      --accent-hover: #ffab3d;
+      --accent-soft: rgba(232, 150, 30, 0.14);
+      --blue: #7dd3fc;
+      --blue-soft: rgba(125, 211, 252, 0.12);
+      --ok: #4ade80;
+      --danger: #ff5252;
+      --danger-soft: rgba(255, 82, 82, 0.12);
+      --audio: #b98cf7;
+      --audio-soft: rgba(185, 140, 247, 0.12);
+      --text: #e8e9eb;
+      --text-dim: #9aa0a8;
+      --text-faint: #676c74;
+      --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 15.5px;
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    ::selection {
+      background: var(--accent-soft);
+      color: var(--text);
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    a:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--blue);
+      outline-offset: 2px;
+    }
+
+    .chrome {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 11px 20px;
+      background: linear-gradient(180deg, var(--surface-2), var(--surface));
+      border-bottom: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    .chrome .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ok);
+      box-shadow: 0 0 6px var(--ok);
+      flex-shrink: 0;
+    }
+
+    .chrome .tag {
+      margin-left: auto;
+      font-size: 9.5px;
+      color: var(--accent);
+      background: var(--accent-soft);
+      border: 1px solid rgba(232, 150, 30, 0.3);
+      border-radius: 999px;
+      padding: 2px 8px;
+    }
+
+    /* Desktop-only tool page (Engine Room dev preview, opened from a
+     1280px+ dev browser window) — no mobile breakpoint on purpose. Wide
+     fixed column, not fluid-to-viewport: running text still wants a
+     readable measure, it just sits in more page instead of stretching
+     edge to edge on a big monitor. */
+    main {
+      max-width: 1920px;
+      margin: 0 auto;
+      padding: 64px 48px 120px;
+    }
+
+    .kicker {
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--blue);
+      margin: 0 0 14px;
+    }
+
+    h1 {
+      font-family: var(--mono);
+      font-size: clamp(28px, 5vw, 38px);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      line-height: 1.15;
+      margin: 0 0 12px;
+      text-wrap: balance;
+      color: var(--text);
+    }
+
+    .lede {
+      font-size: 17px;
+      color: var(--text-dim);
+      max-width: 62ch;
+      margin: 0 0 40px;
+    }
+
+    .lede code {
+      color: var(--text);
+    }
+
+    h2 {
+      font-family: var(--mono);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.005em;
+      color: var(--text);
+      margin: 0 0 6px;
+      text-wrap: balance;
+    }
+
+    h3 {
+      font-family: var(--mono);
+      font-size: 13.5px;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      color: var(--blue);
+      text-transform: uppercase;
+      margin: 26px 0 10px;
+    }
+
+    p {
+      margin: 0 0 14px;
+      color: var(--text);
+    }
+
+    p.dim {
+      color: var(--text-dim);
+    }
+
+    ul,
+    ol {
+      margin: 0 0 14px;
+      padding-left: 22px;
+    }
+
+    li {
+      margin-bottom: 8px;
+    }
+
+    li::marker {
+      color: var(--text-faint);
+      font-family: var(--mono);
+      font-size: 13px;
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.88em;
+      background: var(--surface-2);
+      border: 1px solid var(--border-soft);
+      border-radius: 4px;
+      padding: 1.5px 6px;
+      color: var(--accent-hover);
+    }
+
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      overflow-x: auto;
+      margin: 0 0 16px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+    }
+
+    pre code {
+      background: none;
+      border: none;
+      padding: 0;
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    pre .c {
+      color: var(--text-faint);
+      font-style: italic;
+    }
+
+    section.step {
+      display: grid;
+      grid-template-columns: 34px 1fr;
+      gap: 0 18px;
+      margin-top: 56px;
+      position: relative;
+    }
+
+    section.step::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 40px;
+      bottom: -56px;
+      width: 1px;
+      background: var(--border);
+    }
+
+    section.step:last-of-type::before {
+      display: none;
+    }
+
+    .step-num {
+      font-family: var(--mono);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--bg);
+      background: var(--accent);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      z-index: 1;
+    }
+
+    .step-body {
+      min-width: 0;
+    }
+
+    .ref-table {
+      display: grid;
+      grid-template-columns: minmax(140px, auto) 1fr;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 0 0 16px;
+      font-size: 14px;
+    }
+
+    .ref-table>div {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .ref-table>div:nth-last-child(-n+2) {
+      border-bottom: none;
+    }
+
+    .ref-table .k {
+      background: var(--surface);
+      color: var(--text-dim);
+      font-family: var(--mono);
+      font-size: 12.5px;
+      display: flex;
+      align-items: center;
+    }
+
+    .ref-table .v {
+      background: var(--surface-2);
+      color: var(--text);
+    }
+
+    .ref-table .v code {
+      background: var(--surface-3);
+    }
+
+    .cheat {
+      display: grid;
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 0 0 16px;
+    }
+
+    .cheat-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background: var(--surface-2);
+    }
+
+    .cheat-row>div {
+      padding: 11px 14px;
+      font-size: 13.5px;
+    }
+
+    .cheat-row .q {
+      color: var(--text-dim);
+    }
+
+    .cheat-row .a {
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12.5px;
+    }
+
+    .cheat-row .a code {
+      padding: 0;
+      border: none;
+      background: none;
+      color: var(--accent-hover);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      font-family: var(--mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      background: rgba(142, 242, 168, 0.12);
+      color: var(--ok);
+      text-transform: uppercase;
+    }
+
+    .badge::before {
+      content: "";
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ok);
+    }
+
+    .callout {
+      border-left: 2px solid var(--blue);
+      background: var(--blue-soft);
+      border-radius: 0 8px 8px 0;
+      padding: 12px 16px;
+      margin: 0 0 16px;
+      font-size: 14px;
+      color: var(--text-dim);
+    }
+
+    .callout strong {
+      color: var(--text);
+    }
+
+    .callout.audio {
+      border-left-color: var(--audio);
+      background: var(--audio-soft);
+    }
+
+    .callout.warn {
+      border-left-color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .tree {
+      font-family: var(--mono);
+      font-size: 12.5px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px 16px;
+      line-height: 1.7;
+      color: var(--text-dim);
+      overflow-x: auto;
+    }
+
+    .tree .dir {
+      color: var(--blue);
+    }
+
+    .tree .comment {
+      color: var(--text-faint);
+    }
+
+    .modal-preview {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 0 0 16px;
+    }
+
+    .modal-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border-soft);
+      font-size: 13.5px;
+    }
+
+    .modal-row:last-child {
+      border-bottom: none;
+    }
+
+    .modal-row .chip {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      flex-shrink: 0;
+    }
+
+    .modal-row .chip.on {
+      background: rgba(142, 242, 168, 0.14);
+      color: var(--ok);
+    }
+
+    .modal-row .chip.go {
+      background: var(--accent-soft);
+      color: var(--accent-hover);
+    }
+
+    .modal-row .chip.report {
+      background: var(--blue-soft);
+      color: var(--blue);
+    }
+
+    footer {
+      max-width: 1920px;
+      margin: 64px auto 0;
+      padding: 20px 48px 40px;
+      border-top: 1px solid var(--border);
+      font-family: var(--mono);
+      font-size: 11.5px;
+      color: var(--text-faint);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="chrome">
+    <span class="dot"></span>
+    <span>Ion Engine TECHNOLOGY</span>
+    <span class="tag">Guide</span>
+  </div>
+
+  <main>
+    <p class="kicker">How to use</p>
+    <h1>Ion Engine, start to shipped ad</h1>
+    <p class="lede">
+      A practical walkthrough of the tools you'll actually touch — the <strong>UI Editor</strong>,
+      the <strong>Engine Room</strong> panel, and <strong>Control Desk</strong> — plus the <code>Ion</code>
+      facade for writing gameplay code, from <code>npm run dev</code> to a self-contained
+      <code>dist/index.html</code>. Not an architecture reference and not a setup manual —
+      those live in <code>ENGINE.md</code> and <code>README.md</code>. This is "it's running, now what do I click."
+    </p>
+
+    <h3>The three tools</h3>
+    <div class="ref-table">
+      <div class="k">UI Editor</div>
+      <div class="v">Design the HUD/endcard — buttons, text, images, the joystick. Opens as a live overlay on the
+        running game.</div>
+      <div class="k">Engine Room</div>
+      <div class="v">The dev panel itself — Build, 3D View, Audio Reactor, FPS/stats. Always visible, docked right.
+      </div>
+      <div class="k">Control Desk</div>
+      <div class="v">Live-tweak gameplay numbers and booleans while the game is actually running.</div>
+    </div>
+
+    <section class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h2>Start it up</h2>
+        <pre><code>npm install
+npm run dev</code></pre>
+        <p>Open the URL it prints — usually <code>http://127.0.0.1:8000</code>. The game runs full-screen with the dark
+          Engine Room panel docked on the right. Everything in that panel only exists in this dev preview; none of it
+          ships in the real playable.</p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h2>Design a screen</h2>
+        <p>Click <strong>✏️ Editor</strong> at the top of Engine Room. It opens on top of the running game — you're
+          editing live, not in a separate preview.</p>
+        <ol>
+          <li>Along the top: <strong>Image / Text / Rect / Joystick / Group</strong> — click one to drop it onto the
+            canvas.</li>
+          <li>Click an element to select it. <strong>Properties</strong> (right) shows everything about it —
+            <code>X</code>/<code>Y</code> with a per-axis <strong>PX / %</strong> toggle, the 3×3 anchor grid,
+            a <strong>⊙ Center (0, 0)</strong> quick-reset, width/height, rotation, opacity, and — for text —
+            a color picker and 3-way align control.
+          </li>
+          <li><strong>Layers</strong> (left) lists everything on the canvas. Drag to reorder, drag one row onto another
+            to group, click the eye icon to hide.</li>
+          <li><strong>Save</strong> writes straight to <code>mainLayout.json</code> (or the endcard layout) — no file
+            picker. The running game hot-reloads immediately.</li>
+        </ol>
+        <div class="callout">Everything placed here becomes a <strong>named element</strong> game code can reach
+          directly —
+          which is exactly what the next step is for.</div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h2>Wire an element to code</h2>
+        <p class="dim">Example: a text element named <code>moneyIcon</code> that <code>HUD.ts</code> should control
+          directly.</p>
+        <ol>
+          <li>In the UI Editor, open <strong>Scripts</strong> (below Layers) — only files under <code>*/ui/*.ts</code>
+            show up, since those are the classes with UI-assignable fields.</li>
+          <li>Pick a script. Its public fields appear; an unassigned one still reads <code>undefined</code>.</li>
+          <li>Drag the element from Layers onto the field — or click <strong>⊙ Pick</strong> next to the field, then
+            click the element on the canvas (more reliable across panels than drag-and-drop).</li>
+        </ol>
+        <p>No code to write — the field is populated automatically via <code>applyBindings(...)</code>, called once in
+          that class's own constructor. Toggle <strong>🐞 Debug</strong> here to also see private fields — dimmed,
+          read-only,
+          for visibility only.</p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h2>Tune gameplay live</h2>
+        <p class="dim">For actual gameplay <em>values</em> — speed, a counter, anything public on a running game object
+          — not layout.</p>
+        <ol>
+          <li>In Engine Room, scroll to <strong>📜 Scripts</strong> — a different list from the editor's: everything
+            under <code>src/game/</code> <em>except</em> <code>ui/</code> (that's step 3's job).</li>
+          <li>Click a script, e.g. <code>entities/Player.ts</code>. <strong>🕹 Control Desk</strong> shows every public
+            field live: <code>number</code> → editable input, <code>boolean</code> → checkbox, arrays → a read-only
+            dropdown, everything else → read-only text.</li>
+          <li>A <span class="badge">live</span> badge means an instance is actually running — a field is only editable
+            once it is.</li>
+        </ol>
+        <p><strong>🐞 Debug</strong> also reveals private/protected fields (dimmed, read-only). <strong>💾 Save</strong>
+          writes your tweak straight back into the <code>.ts</code> source as the field's new default, so it survives
+          the
+          next reload instead of resetting — the dev watcher picks up the change and hot-reloads automatically.</p>
+
+        <h3>Grouping fields with Header()</h3>
+        <pre><code>// Header("Player settings")
+public speed: number = 5;</code></pre>
+        <p>Everything below that comment — down to the next <code>Header(...)</code> or the end of the class — shows
+          grouped under a <strong>"Player settings"</strong> divider in Control Desk. Add as many as you want, wherever
+          you want; it's read straight from source, no registration step.</p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h2>Debug audio</h2>
+        <p>Click <strong>🎧 Audio Reactor</strong> (below 3D View in Engine Room) to open a live frequency-spectrum bar
+          graph of whatever background music is actually playing — confirms a track is really running, not just
+          "should be," and gives you something to eyeball while tuning levels.</p>
+        <ul>
+          <li>The status dot reads <strong>Playing</strong> (green, pulsing) or <strong>Stopped — tap the game to start
+              music</strong> — browsers block audio until a real tap, click, or keypress happens, so this is usually the
+            first sign something's wrong if music won't start.</li>
+          <li>The bar graph and the level readout (e.g. <code>42 / 255</code>) only animate while music is actually
+            playing — a flat line with the panel open means nothing's loaded, or nothing's unlocked audio yet.</li>
+        </ul>
+        <div class="callout audio">Dev-only readout, same as 3D View and Control Desk — nothing here ships in the real
+          playable.</div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h2>Write gameplay code with Ion</h2>
+        <p class="dim">Everything above is the visual tools. This is for timed beats, tweens, and cross-system events in
+          code — without hand-rolling timers or holding direct references between classes.</p>
+        <pre><code><span class="c">// import { Ion, Easing } from "../engine/Ion";</span>
+
+Ion.after(3, () =&gt; hud.showHook());                    <span class="c">// once, 3s from now</span>
+Ion.every(0.5, () =&gt; spawner.tick());                   <span class="c">// repeating</span>
+Ion.sequence([                                          <span class="c">// back-to-back beats</span>
+  { wait: 0.5, then: () =&gt; coin.pop() },
+  { wait: 0.2, then: () =&gt; hud.bumpScore() },
+]);
+Ion.tween(mesh.scale, { x: 1.4, y: 1.4, z: 1.4 }, 0.25, { easing: Easing.Back.Out });
+
+Ion.on("coin-collected", (p) =&gt; hud.setScore(p.total)); <span class="c">// subscribe</span>
+Ion.emit("coin-collected", { total: 5 });                <span class="c">// fire, from anywhere else</span>
+
+Ion.cta(STORE_URL);                                       <span class="c">// a CTA button's click handler</span></code></pre>
+        <ul>
+          <li>Everything on <code>Ion</code> runs on <strong>game time</strong>, not wall-clock — it pauses
+            automatically
+            while the UI editor or 3D View is open, and resumes exactly where it left off. No extra code needed.</li>
+          <li>Call <code>Ion.*</code> from a constructor, <code>update()</code>, or an event handler — not a file's
+            top-level module code. <code>Ion</code> only exists once <code>IonEngine.boot()</code> has actually created
+            a game; calling it too early throws a clear error saying exactly that.</li>
+          <li><code>Ion.on</code>/<code>Ion.emit</code> don't need event names declared anywhere — use the same string
+            on both sides. Type the payload at the call site if you want it checked:
+            <code>Ion.on&lt;{total: number}&gt;("coin-collected", fn)</code>.
+          </li>
+        </ul>
+        <div class="callout">Movement input has a desktop fallback too: <strong>WASD or arrow keys</strong> move the
+          player alongside the joystick automatically — no setup, useful for testing at a desk without touching the
+          canvas.</div>
+        <p class="dim">Full API and reasoning: <code>ENGINE.md</code>'s <code>Ion.ts</code> /
+          <code>core/Scheduler.ts</code>
+          / <code>core/EventBus.ts</code> / <code>core/InputManager.ts</code> sections.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h2>Inspect the 3D scene</h2>
+        <p>Click <strong>🧭 3D View</strong> to freecam the live scene, click any object to select it, and drag the
+          Move/Rotate/Scale gizmo to edit it live. A second toolbar cluster adds five more toggles:</p>
+        <div class="ref-table">
+          <div class="k">Grid <span style="color:var(--text-faint)">— G</span></div>
+          <div class="v">A ground-reference grid, off by default.</div>
+          <div class="k">Helpers <span style="color:var(--text-faint)">— H</span></div>
+          <div class="v">Camera frustum + light helper visibility, on by default.</div>
+          <div class="k">Snap <span style="color:var(--text-faint)">— X</span></div>
+          <div class="v">Fixed increments on the active gizmo instead of freehand.</div>
+          <div class="k">Space <span style="color:var(--text-faint)">— C</span></div>
+          <div class="v">Toggles the gizmo between local and world orientation.</div>
+          <div class="k">Frame <span style="color:var(--text-faint)">— F</span></div>
+          <div class="v">Snaps the camera to fit whatever's currently selected.</div>
+        </div>
+        <p class="dim">Dev-only, same as everything else in this section — none of it ships in the production build.</p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">8</div>
+      <div class="step-body">
+        <h2>Ship it</h2>
+        <p><strong>🛠 Builder</strong> (top of Engine Room) runs <code>build.sh</code>: compresses every model and audio
+          asset, bundles <code>src/main.ts</code> with Vite (<code>vite-plugin-singlefile</code>), inlines that JS
+          directly into <code>src/index.template.html</code>, then base64-inlines every real asset straight into that
+          same file — one genuinely self-contained <code>dist/index.html</code>, no <code>dist/assets/</code> folder,
+          nothing else to upload. Opens directly via <code>file://</code> and works on any ad network that only accepts
+          a
+          single file, including the exact syntax and module checks Mintegral's Mindworks review enforces — checked
+          automatically on every build, not just at submission time. Nothing from the Engine Room panel itself ships in
+          the output; the production template never references any of it.</p>
+
+        <div class="modal-preview">
+          <div class="modal-row"><span class="chip on">✓ on</span> Half Float mesh compression — extra size reduction at
+            no visual cost</div>
+          <div class="modal-row"><span class="chip go">🚀</span> Build Now — runs the real build</div>
+          <div class="modal-row"><span class="chip report">📊</span> Build Report — size breakdown, per-asset
+            compression, ad-network warnings</div>
+        </div>
+
+        <div class="callout warn"><strong>Build Report</strong> flags a red banner if the output still contains
+          anything ad-network review would reject — check it before uploading anywhere. It also lists any file sitting
+          unused in <code>assets/</code> that never got referenced, and the exact before/after size of every model
+          and audio file that did.</div>
+
+        <p class="dim">If gameplay ever throws an unhandled error mid-session in the shipped build, players see a
+          minimal "Continue" screen with a working install button instead of a dead frame — the ad spend isn't a total
+          loss even if something breaks. Nothing to configure; it's automatic.</p>
+
+        <pre><code>bash build.sh</code></pre>
+      </div>
+    </section>
+
+    <h3 style="margin-top:56px;">Cheat sheet</h3>
+    <div class="cheat">
+      <div class="cheat-row">
+        <div class="q">Move something to an exact pixel position</div>
+        <div class="a">Properties → switch X/Y to <code>PX</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Reset an element to its anchor's center</div>
+        <div class="a"><code>⊙ Center (0, 0)</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Give a script field a UI element</div>
+        <div class="a">Scripts panel → drag or <code>⊙ Pick</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Change a value while the game runs</div>
+        <div class="a">Engine Room → Scripts → Control Desk</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Make a tweak permanent</div>
+        <div class="a">Control Desk → edit → <code>💾 Save</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Group related Control Desk fields</div>
+        <div class="a"><code>// Header("Name")</code> above the first field</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">See private fields for debugging</div>
+        <div class="a"><code>🐞 Debug</code> (own toggle per panel)</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Inspect the live 3D scene</div>
+        <div class="a"><code>🧭 3D View</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Toggle grid / helpers / snap / space / frame in 3D View</div>
+        <div class="a">Toolbar, or keys <code>G H X C F</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Test movement without a touchscreen</div>
+        <div class="a">Hold <code>WASD</code> or arrow keys</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Check whether music is actually playing</div>
+        <div class="a"><code>🎧 Audio Reactor</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Write a timed beat, tween, or event in code</div>
+        <div class="a"><code>Ion.after/tween/on/emit</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Check a build for ad-network rejects</div>
+        <div class="a"><code>📊 Build Report</code>, inside Builder</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Produce the final ad file</div>
+        <div class="a"><code>🛠 Builder</code>, or <code>bash build.sh</code></div>
+      </div>
+    </div>
+
+    <h3>Where things live</h3>
+    <div class="tree"><span class="dir">src/</span>
+      main.ts <span class="comment">entry point — don't touch when building a new playable</span>
+      <span class="dir">engine/</span> <span class="comment">reusable — see ENGINE.md</span>
+      <span class="dir">game/</span> <span class="comment">this playable's actual content</span>
+      <span class="dir">ui/</span> <span class="comment">HUD/endcard layout JSON + Scripts-panel territory</span>
+    </div>
+    <p class="dim">Replacing everything under <code>src/game/</code> — keeping <code>src/engine/</code> as-is — is how
+      you'd start a brand-new playable on this same engine. See <code>ENGINE.md</code>'s "Building a new playable ad on
+      this engine" for the full checklist.</p>
+  </main>
+
+  <footer>
+    <span>Ion Engine Technology</span>
+    <span>Practical guide, not a spec</span>
+  </footer>
+
+</body>
+
+</html>
