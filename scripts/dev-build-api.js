@@ -28,6 +28,12 @@ const BINDINGS_FILE = path.join(UI_DIR, "bindings.json");
 // file). Deliberately a sibling of the game's own source rather than under
 // ui/: these bind fields to 3D scene objects, not to designed UI elements.
 const SCENE_BINDINGS_FILE = path.join(ROOT, "src", "game", "sceneBindings.json");
+// Colliders authored in the 3D editor's "Configure Colliders" mode — see
+// /list-colliders and /save-colliders below, and
+// src/engine/collision/ColliderSerialization.ts (the runtime side that
+// reads this same file). Ships: it's a real import in Game.ts, so what's
+// placed in the editor is what runs in the production build.
+const COLLIDERS_FILE = path.join(ROOT, "src", "game", "colliders.json");
 const SRC_DIR = path.join(ROOT, "src");
 const SCRIPT_CATEGORIES = { engine: path.join(SRC_DIR, "engine"), game: path.join(SRC_DIR, "game") };
 
@@ -724,6 +730,19 @@ function writeSceneBindings(data) {
   fs.writeFileSync(SCENE_BINDINGS_FILE, JSON.stringify(data, null, 2));
 }
 
+function readColliders() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(COLLIDERS_FILE, "utf8"));
+    if (!Array.isArray(parsed.colliders)) throw new Error("malformed");
+    return parsed;
+  } catch {
+    return { version: 1, colliders: [] };
+  }
+}
+function writeColliders(data) {
+  fs.writeFileSync(COLLIDERS_FILE, JSON.stringify(data, null, 2));
+}
+
 // Vite's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
@@ -1152,12 +1171,19 @@ const server = http.createServer((req, res) => {
           data.bindings = data.bindings.filter((b) => !(b.className === className && b.fieldName === fieldName));
           if (edit.remove) continue;
           if (!edit.objectPath && !edit.objectName) throw new Error("Missing objectPath/objectName");
-          data.bindings.push({
+          const binding = {
             className,
             fieldName,
             objectPath: edit.objectPath || "",
             objectName: edit.objectName || "",
-          });
+          };
+          // Only present for a field that holds an ION Collider rather than
+          // a scene object — a collider can't be found by walking the scene
+          // graph, so this is what resolution keys off at boot (see
+          // SceneFieldBinding.colliderId). Omitted entirely otherwise, so an
+          // ordinary object binding's JSON is unchanged.
+          if (edit.colliderId) binding.colliderId = edit.colliderId;
+          data.bindings.push(binding);
         }
         writeSceneBindings(data);
         res.setHeader("Content-Type", "application/json");
@@ -1172,10 +1198,47 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/list-colliders") {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify(readColliders()));
+    return;
+  }
+
+  // A wholesale replace, not a merge: src/game/colliders.json is entirely
+  // the 3D editor's to own, and the editor always sends the complete set it
+  // holds. Merging would have to reconcile deletions and reorders for no
+  // benefit — and a delete that silently didn't stick is a far worse
+  // failure than a full overwrite.
+  //
+  // Batched to one write on Exit Editor for the same reason as
+  // /save-scene-bindings above: this file is in main.ts's module graph, so
+  // writing it mid-session hot-reloads the scene the editor is editing.
+  if (req.method === "POST" && req.url === "/save-colliders") {
+    readRequestBody(req, 4 * 1024 * 1024)
+      .then((raw) => {
+        const body = JSON.parse(raw);
+        if (!Array.isArray(body.colliders)) throw new Error("Missing colliders array");
+        for (const collider of body.colliders) {
+          if (!collider.id || !collider.shape) throw new Error("Every collider needs an id and a shape");
+        }
+        writeColliders({ version: 1, colliders: body.colliders });
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, saved: body.colliders.length }));
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings, GET /list-colliders, POST /save-colliders)`);
 });

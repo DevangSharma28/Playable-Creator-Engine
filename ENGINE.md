@@ -21,6 +21,7 @@ The dependency direction only ever goes one way. `engine/` has no idea `HUD`, `P
 main.ts
   → IonEngine.boot(canvas)
       → new IonEngine(canvas).start()
+          → bindIon(ctx)                     (Scheduler + EventBus + ColliderManager — before Game.create, so entity constructors can use Ion)
           → Game.create(canvas)              (game/Game.ts — asset preload, scene/camera/renderer, entities, UI)
           → installDevHooks(activeGame)       (window.__* hooks the Engine Room dev panel talks to)
           → requestAnimationFrame loop begins
@@ -29,7 +30,7 @@ main.ts
 `IonEngine` ([src/engine/IonEngine.ts](src/engine/IonEngine.ts)) owns *running* a game, not the game itself:
 
 - The per-frame rAF loop (`update()`/`render()` each tick, capped `dt`, exponential-moving-average FPS)
-- The `Scheduler` (timers/tweens), the `EventBus`, and the `Ion` facade binding — created here because the loop is what drives them and teardown is what must retire them
+- The `Scheduler` (timers/tweens), the `EventBus`, the `ColliderManager` (see `collision/`), and the `Ion` facade binding — created here because the loop is what drives them and teardown is what must retire them. Collider detection runs inside the same not-paused guard as `update()`, so trigger enter/exit freezes with gameplay rather than firing behind an open editor
 - **Crash guard**: `update()`/`render()` run inside a `try/catch`. If gameplay throws, the loop stops rescheduling itself for good (a dead RAF chain is the right outcome — continuing to call into a broken instance just throws again next frame, forever, for no benefit) and `core/CrashOverlay.ts` shows a minimal, dependency-free "Continue" overlay wired to `Cta.open()`, so a mid-game crash still gets its CTA click rather than being a 100% wasted ad. `IonEngineOptions.onCrash` is an optional add-on for logging, itself wrapped in a try/catch so it can't block the recovery UI.
 - **Timestep**: variable frame-length `dt` by default (unchanged from how every existing system here was tuned). `IonEngine.boot(canvas, { fixedTimestep: 1/60 })` opts into a fixed-step accumulator instead — `update()` may then run several times per animation frame, always with that exact `dt`, while `render()` still runs once. Turn it on when determinism matters: anything integrating forces or resolving collisions will visibly jitter (or tunnel through a collider) on a frame spike under variable `dt`, because one 50ms step is not three 16ms ones. Capped at 5 steps per frame — past that the backlog is dropped rather than spiralling.
 - Dev-only hooks for the Engine Room panel (`index.html`, the dev entry — see `vite.config.mts`) — pause-while-editing, device-frame resize, freecam toggle, gizmo mode, live stats
@@ -48,13 +49,15 @@ Small caching loader for textures/GLB models/audio, built on Three.js's own load
 Its `GLTFLoader` has `setMeshoptDecoder(MeshoptDecoder)` wired unconditionally in the constructor (`three/examples/jsm/libs/meshopt_decoder.module.js`) so it can decode `EXT_meshopt_compression` GLBs — see "Production build" below for where that compression actually gets applied. Harmless for a GLB that was never meshopt-compressed (the decoder only engages for primitives that carry the extension), and single-file-safe: that module's WASM is inlined as a base64 byte array in the JS itself, not fetched from a separate `.wasm` file, so it bundles like any other import instead of needing something hosted alongside `dist/index.html`.
 
 ### `Ion.ts` — the one-line facade
-`Ion.after()`, `Ion.every()`, `Ion.sequence()`, `Ion.tween()`, `Ion.on()`/`Ion.once()`/`Ion.emit()`, `Ion.cta()`, `Ion.time`. A **bound singleton**, not a self-initializing static: `IonEngine.boot()` constructs an `IonContext` and calls `bindIon(ctx)`; teardown calls `unbindIon(ctx)`. Deliberate, for two reasons this codebase already cares about — a static that lazily builds its own services ends up owning engine state nobody can see or reset (the `§28 no hidden global state` rule), and in-place hot reload has to be able to *fully* retire the previous bundle's services or its timers keep firing into the new game. `unbindIon` takes the context being retired so a late dispose from an old bundle can't unbind the live one. Using `Ion` before boot throws with a real explanation instead of a `TypeError` on undefined.
+`Ion.after()`, `Ion.every()`, `Ion.sequence()`, `Ion.tween()`, `Ion.on()`/`Ion.once()`/`Ion.emit()`, `Ion.cta()`, `Ion.time`, `Ion.colliders`. A **bound singleton**, not a self-initializing static: `IonEngine.boot()` constructs an `IonContext` and calls `bindIon(ctx)`; teardown calls `unbindIon(ctx)`. Deliberate, for two reasons this codebase already cares about — a static that lazily builds its own services ends up owning engine state nobody can see or reset (the `§28 no hidden global state` rule), and in-place hot reload has to be able to *fully* retire the previous bundle's services or its timers keep firing into the new game. `unbindIon` takes the context being retired so a late dispose from an old bundle can't unbind the live one. Using `Ion` before boot throws with a real explanation instead of a `TypeError` on undefined.
 
 The same services are always reachable directly off the context — `Ion` is a shorthand, never the only way in, so tests can drive a `Scheduler` with no globals at all.
 
 Also re-exports `Easing` (from `core/Scheduler.ts`, itself re-exporting tween.js's), so `import { Ion, Easing } from "./Ion"` is genuinely one line, one path — a caller going through the facade was previously forced into a second import from `core/Scheduler.ts` just for the easing curves, contradicting the whole point of having a facade.
 
-**A constructor that runs during `Game.create()` is too early for `Ion`.** `bindIon()` fires only after `Game.create()` *resolves* (see `IonEngine.start()`), which is after every entity's own constructor has already run. `Player.ts`'s popcorn-machine reveal is the concrete example: it can't tween from inside the constructor (that would throw the "used before boot finished" error), so it defers to a one-shot guard checked on the first real `update()` tick instead — the earliest point in an entity's lifecycle `Ion` is guaranteed bound. Any editor-assigned object that needs an `Ion`-driven intro animation follows the same pattern.
+**`Ion` is bound before `Game.create()`, so entity constructors can use it.** `IonEngine.start()` calls `bindIon(ctx)` *before* awaiting `Game.create()`, not after. Nothing in the context (`Scheduler`, `EventBus`, `ColliderManager`) depends on `Game`, so there was never a reason for the bind to wait — and waiting had a real cost: every entity constructor runs inside `Game.create()`, so `Ion.*` threw its not-yet-booted error for exactly the code most likely to reach for it. `Player.ts` registering its own collision volume where it builds its model (see `collision/` below) needs this ordering. It's safe against the stale-dispose case, because `__disposeGame()` has already run by then and `unbindIon` is context-guarded.
+
+This used to be the other way round, and the historical workaround is still visible in `Player.ts`: its popcorn-machine reveal defers off the constructor rather than tweening directly from it. That deferral is no longer *required* for `Ion` to be available — it's about when the reveal should play.
 
 ### `core/Scheduler.ts`
 Timers, repeats, sequences, and tweens — all on **game time**, not wall clock. It owns a clock that only advances inside `update()`, which `IonEngine` only calls when gameplay is actually running, so everything scheduled freezes while the UI editor overlay or the 3D freecam is open and resumes exactly where it left off. That matches `Game.ts`'s own `playTimeMs` auto-endcard accumulator; a `setTimeout`-based scheduler would keep counting behind the editor and fire the endcard mid-edit.
@@ -80,7 +83,7 @@ A bare 0-to-1 progress driver for anywhere `Ion.tween`'s own "tween these numeri
 
 Deliberately a thin wrapper over `Ion.tween`, not a second animation clock — it tweens a private `{ t: 0 }` object to `{ t: 1 }` and hands `t` to `onProgress`. That's what makes it inherit `Scheduler`'s game-time pausing and hot-reload teardown for free, with nothing Animator-specific to get wrong. `game/entities/Player.ts`'s popcorn-machine reveal is the reference use — two `Animator`s on different `time`/`easing` (scale via `Easing.Elastic.Out`, rotation via `Easing.Back.Out`) so they resolve at different moments instead of reading as one shared progress bar.
 
-Same constraint as any `Ion.*` call: a class constructed *during* `Game.create()` (most entity constructors) is too early — `bindIon()` only fires after `Game.create()` resolves. See the `Ion.ts` section above for that gotcha and `Player.ts`'s own comment for the concrete workaround (defer to the entity's first `update()` tick).
+Constructing one from an entity constructor is fine now that `bindIon()` runs before `Game.create()` (see the `Ion.ts` section above) — the deferral still visible in `Player.ts` is about *when the reveal should play*, not about whether `Ion` exists yet.
 
 **`LoopAnimator`** — `Animator` that doesn't stop at 1: `new LoopAnimator({ time, loops, yoyo }, (progress) => { ... }, onComplete?)` for a pulsing glow, an idle bob, a spinning coin, anything that's "run this curve repeatedly" instead of once. `loops` defaults to `Infinity` (runs until `cancel()`); `yoyo` alternates direction each cycle (0→1, then 1→0, ...) instead of restarting from 0 every time.
 
@@ -131,6 +134,124 @@ Touch-anywhere virtual joystick. Invisible until you touch the screen, then appe
 ### `core/CameraHandler.ts`
 Generic lerp-follow camera — frame-rate-independent exponential smoothing (`1 - 0.001^dt`), takes a world-space focus point and an offset. No game-specific knowledge.
 
+### `collision/` — the ION Collider & Area system
+Trigger zones, area volumes, and character collision shapes. **Not physics, and not a wrapper around one.** There is no rigidbody, no mass, no velocity, no gravity, no solver, and nothing here ever moves a scene object. The system answers exactly one question, continuously — *which registered volumes overlap right now* — and turns the frame-over-frame change in that answer into enter/stay/exit events. Rapier and its relatives stay entirely out of the bundle.
+
+That's the right trade for a playable ad. Trigger zones, pickup radii, "did the player reach the machine" — none of it wants a simulation step, and all of it has to survive a hard size budget. This costs a few kilobytes of JS and a handful of dot products per frame.
+
+**The runtime ships; the editor for it does not.** `collision/` is ordinary engine runtime, imported by `Game.ts` and present in `dist/index.html`. The authoring half (`editor/EditorColliders.ts`, `editor/ColliderVisuals.ts`) lives under `editor/` and tree-shakes out with the rest of it — verified the same way, by grepping the production bundle.
+
+| File | What it is |
+| --- | --- |
+| `Collider.ts` | Base class: shape + transform + `tag` + `enabled` + `isTrigger`, the `on*` event subscriptions, and the per-frame transform sync. |
+| `BoxCollider.ts` / `SphereCollider.ts` / `CylinderCollider.ts` | The three volumes. Each owns its dimensions and rebuilds its own world-space shape from the node's decomposed transform. |
+| `intersect.ts` | Every shape-vs-shape test, zero-allocation, with the exactness of each pair stated in the file header. |
+| `ColliderManager.ts` | The registry, the broad phase, and the enter/stay/exit state machine. Reached as `Ion.colliders`. |
+| `ColliderSerialization.ts` | `src/game/colliders.json` ↔ live registry. `loadColliders` runs in production. |
+| `ColliderTypes.ts` | Shape/data/world-shape types shared by all of the above. |
+
+#### How one frame works
+
+`IonEngine` calls `Ion.colliders.update()` immediately after `activeGame.update(dt)`, inside the same not-paused guard as everything else — so detection sees where things actually moved to this frame, and freezes with gameplay rather than firing behind an open editor.
+
+**1 · Sync.** For each *enabled* collider, `Collider.syncWorld()`:
+
+```
+attached.updateWorldMatrix(true, false)      // force-refresh: this runs before three.js's own render traversal
+nodeWorld = attached.matrixWorld × offsetMatrix
+decompose nodeWorld into node.position / quaternion / scale
+rebuild the world-space shape (centre, unit axes, half-extents / radius / halfHeight)
+```
+
+The forced refresh is what makes detection current instead of one frame stale for anything that moved this frame. The same step also detects and folds back an *external* edit to the node — see "the sync is two-way" below.
+
+**2 · Broad phase.** Sweep-and-prune along X over world bounding spheres:
+
+```
+sort entries by min-X
+for i, for j > i:  if entries[j].min > entries[i].max → break   // sorted, so nothing further along can reach
+```
+
+The sort is an insertion sort, because the array is almost always already sorted between frames (colliders move a little; they don't teleport) — the case insertion sort is O(n) on. Single-axis sweep rather than a BVH or spatial hash on purpose: for the collider counts a playable holds, maintaining either costs more per frame than it saves.
+
+**3 · Filter, before any math.** `canPair(a, b)` — both enabled, not the same collider, and each side's tag mask accepts the other (see "tags and masks" below) — then a bounding-sphere reject. A pair rejected here never reaches an intersection test at all, which is what makes a mask a genuine optimization rather than an `if` at the top of your handler.
+
+**4 · Narrow test** (`intersect.ts`), dispatched on the two shape kinds:
+
+| Pair | How | Exact? |
+| --- | --- | --- |
+| sphere ↔ sphere | squared centre distance vs summed radii | yes |
+| sphere ↔ box | closest point on the OBB, clamped in the box's own frame | yes |
+| box ↔ box | SAT over 15 axes — 6 face normals + 9 edge cross products | yes |
+| sphere ↔ cylinder | clamp the centre into the capped volume: radially, then along the axis | yes |
+| cylinder ↔ cylinder, near-parallel axes | 1D extent overlap along the shared axis + 2D circle test across it | yes |
+| cylinder ↔ cylinder skewed, box ↔ cylinder | SAT against the cylinder's tight OBB **and** distance to its axis segment | conservative |
+
+*Conservative* means never a false negative, occasionally a false positive within a fraction of the cylinder's radius near a corner — a genuine overlap always passes both tests. Closing that last fraction of a radius would mean a GJK/EPA solver, which is frame budget spent on precision nobody can see in a playable.
+
+Every function here borrows from a fixed pool of module-level scratch vectors rather than allocating — these run O(pairs) times per frame, and the pool is partitioned by purpose so the one case that nests (box↔cylinder calls both) can't stomp on itself.
+
+**5 · Diff and dispatch.** Overlapping pairs live in a `Map` keyed by two collider ids packed into a single integer:
+
+- key absent → **enter**, age 0
+- key present → age++, **stay**
+- key in the map but not seen this frame → **exit**, delete
+
+Nothing traverses the scene graph anywhere in those five steps. Cost scales with the number of *colliders*, not the size of the scene — which is the entire reason for a dedicated registry.
+
+#### Mechanics
+
+**Colliders live in their own `COLLIDERS` group, and *attach* to scene objects rather than parent under them.** Every collider's node sits under one engine-owned group at the scene root; `attachTo` makes it *follow* a scene object by recomputing its world transform from that object's world matrix every frame. Two reasons: a GLB-heavy scene is already hundreds of nodes and salting collision data through it makes both harder to read (and a re-export would blow the colliders away with the model), and attachment then survives the target being re-parented or swapped out entirely. The group is held at identity permanently — `Collider.syncWorld` writes world-space transforms straight into each node's local transform on exactly that assumption. Note the name is uppercase: `Cinema_World.glb` already contains a mesh group called `Colliders`, and the two must never be confused.
+
+**The sync is two-way.** If something else moves a collider's node — the 3D editor's transform gizmo is the case that matters — the change is detected (`node.matrix` no longer matches what the collider last wrote) and folded back into the offset instead of being overwritten next frame. That's what makes dragging a collider in the editor actually stick, and it needs no cooperation from the gizmo.
+
+**Tags and masks are two different filters, and it's worth keeping them straight.** `mask` is the *broad-phase* filter: masks are ANDed, so each side has to accept the other, and an empty mask means "accept anything". A pair the mask rejects never reaches an intersection test at all. The optional tag argument to `onTriggerEnter("Player", handler)` is the *handler* filter — it saves every handler from opening with `if (other.tag !== "Player") return;`. The shipped example uses both and they agree, which is the normal case; they're separate because a zone that wants to *see* several tags but *react* differently to each needs a wide mask and narrow handlers.
+
+**Event contract:** enter fires once on the frame the overlap begins; stay fires every frame *after* that while it holds (so enter and stay never both fire for one pair on one frame); exit fires once when it ends — **including** when the other collider is disabled, destroyed, or has its attached object removed from the scene. That last part is what stops the classic stuck-flag bug where a handler runs on enter and never hears the matching exit. If either side of a pair is a trigger, only trigger events fire; two non-triggers report to each other as `onCollision*`.
+
+#### Runtime API
+
+In the shape gameplay actually uses it:
+
+```ts
+const zone = Ion.colliders.getByName("PlayerZone");
+zone.onTriggerEnter("Player", (other) => hud.showPrompt());
+zone.onTriggerStay("Player", () => score.tickBonus());
+zone.onTriggerExit("Player", () => hud.hidePrompt());
+zone.setEnabled(false);                       // fires exit on anything inside
+
+// An entity registering its own volume, in its own constructor:
+this.collider = Ion.colliders.cylinder({ name: "Player Collider", tag: "Player", radius: 0.4, height: 1.8, attachTo: this.group, position: [0, 0.9, 0] });
+
+// Ad-hoc queries, for the "what's near me right now" question you ask once
+// rather than every frame:
+Ion.colliders.overlapSphere(point, 3, "Pickup");
+Ion.colliders.queryPoint(point);
+Ion.colliders.getByTag("Solid");
+```
+
+#### Authoring and persistence
+
+**Colliders can be assigned to script fields, exactly like scene objects.** A `public zone: Collider | undefined` (or `BoxCollider`/`SphereCollider`/`CylinderCollider`, which additionally enforce the shape) gets a `⊙ Pick` button in Control Desk and accepts a collider dragged out of the Hierarchy's COLLIDERS group or clicked on its volume in the viewport. Two things are worth spelling out:
+
+- **The field receives the `Collider`, not its node.** A collider isn't an `Object3D`, so `EditorRoot.assignmentFor` returns a `value` (what the field gets) separately from the `object` (what was clicked) — one place decides it for both ⊙ Pick and drag-to-assign, so the two can't drift into assigning different things, which is the kind of bug that only surfaces after a reload.
+- **It persists by `colliderId`, not by path.** `SceneFieldBinding.colliderId` is set for collider assignments and resolved through the registry at boot rather than by walking the scene, falling back to a lookup by name so renaming a collider stays recoverable.
+
+The ordering constraint that follows: a collider field is populated by `Game.ts`'s `applySceneBindings` pass over `inspectables`, which runs *after* every inspectable is constructed — so a constructor reading it always sees `undefined`. `AreaDemo` shows the pattern: it has a `wire()` method that `Game.ts` calls straight after that pass, rather than subscribing from its constructor.
+
+**Persistence.** `src/game/colliders.json` is a real static import, so **colliders ship**: what you place in the 3D editor is what runs in the production build, exactly as with `sceneBindings.json`. Attachments are recorded by *path*, never uuid, for the same reason `SceneBindings.ts` gives. Colliders created in code (the Player's cylinder) carry `persisted = false` and are deliberately excluded from the file — writing one out would resurrect it as a duplicate next to the one the script creates again on the next boot.
+
+The worked example lives in [`src/game/AreaDemo.ts`](src/game/AreaDemo.ts): a `PlayerZone` trigger from `colliders.json`, masked to `["Player"]`, responding to the Player's own cylinder — the spec'd setup, and about forty lines covering the whole runtime API.
+
+#### Four things that already went wrong here
+
+All four presented identically — "the editor forgot my collider on reload" — and none of them was the editor forgetting anything. Worth knowing before changing any of this back.
+
+- **`loadColliders()` runs after the entities are built**, not just after the environment GLB. A collider records its attachment as a scene path and can only resolve it against a graph that already contains the object — and the most useful thing to attach one to is a character, which doesn't exist until `new Player(...)` has added its model. Loading earlier silently dropped every collider attached to anything an entity builds.
+- **Path resolution backtracks** (`SceneBindings.descend`). Sibling name collisions are the default here, not an edge case: every GLB's root node is called `Scene`, so a game with an environment model *and* a character model has two scene children both named `Scene`. A first-match walk went down the environment's branch looking for `Scene/Armature`, found nothing, and gave up — while the node it wanted sat one branch over.
+- **`attachToScene()` on a *different* scene retires everything already registered.** Saving in the 3D editor can write two watched files at once (`colliders.json` *and* `sceneBindings.json`), firing two hot reloads back to back. Both new bundles bind their own context but share whichever registry was bound last — so the first reload's Game registered its colliders here, and the second reload's Game then pointed this registry at *its* scene. `syncAll` correctly noticed every collider was attached to objects no longer present and disabled them all. One registry serves one scene.
+- **Attaching a collider does not move it.** `attachToObject()` recomputes the offset against the new parent so the volume stays exactly where it is in the world. Keeping the old offset verbatim — the obvious implementation — teleports it: a collider at world (−8, 0, 8) re-homed onto a prop 12 units away lands at *that prop's transform times* (−8, 0, 8), somewhere off in the distance, which from the outside looks exactly like attaching having done nothing.
+
 ### `editor/` — the 3D Viewer/Editor
 Dev-only, and structurally dev-only: every entry point into this directory is behind `import.meta.env.DEV` (see `Game.setFreecam` and the `ViewHelperWidget` construction), so Rollup drops the whole tree from a production build rather than shipping it guarded by a DOM lookup that never matches. Verified by grepping `dist/index.html` — no `TransformControls`, `OrbitControls`, `BoxHelper`, `GridHelper`, `CameraHelper`, or any editor string survives the build.
 
@@ -149,11 +270,14 @@ One composition root and a set of single-purpose classes, rather than one large 
 | `EditorHierarchy.ts` | The Object3D tree panel — collapsible, reveals the selection on demand. |
 | `EditorInspector.ts` | Live transform/visible fields for the selection, plus name/parent/mesh-stats readouts. |
 | `objectAssignment.ts` | Declared-TS-type → live-object compatibility for Pick. |
+| `InspectorSections.ts` | Field-descriptor vocabulary letting other subsystems contribute a panel to the Inspector. |
+| `ColliderVisuals.ts` | The wireframe/fill drawing. Owned by `Game` (it also serves the in-game overlay), borrowed by the editor. |
+| `EditorColliders.ts` | "Configure Colliders" mode: creating, fitting, attaching, and the Inspector's collider panel. |
 | `core/SceneInspector.ts` | What genuinely belongs to the 3D scene: the transform gizmo, selection outline, debug helpers, and the toggles/shortcuts below. |
 
 **Everything is driven by one selection store.** `EditorSelection` is the reason the Hierarchy, the viewport, the Inspector, the gizmo, and Pick can't disagree: none of them owns a private `selected` field, they all subscribe. Previously `SceneInspector` held selection privately and each panel found out only if whichever code path made the change remembered to tell it, which is exactly how they drifted. Selection changes carry a `source` so a panel can tell *its own* click apart from someone else's — the Hierarchy scroll-into-views a viewport pick but not its own row click.
 
-**Scene-object assignment (Pick, or drag-and-drop).** Control Desk shows a `⊙ Pick` button on any field whose declared type accepts a scene object (`THREE.Object3D`, `THREE.Mesh`, `THREE.Group`, lights, cameras, … — see `objectAssignment.ts`, which is also what `window.__editorIsPickableField` answers from, so the rule lives in one place rather than being re-derived in `index.html`). Arm it, then click the object **either in the Hierarchy or directly in the 3D viewport** — both routes funnel through `EditorObjectPicker.offerObject()`, so they're genuinely interchangeable. The object is type-checked against the declaration; a mismatch reports why and leaves the pick armed for another try rather than making you re-arm on every near-miss. What lands in the field is the *real live object*, not a copy or an id — same no-serialization contract as `__getInspectable`. Assignments **persist**: they're written to `src/game/sceneBindings.json` and re-applied on every boot by `applySceneBindings` (see `SceneBindings.ts` below), production build included.
+**Scene-object assignment (Pick, or drag-and-drop).** Control Desk shows a `⊙ Pick` button on any field whose declared type accepts a scene object (`THREE.Object3D`, `THREE.Mesh`, `THREE.Group`, lights, cameras, …) **or an ION collider** (`Collider`, `BoxCollider`, `SphereCollider`, `CylinderCollider` — see the `collision/` section above for what a collider field receives and how it persists) — see `objectAssignment.ts`, which is also what `window.__editorIsPickableField` answers from, so the rule lives in one place rather than being re-derived in `index.html`). Arm it, then click the object **either in the Hierarchy or directly in the 3D viewport** — both routes funnel through `EditorObjectPicker.offerObject()`, so they're genuinely interchangeable. The object is type-checked against the declaration; a mismatch reports why and leaves the pick armed for another try rather than making you re-arm on every near-miss. What lands in the field is the *real live object*, not a copy or an id — same no-serialization contract as `__getInspectable`. Assignments **persist**: they're written to `src/game/sceneBindings.json` and re-applied on every boot by `applySceneBindings` (see `SceneBindings.ts` below), production build included.
 
 Writes are **batched into a single request on Exit Editor**, not made as you pick. `sceneBindings.json` sits inside `main.ts`'s module graph, so writing it trips Vite's watcher and hot-reloads the game — done per-pick, that tears down the very scene you're picking objects out of, at the moment you're picking them. Queuing gives exactly one reload, when you've said you're done, which is also when you want to see the bindings actually re-applied. The Exit button shows the pending count and flushes before closing; a queued edit survives a failed flush (a dead dev API shouldn't trap you inside the editor) instead of being silently dropped.
 
@@ -172,6 +296,18 @@ This was a real bug, not a hypothetical: `CameraHandler.handleResize()` is the o
 Two supporting details are load-bearing and easy to undo by accident: `.editor-dock` sets `box-sizing: border-box` so its CSS-variable width *is* the space it occupies (`currentInsets()` reserves exactly that; without it, padding and border put the viewport ~21px underneath a dock), and `editorDockWidth()` **measures the dock element** rather than parsing its CSS variable — a custom property's computed value is an unresolved token stream, so `parseFloat("clamp(150px, 20vw, 264px)")` is `NaN`, which silently became a zero inset and laid the viewport out full-width under both docks. Dock widths are `clamp()`ed so two fixed widths can't exceed a narrow window and collapse the viewport to nothing at 9:16.
 
 Verified in a real browser (Chrome via CDP) at 9:16, 4:5, 1:1, 4:3, 16:9, 21:9, and a deliberately non-round 1237×603 — camera aspect and drawing-buffer aspect both match the container's at every one.
+
+**Show Colliders (Engine Room button, or `Shift+K`) — the in-game overlay.** Draws every collider and trigger volume **over the running game**: no editor, gameplay proceeding normally, so a trigger can be watched turning red as the player walks into it. That's the difference from Configure Colliders below, which is an authoring mode inside the 3D editor with gameplay paused. Both drive the same `ColliderVisuals` layer — `Game` owns it (see `Game.colliderDebug`) and the editor borrows it for the duration of a session, so there's one layer with two independent things that can show it rather than two layers drawing the same volumes twice. `Game.render()` reconciles it once a frame, and it no-ops entirely while nothing is showing. DEV-only in the same way `ViewHelperWidget` is: built behind `import.meta.env.DEV`, so the module and its geometry/materials drop out of a production build while the collision system itself ships untouched.
+
+**Configure Colliders (🧊 in the toolbar, or `K`).** The authoring mode for the ION Collider & Area system described under `collision/` above. Turning it on reveals a second toolbar row and draws every registered collider's volume; turning it off hides the drawing and changes nothing else — the registry and detection are runtime, this is only its editor.
+
+- **`＋ Box` / `＋ Sphere` / `＋ Cylinder`** create a collider. With a scene object selected, the new collider is **attached to it and fitted to its real geometry bounds**; with nothing selected it's a 1-unit volume at the orbit target. The fit is measured in the object's own *local* space, not from `Box3.setFromObject` — a world-space AABB would produce a collider that's too big for any rotated object and wrong again the moment it turns, whereas a local measurement wraps the geometry and then inherits the object's rotation through the attachment, which is the entire point of an oriented collider.
+- **Nothing about a render mesh is ever modified.** Fitting reads geometry bounds and writes only the collider; the visuals are separate geometry parented under the collider's own node. Teardown removes all of it and leaves the scene byte-identical.
+- **Normal colliders and triggers are visually distinct**: solid volumes draw green, triggers cyan, disabled grey — and any collider *currently overlapping something* turns red, so you can watch a trigger fire instead of reading a console. `👁 Volumes` hides the drawing without stopping detection.
+- **Selecting a collider** — in the Hierarchy under the `COLLIDERS` group, or by clicking its volume in the viewport — shows a full collider panel in the Inspector: name, shape dimensions, `Is Trigger`, `Enabled`, `Tag`, `Mask`, the attachment (assignable by `⊙ Pick` *or* by dragging a Hierarchy row onto it, same as Control Desk's object fields), offset transform, a live overlapping/clear readout, and Fit/Duplicate/Delete. A viewport click lands on the translucent volume mesh, which is a child of the collider's node — `EditorObjectPicker`'s `resolveHit` hook maps it back to the node, otherwise the gizmo would attach to the *drawing* and drag it away from the volume.
+- The panel reaches the Inspector through `InspectorSections.ts`, not by the Inspector importing collider code. The Inspector knows how to draw a `number` row and nothing else; `EditorColliders` knows what a collider is and nothing about DOM. That split is also what keeps the whole collider editor out of production — in a shipped build the Inspector's provider list is simply empty, because the module that would fill it is never imported.
+- **Colliders sync every editor frame via `previewOverlaps()`**, which detects overlaps but dispatches no events. It has to exist because gameplay is paused for the whole editor session: without it a gizmo drag would never fold back into the collider's offset (so the edit wouldn't save) and the wireframes would never light up. Dispatching real events from here would be worse — a trigger firing while you arrange it is the game's logic running behind a paused game.
+- **Saved on Exit Editor**, in one `POST /save-colliders` that replaces `src/game/colliders.json` wholesale, for exactly the reasons the batched scene-binding write gives above. The Exit button counts collider changes alongside pending assignments.
 
 **`core/ViewHelperWidget.ts`** is the small red/green/blue axis gizmo mirroring camera orientation — its own tiny Three.js renderer and WebGL context. It is physically re-parented into the right dock while the editor is open and back into the Engine Room on exit; a canvas keeps its context across a re-parent, so this reuses the existing widget rather than building a second one. The Scripts and Control Desk blocks move the same way and for the same reason: their existing logic holds direct element references, so relocating the nodes carries all of it along with no second implementation to keep in sync.
 
@@ -219,7 +355,7 @@ Runtime half of the UI editor's Scripts panel drag-and-drop. `applyBindings(inst
 ### `SceneBindings.ts`
 The same idea as `Bindings.ts`, for **3D scene objects instead of UI elements** — the runtime half of the 3D Viewer/Editor's `⊙ Pick`. `applySceneBindings(instance, className, sceneBindingsData, scene)` resolves each saved assignment and writes the real `THREE.Object3D` onto the field, so a field like `public popcornMachine!: THREE.Object3D` is populated at boot instead of being wired by hand.
 
-**Objects are identified by path, never by uuid.** three.js regenerates uuids every time a GLB is parsed, so a uuid saved in one session resolves to nothing in the next — that is exactly why an assignment made in the editor came back `undefined` after a reload. `objectPath` is slash-separated node names from the scene root (`"Scene/props/popcornMachine"`, with unnamed nodes as `#<childIndex>`, since GLB exports are full of them); `objectName` is kept alongside it as a fallback `getObjectByName()` lookup for when a model is re-exported with a shifted hierarchy but the same node names — the same name-based convention `Game.ts` already relies on for `walkablearea`/`cinemafloor`/`Colliders`, and that `scripts/compress-assets.mjs` deliberately preserves node names to keep working. A binding that stops resolving leaves the field alone rather than throwing, and warns in dev only.
+**Objects are identified by path, never by uuid.** three.js regenerates uuids every time a GLB is parsed, so a uuid saved in one session resolves to nothing in the next — that is exactly why an assignment made in the editor came back `undefined` after a reload. `objectPath` is slash-separated node names from the scene root (`"Scene/props/popcornMachine"`, with unnamed nodes as `#<childIndex>`, since GLB exports are full of them). Resolution **backtracks** through same-named siblings rather than committing to the first match — every GLB root is named `Scene`, so ambiguity is normal, not exotic. `objectName` is kept alongside it as a fallback `getObjectByName()` lookup for when a model is re-exported with a shifted hierarchy but the same node names — the same name-based convention `Game.ts` already relies on for `walkablearea`/`cinemafloor`/`Colliders`, and that `scripts/compress-assets.mjs` deliberately preserves node names to keep working. A binding that stops resolving leaves the field alone rather than throwing, and warns in dev only.
 
 `src/game/sceneBindings.json` is a real static import, so **assignments ship**: the production bundle carries the binding data and re-applies it on boot exactly as the editor does. `Game.ts` applies it across its whole `inspectables` map at the end of the constructor — after `scene.add(sceneModel)`, since a binding can only resolve against objects already in the graph — so registering a class in that map is the only step needed for its scene fields to persist.
 
@@ -240,6 +376,7 @@ It talks to `scripts/dev-build-api.js` (localhost:8001, dev-only, started by `np
 | `GET /script-info`                                                 | A script's classes + public/private fields (brace-depth text scan, not a real TS parse — see the file's own doc comment for why)                                                                                                                                                                          |
 | `GET /list-bindings`, `POST /save-binding`, `POST /remove-binding` | The drag-and-drop field↔element assignments — `src/game/ui/bindings.json`                                                                                                                                                                                                                                 |
 | `GET /list-scene-bindings`, `POST /save-scene-bindings`                | The 3D editor's `⊙ Pick` field↔scene-object assignments — `src/game/sceneBindings.json`. The save is deliberately *batched* (a whole session's edits in one request, flushed on Exit Editor) rather than one-per-assignment: this file is in `main.ts`'s module graph, so each write hot-reloads the game, and reloading mid-session tears down the scene being picked from |
+| `GET /list-colliders`, `POST /save-colliders`                      | The 3D editor's "Configure Colliders" mode — `src/game/colliders.json`. Batched on Exit Editor for the same module-graph reason as the row above, and a *wholesale replace* rather than a merge: the file is entirely the editor's to own, and merging would have to reconcile deletions and reorders for no benefit — a delete that silently didn't stick is a far worse failure than a full overwrite |
 
 ## Building a new playable ad on this engine
 

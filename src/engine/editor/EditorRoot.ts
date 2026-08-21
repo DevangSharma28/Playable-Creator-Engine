@@ -7,9 +7,13 @@ import { EditorResizeManager } from "./EditorResizeManager";
 import { EditorObjectPicker } from "./EditorObjectPicker";
 import { EditorHierarchy } from "./EditorHierarchy";
 import { EditorInspector } from "./EditorInspector";
-import { checkAssignable } from "./objectAssignment";
-import { EditorDragSource } from "./EditorDragSource";
+import { checkAssignable, isColliderField } from "./objectAssignment";
+import type { ColliderVisuals } from "./ColliderVisuals";
+import { EditorDragSource, OBJECT_DRAG_MIME } from "./EditorDragSource";
 import { sceneObjectPath } from "../SceneBindings";
+import { EditorColliders } from "./EditorColliders";
+import type { ColliderManager } from "../collision/ColliderManager";
+import type { ColliderData, ColliderShape } from "../collision/ColliderTypes";
 
 export interface EditorRootOptions {
   scene: THREE.Scene;
@@ -22,11 +26,35 @@ export interface EditorRootOptions {
   inspectorEl: HTMLElement;
   /** Where to point the orbit camera on entry (typically the player). */
   initialTarget?: THREE.Vector3;
+  /** The live ION Collider registry — the editor edits the same colliders gameplay runs against, never a copy. */
+  colliderManager: ColliderManager;
+  /** The collider wireframe layer. Owned by Game (it also drives the in-game DEV debug toggle), borrowed by the editor for the duration of a session. */
+  colliderVisuals: ColliderVisuals;
+  /** Fired the first time a collider edit happens in a session, so the dev page's Exit button can show there's something to save. */
+  onColliderDirty?: () => void;
+}
+
+/**
+ * Where an assignment ends up and how to write it down.
+ *
+ * `value` and `object` are deliberately separate: for a collider field the
+ * value written onto the script is the `Collider` instance, while `object`
+ * is the node that was clicked — the thing the panel names in its readout.
+ * For an ordinary scene-object field they're the same reference.
+ */
+export interface FieldAssignment {
+  value: unknown;
+  object: THREE.Object3D;
+  /** Stable scene path, for persisting an Object3D assignment. */
+  objectPath: string;
+  objectName: string;
+  /** Set instead of relying on objectPath when the value is a collider — see SceneFieldBinding.colliderId. */
+  colliderId?: string;
 }
 
 /** Resolution of a Control Desk "Pick" — reported back so the panel can show what happened without knowing anything about raycasting. */
 export interface FieldPickCallbacks {
-  onResolve: (object: THREE.Object3D) => void;
+  onResolve: (assignment: FieldAssignment) => void;
   onReject?: (reason: string) => void;
   onCancel?: () => void;
 }
@@ -69,9 +97,13 @@ export class EditorRoot {
   private readonly picker: EditorObjectPicker;
   private readonly hierarchy: EditorHierarchy;
   private readonly inspector: EditorInspector;
+  /** "Configure Colliders" mode: authoring, wireframe visualization, and the Inspector's collider panel. */
+  private readonly editorColliders: EditorColliders;
   private onPickStateChange: ((pending: boolean) => void) | undefined;
   private readonly rendererRef: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
+  private readonly colliderManager: ColliderManager;
+  private readonly colliderVisuals: ColliderVisuals;
   private readonly viewportContainerRect: () => DOMRect;
 
   constructor(opts: EditorRootOptions) {
@@ -110,6 +142,28 @@ export class EditorRoot {
       selection: this.selection,
       isGizmoBusy: () => this.sceneInspector.isGizmoBusy(),
       onPickStateChange: (pending) => this.onPickStateChange?.(pending),
+      // Clicking a collider's translucent volume selects the collider, not
+      // the drawing of it — see EditorColliders.resolveHit.
+      resolveHit: (object) => this.editorColliders.resolveHit(object),
+    });
+
+    // Before the picker's consumers below, and before the Inspector, so its
+    // wireframes are already in the shared `excluded` set (which the
+    // Hierarchy and the picker both read) by the time either is built.
+    this.colliderManager = opts.colliderManager;
+    this.colliderVisuals = opts.colliderVisuals;
+    // The wireframes are the editor's to hide from the tree and refuse to
+    // gizmo for the duration of this session only — outside the editor
+    // they're just debug drawing with nothing to exclude them from.
+    this.colliderVisuals.setExclusionSink(this.sceneInspector.ownedHelpers);
+    this.editorColliders = new EditorColliders({
+      manager: opts.colliderManager,
+      visuals: opts.colliderVisuals,
+      scene: opts.scene,
+      selection: this.selection,
+      picker: this.picker,
+      getFocusPoint: () => this.orbitControls.target.clone(),
+      onDirty: opts.onColliderDirty,
     });
 
     this.hierarchy = new EditorHierarchy({
@@ -121,7 +175,18 @@ export class EditorRoot {
       dragSource: this.dragSource,
     });
 
-    this.inspector = new EditorInspector(opts.inspectorEl, this.selection);
+    this.inspector = new EditorInspector(opts.inspectorEl, this.selection, {
+      resolveDraggedObject: (uuid) => this.dragSource.resolve(uuid),
+      dragMime: OBJECT_DRAG_MIME,
+    });
+    // The Inspector renders whatever sections its providers hand back and
+    // knows nothing about colliders — see InspectorSections.ts.
+    this.inspector.addSectionProvider(this.editorColliders);
+  }
+
+  /** "Configure Colliders" mode and its authoring operations. */
+  get colliders(): EditorColliders {
+    return this.editorColliders;
   }
 
   /** The camera the scene is rendered through while the editor is open. */
@@ -133,8 +198,42 @@ export class EditorRoot {
   update(): void {
     this.orbitControls.update();
     this.sceneInspector.update();
+    // Before the panels: this is what folds a gizmo drag back into the
+    // collider's offset and refreshes the overlap tint, so the Hierarchy
+    // and Inspector below read this frame's numbers rather than last
+    // frame's. Gameplay is paused while the editor is open, so nothing else
+    // is syncing colliders.
+    this.editorColliders.update();
     this.hierarchy.refreshIfChanged();
     this.inspector.refresh();
+  }
+
+  // -----------------------------------------------------------------------
+  // Collider authoring — thin passthroughs; the behavior is EditorColliders'.
+  // -----------------------------------------------------------------------
+
+  /** Toolbar "Configure Colliders". Returns the new mode state. */
+  setColliderMode(active: boolean): boolean {
+    return this.editorColliders.setActive(active);
+  }
+  createCollider(shape: ColliderShape): void {
+    this.editorColliders.create(shape);
+  }
+  deleteSelectedCollider(): boolean {
+    return this.editorColliders.removeSelected();
+  }
+  toggleColliderVisible(): boolean {
+    return this.editorColliders.toggleVisible();
+  }
+  /** Every collider that belongs in src/game/colliders.json, as JSON-ready records. */
+  serializeColliders(): ColliderData[] {
+    return this.editorColliders.serialize();
+  }
+  get hasColliderChanges(): boolean {
+    return this.editorColliders.hasChanges;
+  }
+  markCollidersSaved(): void {
+    this.editorColliders.markSaved();
   }
 
   /**
@@ -146,11 +245,30 @@ export class EditorRoot {
    */
   requestObjectPick(declaredType: string | undefined, callbacks: FieldPickCallbacks): void {
     this.picker.beginPickRequest({
-      validate: (object) => checkAssignable(declaredType, object),
-      onResolve: callbacks.onResolve,
+      validate: (object) => checkAssignable(declaredType, object, this.colliderManager.fromNode(object)),
+      onResolve: (object) => callbacks.onResolve(this.assignmentFor(declaredType, object)),
       onReject: callbacks.onReject,
       onCancel: callbacks.onCancel,
     });
+  }
+
+  /**
+   * What a field should actually receive for a given clicked object, plus
+   * the identifiers needed to persist it.
+   *
+   * One place decides this for both entry points (⊙ Pick and a Hierarchy
+   * row dropped on the field), so a collider assigned by dragging and a
+   * collider assigned by picking can't end up as different things — which
+   * is exactly the kind of drift that would only show up after a reload.
+   */
+  assignmentFor(declaredType: string | undefined, object: THREE.Object3D): FieldAssignment {
+    const base = { object, objectPath: sceneObjectPath(object, this.scene), objectName: object.name || "" };
+    if (!isColliderField(declaredType)) return { ...base, value: object };
+    const collider = this.colliderManager.fromNode(object);
+    if (!collider) return { ...base, value: object };
+    // The collider's *name* rides in objectName so the binding stays
+    // recoverable if the id ever changes — see resolveCollider.
+    return { ...base, value: collider, colliderId: collider.id, objectName: collider.name };
   }
 
   cancelObjectPick(): void {
@@ -167,22 +285,19 @@ export class EditorRoot {
    * itself and additionally returns the live object plus the identifiers
    * needed to persist the assignment.
    */
-  dragAssign(declaredType: string | undefined, commit: boolean, uuid?: string): { ok: boolean; reason: string; name?: string; object?: THREE.Object3D; objectPath?: string; objectName?: string } {
+  dragAssign(declaredType: string | undefined, commit: boolean, uuid?: string): { ok: boolean; reason: string; name?: string; value?: unknown; objectPath?: string; objectName?: string; colliderId?: string } {
     const object = uuid ? this.dragSource.resolve(uuid) : this.dragSource.object;
     if (!object) return { ok: false, reason: "Nothing is being dragged." };
-    const verdict = checkAssignable(declaredType, object);
-    if (!verdict.ok) return { ok: false, reason: verdict.reason, name: object.name || object.type };
-    if (!commit) return { ok: true, reason: "", name: object.name || object.type };
-    const id = this.objectPath(object);
+    const collider = this.colliderManager.fromNode(object);
+    const verdict = checkAssignable(declaredType, object, collider);
+    const label = collider?.name || object.name || object.type;
+    if (!verdict.ok) return { ok: false, reason: verdict.reason, name: label };
+    if (!commit) return { ok: true, reason: "", name: label };
+    const assignment = this.assignmentFor(declaredType, object);
     // Select what was just dropped, same as a completed Pick does — the
     // gizmo and Inspector then show the thing you just wired up.
     this.selection.selectObject(object, "hierarchy");
-    return { ok: true, reason: "", name: object.name || object.type, object, ...id };
-  }
-
-  /** Stable identifier for a scene object, for persisting a Pick assignment — see SceneBindings.sceneObjectPath for why this isn't the uuid. */
-  objectPath(object: THREE.Object3D): { objectPath: string; objectName: string } {
-    return { objectPath: sceneObjectPath(object, this.scene), objectName: object.name || "" };
+    return { ok: true, reason: "", name: label, value: assignment.value, objectPath: assignment.objectPath, objectName: assignment.objectName, colliderId: assignment.colliderId };
   }
 
   get isPickPending(): boolean {
@@ -251,6 +366,14 @@ export class EditorRoot {
   dispose(): void {
     this.onPickStateChange = undefined;
     this.resizeManager.dispose();
+    // Before sceneInspector: the collider wireframes live in that class's
+    // `ownedHelpers` set, and removing them after it has cleared the set
+    // would leave them parented in the scene with nothing tracking them.
+    this.editorColliders.dispose();
+    // Hands the wireframes back to Game: they outlive the session (the
+    // in-game DEV debug toggle draws the same ones), so they're released
+    // from the editor's exclusion set rather than destroyed.
+    this.colliderVisuals.setExclusionSink(undefined);
     this.picker.dispose();
     this.hierarchy.dispose();
     this.inspector.dispose();

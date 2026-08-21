@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "colliders": [
+    {
+      "id": "col_playerzone",
+      "name": "PlayerZone",
+      "shape": "box",
+      "isTrigger": true,
+      "enabled": true,
+      "tag": "PlayerZone",
+      "mask": [
+        "Player"
+      ],
+      "attachPath": "",
+      "attachName": "",
+      "offset": {
+        "position": [
+          3.3517,
+          1,
+          -0.163
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        4,
+        2.5,
+        4
+      ]
+    },
+    {
+      "id": "col_arenawall",
+      "name": "Arena Wall",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Solid",
+      "mask": [],
+      "attachPath": "",
+      "attachName": "",
+      "offset": {
+        "position": [
+          -5.35,
+          1,
+          -0.1314
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        0.6,
+        2,
+        8
+      ]
+    },
+    {
+      "id": "col_t2c48z5bgn",
+      "name": "Box Collider 1",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "",
+      "attachName": "",
+      "offset": {
+        "position": [
+          3.3763,
+          0.2156,
+          -1.6129
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        3.4,
+        1,
+        1
+      ]
+    }
+  ]
+}

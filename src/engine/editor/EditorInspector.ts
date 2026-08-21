@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { EditorSelection } from "./EditorSelection";
+import type { InspectorField, InspectorSection, InspectorSectionProvider } from "./InspectorSections";
 
 interface AxisInputs {
   x: HTMLInputElement;
@@ -11,20 +12,32 @@ const EYE_OPEN_SVG = '<svg viewBox="0 0 20 20" width="13" height="13" fill="none
 const EYE_OFF_SVG = '<svg viewBox="0 0 20 20" width="13" height="13" fill="none"><path d="M1 10s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.6"/><path d="M2 18 18 2" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 const COPY_SVG = '<svg viewBox="0 0 20 20" width="11" height="11" fill="none"><rect x="6.5" y="6.5" width="10" height="10" rx="1.5" stroke="currentColor" stroke-width="1.5"/><path d="M13.5 6.5V4.5A1.5 1.5 0 0 0 12 3H4.5A1.5 1.5 0 0 0 3 4.5V12a1.5 1.5 0 0 0 1.5 1.5h2" stroke="currentColor" stroke-width="1.5"/></svg>';
 
+export interface EditorInspectorOptions {
+  /** Resolves the uuid carried by a Hierarchy row drag into the live object — needed by object-reference rows, since DataTransfer can't be read during dragover (see EditorDragSource). */
+  resolveDraggedObject?: (uuid: string) => THREE.Object3D | undefined;
+  /** The MIME the Hierarchy sets on its drags. Passed in rather than imported so this file stays unaware of the drag plumbing. */
+  dragMime?: string;
+}
+
 /**
  * Live transform readout/editor for whatever EditorSelection currently
- * holds — the same two-way binding the previous inspector had (typing
- * edits the real object; dragging the gizmo updates the fields), now
- * driven by the shared selection store instead of owning its own
- * `selected` reference.
+ * holds — plus any extra panels other subsystems contribute.
  *
- * The build/refresh split is load-bearing and predates this extraction:
- * structure is created once per newly-selected object, while *values* are
- * written every frame by `refresh()`. Rebuilding the DOM each frame would
- * destroy and recreate the very `<input>` the user is typing into, losing
- * focus and caret position on every keystroke. `refresh()` additionally
- * skips whichever input is focused, so a half-typed "1.2" is never
- * clobbered back to "1" by the frame that lands mid-edit.
+ * The build/refresh split is load-bearing and predates this file's
+ * extraction: structure is created once per newly-selected object, while
+ * *values* are written every frame by `refresh()`. Rebuilding the DOM each
+ * frame would destroy and recreate the very `<input>` the user is typing
+ * into, losing focus and caret position on every keystroke. `refresh()`
+ * additionally skips whichever input is focused, so a half-typed "1.2" is
+ * never clobbered back to "1" by the frame that lands mid-edit.
+ *
+ * **Section providers** (see InspectorSections.ts) are how the collider
+ * editor gets a panel here without this file knowing what a collider is:
+ * a provider hands back a list of field descriptors, this renders them,
+ * and their own `read()` callbacks feed the same per-frame refresh as the
+ * transform fields. A provider's `version` changing is the signal to
+ * rebuild — that's what makes switching a collider from box to sphere swap
+ * a Size row for a Radius row without rebuilding anything every frame.
  */
 export class EditorInspector {
   private readonly unsubscribe: () => void;
@@ -35,17 +48,37 @@ export class EditorInspector {
   private visibleButton: HTMLButtonElement | undefined;
   private visibleLabel: HTMLElement | undefined;
 
+  private readonly providers: InspectorSectionProvider[] = [];
+  /** Last-seen `version` per provider — compared each frame to decide whether the section's rows need rebuilding. */
+  private readonly providerVersions = new Map<InspectorSectionProvider, number>();
+  /** Per-frame value writers for every provider-contributed row currently on screen. */
+  private sectionRefreshers: (() => void)[] = [];
+
   constructor(
     private readonly container: HTMLElement,
-    private readonly selection: EditorSelection
+    private readonly selection: EditorSelection,
+    private readonly options: EditorInspectorOptions = {}
   ) {
     this.unsubscribe = selection.subscribe((state) => this.setObject(state.object));
     this.setObject(selection.object);
   }
 
-  /** Once per editor frame — keeps the fields in step with gizmo drags and any gameplay-side transform changes. */
+  /** Adds a panel contributor. Order is registration order, and every provider sits between the identity block and the transform fields. */
+  addSectionProvider(provider: InspectorSectionProvider): void {
+    this.providers.push(provider);
+    this.providerVersions.set(provider, -1);
+    if (this.current) this.setObject(this.current, true);
+  }
+
+  /** Once per editor frame — keeps the fields in step with gizmo drags and any gameplay-side changes. */
   refresh(): void {
-    if (this.current) this.writeValues(this.current);
+    if (!this.current) return;
+    if (this.providersChanged()) {
+      this.setObject(this.current, true);
+      return;
+    }
+    this.writeValues(this.current);
+    for (const write of this.sectionRefreshers) write();
   }
 
   dispose(): void {
@@ -54,8 +87,16 @@ export class EditorInspector {
     this.container.innerHTML = "";
   }
 
-  private setObject(obj: THREE.Object3D | undefined): void {
-    if (obj === this.current) return;
+  private providersChanged(): boolean {
+    let changed = false;
+    for (const provider of this.providers) {
+      if (this.providerVersions.get(provider) !== provider.version) changed = true;
+    }
+    return changed;
+  }
+
+  private setObject(obj: THREE.Object3D | undefined, force = false): void {
+    if (obj === this.current && !force) return;
     this.current = obj;
     if (!obj) {
       this.clearFieldRefs();
@@ -69,9 +110,11 @@ export class EditorInspector {
   private clearFieldRefs(): void {
     this.posInputs = this.rotInputs = this.scaleInputs = undefined;
     this.visibleButton = this.visibleLabel = undefined;
+    this.sectionRefreshers = [];
   }
 
   private buildFields(obj: THREE.Object3D): void {
+    this.clearFieldRefs();
     this.container.innerHTML = "";
 
     const nameRow = document.createElement("div");
@@ -129,6 +172,8 @@ export class EditorInspector {
       this.container.appendChild(statsInfo);
     }
 
+    this.buildProviderSections(obj);
+
     const visRow = document.createElement("div");
     visRow.className = "si-insp-visible-row";
     const visBtn = document.createElement("button");
@@ -154,6 +199,202 @@ export class EditorInspector {
     this.scaleInputs = this.buildAxisRow("Scale", (axis, v) => {
       obj.scale[axis] = v;
     });
+  }
+
+  private buildProviderSections(obj: THREE.Object3D): void {
+    for (const provider of this.providers) {
+      this.providerVersions.set(provider, provider.version);
+      const section = provider.describe(obj);
+      if (section) this.buildSection(section);
+    }
+  }
+
+  private buildSection(section: InspectorSection): void {
+    const wrap = document.createElement("div");
+    wrap.className = "si-insp-section";
+    wrap.dataset.sectionId = section.id;
+
+    const header = document.createElement("div");
+    header.className = "si-insp-section-title";
+    const title = document.createElement("span");
+    title.textContent = section.title;
+    header.appendChild(title);
+    if (section.badge) {
+      const badge = document.createElement("em");
+      badge.className = `si-insp-badge tone-${section.badgeTone ?? "solid"}`;
+      badge.textContent = section.badge;
+      header.appendChild(badge);
+    }
+    wrap.appendChild(header);
+
+    for (const field of section.fields) wrap.appendChild(this.buildSectionField(field));
+    this.container.appendChild(wrap);
+  }
+
+  private buildSectionField(field: InspectorField): HTMLElement {
+    if (field.kind === "buttons") return this.buildButtonsField(field);
+    const row = document.createElement("div");
+    row.className = `si-insp-field kind-${field.kind}`;
+    if (field.hint) row.title = field.hint;
+    const label = document.createElement("span");
+    label.className = "si-insp-field-label";
+    label.textContent = field.label;
+    row.appendChild(label);
+
+    if (field.kind === "text") {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.className = "si-insp-text";
+      input.value = field.value;
+      if (field.placeholder) input.placeholder = field.placeholder;
+      input.addEventListener("input", () => field.onChange(input.value));
+      row.appendChild(input);
+      if (field.read) this.sectionRefreshers.push(() => setIfIdleText(input, field.read as () => string));
+    } else if (field.kind === "number") {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = "si-insp-number";
+      input.step = String(field.step ?? 0.05);
+      if (field.min !== undefined) input.min = String(field.min);
+      input.value = String(round2(field.value));
+      input.addEventListener("input", () => {
+        const v = parseFloat(input.value);
+        if (!Number.isNaN(v)) field.onChange(v);
+      });
+      row.appendChild(input);
+      if (field.read) this.sectionRefreshers.push(() => setIfIdleNumber(input, (field.read as () => number)()));
+    } else if (field.kind === "toggle") {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "si-insp-switch";
+      const paint = (on: boolean): void => {
+        button.classList.toggle("on", on);
+        button.setAttribute("aria-pressed", String(on));
+        button.textContent = on ? (field.onText ?? "On") : (field.offText ?? "Off");
+      };
+      paint(field.value);
+      button.addEventListener("click", () => {
+        const next = !button.classList.contains("on");
+        field.onChange(next);
+        paint(next);
+      });
+      row.appendChild(button);
+      if (field.read) this.sectionRefreshers.push(() => paint((field.read as () => boolean)()));
+    } else if (field.kind === "vec3") {
+      row.classList.add("stacked");
+      const grid = document.createElement("div");
+      grid.className = "si-insp-axisgrid";
+      const labels = field.axisLabels ?? ["X", "Y", "Z"];
+      const inputs: HTMLInputElement[] = [];
+      for (let i = 0; i < 3; i++) {
+        const cell = document.createElement("label");
+        cell.className = `si-insp-axisfield axis-${["x", "y", "z"][i]}`;
+        const tag = document.createElement("span");
+        tag.textContent = labels[i];
+        const input = document.createElement("input");
+        input.type = "number";
+        input.step = String(field.step ?? 0.05);
+        input.value = String(round2(field.value[i]));
+        const axis = i as 0 | 1 | 2;
+        input.addEventListener("input", () => {
+          const v = parseFloat(input.value);
+          if (!Number.isNaN(v)) field.onChange(axis, v);
+        });
+        cell.append(tag, input);
+        grid.appendChild(cell);
+        inputs.push(input);
+      }
+      row.appendChild(grid);
+      if (field.read) {
+        this.sectionRefreshers.push(() => {
+          const values = (field.read as () => [number, number, number])();
+          for (let i = 0; i < 3; i++) setIfIdleNumber(inputs[i], values[i]);
+        });
+      }
+    } else if (field.kind === "info") {
+      const value = document.createElement("b");
+      value.className = `si-insp-info-value accent-${field.accent ?? "normal"}`;
+      value.textContent = field.value;
+      row.appendChild(value);
+      if (field.read || field.readAccent) {
+        this.sectionRefreshers.push(() => {
+          if (field.read) {
+            const text = field.read();
+            if (value.textContent !== text) value.textContent = text;
+          }
+          if (field.readAccent) value.className = `si-insp-info-value accent-${field.readAccent()}`;
+        });
+      }
+    } else {
+      row.appendChild(this.buildObjectRefControl(field));
+    }
+    return row;
+  }
+
+  private buildObjectRefControl(field: Extract<InspectorField, { kind: "objectRef" }>): HTMLElement {
+    const wrap = document.createElement("div");
+    wrap.className = "si-insp-objectref";
+    const value = document.createElement("span");
+    value.className = "si-insp-objectref-value";
+    value.textContent = field.value;
+    const pick = document.createElement("button");
+    pick.type = "button";
+    pick.className = "si-insp-mini-btn";
+    pick.textContent = "⊙";
+    pick.title = "Pick — then click an object in the viewport or the Hierarchy";
+    pick.addEventListener("click", () => field.onPick());
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "si-insp-mini-btn";
+    clear.textContent = "✕";
+    clear.title = "Detach (world space)";
+    clear.addEventListener("click", () => field.onClear());
+    wrap.append(value, pick, clear);
+
+    // The second way to assign one, matching the affordance Control Desk's
+    // object fields already offer: drag a Hierarchy row onto it. The uuid
+    // is all DataTransfer carries; the live object is resolved through the
+    // drag source, because dragover can't read a payload's contents.
+    const mime = this.options.dragMime;
+    const resolve = this.options.resolveDraggedObject;
+    if (mime && resolve) {
+      wrap.addEventListener("dragover", (e) => {
+        if (!e.dataTransfer?.types.includes(mime)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "copy";
+        wrap.classList.add("drop-ok");
+      });
+      wrap.addEventListener("dragleave", () => wrap.classList.remove("drop-ok"));
+      wrap.addEventListener("drop", (e) => {
+        wrap.classList.remove("drop-ok");
+        const uuid = e.dataTransfer?.getData(mime);
+        if (!uuid) return;
+        e.preventDefault();
+        const object = resolve(uuid);
+        if (object) field.onDropObject(object);
+      });
+    }
+
+    if (field.read) this.sectionRefreshers.push(() => {
+      const text = (field.read as () => string)();
+      if (value.textContent !== text) value.textContent = text;
+    });
+    return wrap;
+  }
+
+  private buildButtonsField(field: Extract<InspectorField, { kind: "buttons" }>): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "si-insp-buttonrow";
+    for (const spec of field.buttons) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = spec.danger ? "si-insp-action danger" : "si-insp-action";
+      button.textContent = spec.text;
+      if (spec.title) button.title = spec.title;
+      button.addEventListener("click", () => spec.onClick());
+      row.appendChild(button);
+    }
+    return row;
   }
 
   /** Icon + label + pressed-state for the eye button, in one place so a click and the per-frame sync below (writeValues) never drift out of step with each other. */
@@ -231,25 +472,37 @@ export class EditorInspector {
   }
 
   private writeValues(obj: THREE.Object3D): void {
-    const setIfIdle = (input: HTMLInputElement | undefined, value: number): void => {
-      if (!input || document.activeElement === input) return; // never overwrite what's mid-typing
-      const rounded = String(Math.round(value * 100) / 100);
-      if (input.value !== rounded) input.value = rounded;
-    };
-    setIfIdle(this.posInputs?.x, obj.position.x);
-    setIfIdle(this.posInputs?.y, obj.position.y);
-    setIfIdle(this.posInputs?.z, obj.position.z);
-    setIfIdle(this.rotInputs?.x, THREE.MathUtils.radToDeg(obj.rotation.x));
-    setIfIdle(this.rotInputs?.y, THREE.MathUtils.radToDeg(obj.rotation.y));
-    setIfIdle(this.rotInputs?.z, THREE.MathUtils.radToDeg(obj.rotation.z));
-    setIfIdle(this.scaleInputs?.x, obj.scale.x);
-    setIfIdle(this.scaleInputs?.y, obj.scale.y);
-    setIfIdle(this.scaleInputs?.z, obj.scale.z);
+    setIfIdleNumber(this.posInputs?.x, obj.position.x);
+    setIfIdleNumber(this.posInputs?.y, obj.position.y);
+    setIfIdleNumber(this.posInputs?.z, obj.position.z);
+    setIfIdleNumber(this.rotInputs?.x, THREE.MathUtils.radToDeg(obj.rotation.x));
+    setIfIdleNumber(this.rotInputs?.y, THREE.MathUtils.radToDeg(obj.rotation.y));
+    setIfIdleNumber(this.rotInputs?.z, THREE.MathUtils.radToDeg(obj.rotation.z));
+    setIfIdleNumber(this.scaleInputs?.x, obj.scale.x);
+    setIfIdleNumber(this.scaleInputs?.y, obj.scale.y);
+    setIfIdleNumber(this.scaleInputs?.z, obj.scale.z);
     // Kept in sync every frame too, not just on click — the gizmo/hierarchy
     // never toggle visibility directly today, but Control Desk or a
     // gameplay script legitimately could while this object stays selected.
     if (this.visibleButton && this.visibleButton.classList.contains("off") !== !obj.visible) this.paintVisible(obj.visible);
   }
+}
+
+/** Never overwrite what's mid-typing — see the class doc comment. */
+function setIfIdleNumber(input: HTMLInputElement | undefined, value: number): void {
+  if (!input || document.activeElement === input) return;
+  const rounded = String(round2(value));
+  if (input.value !== rounded) input.value = rounded;
+}
+
+function setIfIdleText(input: HTMLInputElement, read: () => string): void {
+  if (document.activeElement === input) return;
+  const text = read();
+  if (input.value !== text) input.value = text;
+}
+
+function round2(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 function escapeHtml(s: string): string {

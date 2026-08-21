@@ -8,6 +8,8 @@ import { applySceneBindings, type SceneBindingsData } from "../../engine/SceneBi
 import sceneBindingsRaw from "../sceneBindings.json";
 import { Easing } from "../../engine/Ion";
 import { Animator, LoopAnimator } from "../../engine/core/Animator";
+import { Ion } from "../../engine/Ion";
+import type { CylinderCollider } from "../../engine/collision";
 import { lerp } from "three/src/math/MathUtils.js";
 
 
@@ -53,6 +55,19 @@ export class Player {
   private currentAction: THREE.AnimationAction | null = null;
   /** One-shot guard for revealPopcornMachine() — see its own call site in update() for why this can't just fire from the constructor. */
   private aAnimator: Animator | undefined
+
+  /**
+   * The player's own collision volume — a cylinder, the standard character
+   * shape: rotation-invariant about the up axis (so walking into a doorway
+   * behaves the same whichever way you're facing, which a box does not)
+   * while still having a real height, which a sphere does not.
+   *
+   * Not physics. It never blocks or pushes the player — movement is still
+   * the clamp in update(). All it does is let *other* colliders notice the
+   * player, which is what makes the `PlayerZone` trigger in colliders.json
+   * work (see src/game/AreaDemo.ts).
+   */
+  public collider: CylinderCollider | undefined;
 
 
   // ==========================================================================
@@ -155,6 +170,31 @@ export class Player {
     // ------------------------------------------------------------------------
 
     scene.add(this.player);
+
+
+    // ------------------------------------------------------------------------
+    // Collision Volume
+    // ------------------------------------------------------------------------
+    // Attached to the player group rather than positioned each frame:
+    // ColliderManager recomputes the collider's world transform from the
+    // group's world matrix every frame, so it follows movement and turning
+    // for free and there is nothing to keep in sync here.
+    //
+    // Safe to do in a constructor, unlike Animator: IonEngine binds the Ion
+    // context *before* Game.create() runs precisely so entities can
+    // register their own colliders where they build their model. Ion.after/
+    // Ion.tween are fine here now too — the deferred reveal below is left
+    // as-is because it's about timing, not availability.
+    this.collider = Ion.colliders.cylinder({
+      name: "Player Collider",
+      tag: "Player",
+      radius: 0.4,
+      height: 1.8,
+      attachTo: this.player,
+      // Half the height, so the cylinder stands on the ground plane instead
+      // of being centered on the player's feet and sinking half of it.
+      position: [0, 0.9, 0],
+    });
 
     setTimeout(() => {
       this.revealPopcornMachine(this.popcornMachine);

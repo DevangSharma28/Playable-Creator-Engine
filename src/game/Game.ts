@@ -5,6 +5,7 @@ import { CameraHandler } from "../engine/core/CameraHandler";
 import { ViewHelperWidget } from "../engine/core/ViewHelperWidget";
 import type { GizmoMode, InspectorToolState } from "../engine/core/SceneInspector";
 import { EditorRoot, type FieldPickCallbacks } from "../engine/editor/EditorRoot";
+import { ColliderVisuals } from "../engine/editor/ColliderVisuals";
 import { World } from "./world/World";
 import { Player } from "./entities/Player";
 import { CoinField } from "./entities/CoinField";
@@ -20,6 +21,11 @@ import { Cta } from "../engine/Cta";
 import { setCrashRecoveryUrl } from "../engine/core/CrashOverlay";
 import { applySceneBindings, type SceneBindingsData } from "../engine/SceneBindings";
 import sceneBindingsRaw from "./sceneBindings.json";
+import { Ion } from "../engine/Ion";
+import { loadColliders } from "../engine/collision";
+import type { ColliderData, ColliderShape, CollidersFileData } from "../engine/collision";
+import collidersRaw from "./colliders.json";
+import { AreaDemo } from "./AreaDemo";
 import { SoundHandler } from "./SoundHandler";
 import { manifest, libGlb, libAudio } from "./assets";
 
@@ -50,12 +56,31 @@ export class Game {
   private readonly keyboardInput: InputManager;
   private readonly cameraHandler: CameraHandler;
   private readonly hud: HUD;
+  /** The ION Collider & Area worked example — see src/game/AreaDemo.ts. */
+  private readonly areaDemo: AreaDemo;
   private readonly soundHandler: SoundHandler;
   private readonly mainUI: UILayout;
   private readonly endcardUI: UILayout;
   private readonly assetLoader: AssetLoader;
   /** Only exists when #er-viewhelper is in the page (the dev-only Engine Room panel) — undefined, and never rendered into, in production. */
   private readonly viewHelper: ViewHelperWidget | undefined;
+  /**
+   * Collider wireframe drawing, DEV only.
+   *
+   * Owned here rather than by the editor because it has to work **while
+   * the game is playing** — that's the whole point of the Engine Room's
+   * Colliders toggle: watch a trigger light up as you walk into it, with
+   * gameplay running normally. The editor borrows the same instance for
+   * its Configure Colliders mode (see EditorRoot), so there's one layer
+   * and two independent things that can show it, rather than two layers
+   * drawing the same volumes twice.
+   *
+   * Constructed behind `import.meta.env.DEV` like ViewHelperWidget, so the
+   * whole module — geometry, materials, colours — drops out of a
+   * production build. The collision system itself is unaffected: it's
+   * runtime, and it ships.
+   */
+  private readonly colliderDebug: ColliderVisuals | undefined;
   private readonly mainLayer: HTMLElement;
   /**
    * The whole dev 3D Viewer/Editor (camera, orbit controls, selection,
@@ -70,6 +95,8 @@ export class Game {
   private gizmoModeChangeCallback: ((mode: GizmoMode) => void) | undefined;
   /** Same reasoning as gizmoModeChangeCallback, for grid/helpers/snap/space instead of gizmo mode — see onInspectorStateChange(). */
   private inspectorStateChangeCallback: ((state: InspectorToolState) => void) | undefined;
+  /** Same again, for "a collider edit happened" — lets the dev page's Exit button count colliders alongside pending scene-object assignments. */
+  private colliderDirtyCallback: (() => void) | undefined;
 
   private collected = 0;
   private ended = false;
@@ -102,6 +129,14 @@ export class Game {
 
     this.world = new World(this.scene);
 
+    // The ION Collider & Area registry's own COLLIDERS group joins the
+    // scene here, before anything creates a collider — Player builds its
+    // cylinder in its own constructor a few lines down, and a collider
+    // whose node has nowhere to live would never get a world transform.
+    // Ion is already bound at this point: IonEngine binds it before
+    // Game.create() precisely so entity constructors can do this.
+    Ion.colliders.attachToScene(this.scene);
+
     // Cinema_World.glb — a designed environment dropped in alongside World's
     // procedural ground/walls (not replacing them; World.bound below still
     // drives gameplay's play-area clamp regardless of what this model looks
@@ -117,11 +152,31 @@ export class Game {
 
     this.player = new Player(this.scene, this.world.bound, model, clips);
     this.coinField = new CoinField(this.scene, COIN_COUNT, this.world.bound);
+
+    // Editor-authored colliders (src/game/colliders.json — written by the
+    // 3D editor's "Configure Colliders" mode). It's a real import, so these
+    // ship: what you place in the editor is what runs in the production
+    // build.
+    //
+    // Loaded *after* the entities, not just after the environment GLB. A
+    // collider records its attachment as a scene path and can only resolve
+    // it against a graph that already contains that object — and the most
+    // useful thing to attach one to is a character, which doesn't exist
+    // until `new Player(...)` above has added its model. Loading these
+    // earlier silently dropped every collider attached to anything the
+    // entities build, which read as "the editor forgot my attachment".
+    loadColliders(Ion.colliders, collidersRaw as CollidersFileData, this.scene);
+
+    // Both halves of the collider example now exist — the zone from
+    // colliders.json above, and the Player's own cylinder from its
+    // constructor — so the handlers have something to subscribe to.
+    this.areaDemo = new AreaDemo();
     this.inspectables = new Map<string, object>([
       ["Game", this],
       ["World", this.world],
       ["Player", this.player],
       ["CoinField", this.coinField],
+      ["AreaDemo", this.areaDemo],
       ["SoundHandler", this.soundHandler],
     ]);
 
@@ -138,6 +193,11 @@ export class Game {
     for (const [className, instance] of this.inspectables) {
       applySceneBindings(instance, className, sceneBindingsRaw as SceneBindingsData, this.scene);
     }
+
+    // After that pass, never inside AreaDemo's own constructor: its `zone`
+    // field is editor-assignable, and editor-assigned fields don't exist
+    // until the loop above has run. See AreaDemo.wire's doc comment.
+    this.areaDemo.wire();
 
     this.mainLayer = document.getElementById("custom-ui-layer") as HTMLElement;
     const endcardLayer = document.getElementById("endcard-layer") as HTMLElement;
@@ -195,6 +255,10 @@ export class Game {
     // finds anything.
     const viewHelperCanvas = import.meta.env.DEV ? (document.getElementById("er-viewhelper") as HTMLCanvasElement | null) : null;
     this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
+    // Same gating and the same reasoning as viewHelper above — see the
+    // field's own doc comment. Starts hidden and draws nothing until
+    // something turns it on.
+    this.colliderDebug = import.meta.env.DEV ? new ColliderVisuals(Ion.colliders) : undefined;
 
     window.addEventListener("resize", this.onWindowResize);
 
@@ -340,6 +404,13 @@ export class Game {
         hierarchyEl,
         inspectorEl,
         initialTarget: this.player.position,
+        // The live registry, not a copy — colliders arranged in the editor
+        // are the same objects gameplay resumes running against on exit.
+        colliderManager: Ion.colliders,
+        // Guaranteed to exist: this whole branch is already behind
+        // import.meta.env.DEV, the same gate colliderDebug is built under.
+        colliderVisuals: this.colliderDebug as ColliderVisuals,
+        onColliderDirty: () => this.colliderDirtyCallback?.(),
       });
       // A fresh EditorRoot is created each session, so re-wire any
       // previously-registered listener rather than relying on it surviving
@@ -389,9 +460,9 @@ export class Game {
     return this.editor?.dragAssign(declaredType, commit, uuid);
   }
 
-  /** Dev-only: stable path for a picked scene object, so Control Desk can persist the assignment (see SceneBindings.ts). */
-  editorObjectPath(object: THREE.Object3D): { objectPath: string; objectName: string } | undefined {
-    return this.editor?.objectPath(object);
+  /** Dev-only: what a field should receive for a clicked object, plus what to write down so it survives a reload — see EditorRoot.assignmentFor. */
+  editorAssignmentFor(declaredType: string | undefined, object: THREE.Object3D): ReturnType<EditorRoot["assignmentFor"]> | undefined {
+    return this.editor?.assignmentFor(declaredType, object);
   }
 
   /** Dev-only: see EditorRoot.getViewportInfo — the readable form of the "never stretched" invariant. */
@@ -425,6 +496,58 @@ export class Game {
   }
   frameSelected(): void {
     this.editor?.frameSelected();
+  }
+
+  // -----------------------------------------------------------------------
+  // Dev-only: the 3D editor's "Configure Colliders" mode. Thin passthroughs
+  // for the same reason as the toolbar toggles above — the whole collider
+  // *editor* lives inside EditorRoot, which only exists while the editor is
+  // open and only in a dev build. The collision system itself
+  // (engine/collision/) is entirely separate and always running.
+  // -----------------------------------------------------------------------
+
+  setColliderMode(active: boolean): boolean | undefined {
+    return this.editor?.setColliderMode(active);
+  }
+  /**
+   * The Engine Room's "Colliders" debug toggle — draws every registered
+   * collider and trigger volume **over the running game**, independent of
+   * the 3D editor. Returns the new state, or undefined in production where
+   * there is no layer to toggle.
+   */
+  setColliderDebug(visible: boolean): boolean | undefined {
+    this.colliderDebug?.setDebugVisible(visible);
+    return this.colliderDebug?.isDebugVisible;
+  }
+  toggleColliderDebug(): boolean | undefined {
+    return this.setColliderDebug(!this.colliderDebug?.isDebugVisible);
+  }
+  createCollider(shape: ColliderShape): void {
+    this.editor?.createCollider(shape);
+  }
+  deleteSelectedCollider(): boolean {
+    return this.editor?.deleteSelectedCollider() ?? false;
+  }
+  toggleColliderVisible(): boolean | undefined {
+    return this.editor?.toggleColliderVisible();
+  }
+  /** The records the dev page POSTs to /save-colliders on Exit Editor. Undefined when the editor isn't open — there's nothing to save then. */
+  serializeColliders(): ColliderData[] | undefined {
+    return this.editor?.serializeColliders();
+  }
+  hasColliderChanges(): boolean {
+    return this.editor?.hasColliderChanges ?? false;
+  }
+  markCollidersSaved(): void {
+    this.editor?.markCollidersSaved();
+  }
+  /** Live counters for the collider toolbar's readout — available with or without the editor, since the registry itself is always there. */
+  getColliderStats(): ReturnType<typeof Ion.colliders.getStats> {
+    return Ion.colliders.getStats();
+  }
+  /** Same reasoning as onGizmoModeChange: a new EditorRoot is built per session, so the callback is stored here and re-attached. */
+  onColliderDirty(cb: () => void): void {
+    this.colliderDirtyCallback = cb;
   }
 
   /** Same reasoning as onGizmoModeChange, for the toolbar toggles above — keeps the toolbar's active-highlight in sync when a toggle happens via keyboard shortcut (F/G/H/X/C) instead of a button click. */
@@ -480,6 +603,12 @@ export class Game {
   render(): void {
     const activeCamera = this.editor?.camera ?? this.camera;
     this.editor?.update();
+    // After the editor (which is what syncs colliders while gameplay is
+    // paused) and before the draw, so the wireframes show this frame's
+    // positions and overlap state. Reconciled here for both the in-game
+    // debug overlay and the editor's Configure Colliders mode — one call
+    // site, one layer. Cheap to a no-op while nothing is showing.
+    this.colliderDebug?.update();
     this.renderer.render(this.scene, activeCamera);
     this.viewHelper?.update(activeCamera);
   }
@@ -516,6 +645,11 @@ export class Game {
     // cap live WebGL contexts, so leaking one per hot reload eventually
     // starts force-losing them.
     this.viewHelper?.dispose();
+    // Drops the collider event subscriptions this instance registered. The
+    // colliders themselves are IonEngine's to retire (it clears the whole
+    // registry in __disposeGame) — this is just the handlers closing over
+    // *this* Game.
+    this.areaDemo.dispose();
     this.input.dispose();
     this.keyboardInput.dispose();
     this.soundHandler.dispose();

@@ -4,6 +4,7 @@ import type { UILayout } from "./ui/UILayout";
 import { Scheduler } from "./core/Scheduler";
 import { EventBus } from "./core/EventBus";
 import { bindIon, unbindIon, type IonContext } from "./Ion";
+import { ColliderManager } from "./collision/ColliderManager";
 import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
 import { isAssignableObjectField } from "./editor/objectAssignment";
 import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
@@ -74,6 +75,28 @@ import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
  * object, not a copy or an id. __editorRequestPick returns false when the
  * editor isn't open (nothing to click in).
  *
+ * __setColliderMode / __createCollider / __deleteSelectedCollider /
+ * __toggleColliderVisible / __getColliderStats: the 3D editor's "Configure
+ * Colliders" toolbar — same passthrough shape as __setGizmoMode. Only
+ * meaningful while the editor is open, except __getColliderStats, which
+ * reads the always-present runtime registry.
+ *
+ * __setColliderDebug / __toggleColliderDebug: the Engine Room's "Colliders"
+ * overlay — draws every collider and trigger volume *over the running
+ * game*, with no editor open and gameplay proceeding normally, so a trigger
+ * can be watched lighting up as the player walks into it. Deliberately
+ * installed alongside the ungated hooks above rather than the editor ones
+ * below, since needing the editor open would defeat the point.
+ *
+ * __serializeColliders / __hasColliderChanges / __markCollidersSaved /
+ * __onColliderDirty: persisting collider edits. Batched to a single write
+ * on Exit Editor for exactly the reason scene bindings are (see
+ * index.html's pendingSceneBindings): src/game/colliders.json is a real
+ * source file in main.ts's module graph, so writing it mid-session
+ * hot-reloads the scene out from under the editor that's editing it.
+ * __onColliderDirty is the reverse direction, so the Exit button can show
+ * there's something to save.
+ *
  * __getInspectable: the Engine Room panel's Control Desk (a live public-
  * field viewer/editor, keyed by class name) calls this to reach an actual
  * running instance — Player, CoinField, World, Game itself, whatever
@@ -116,12 +139,26 @@ type EngineWindow = Window & {
   __onInspectorStateChanged?: (state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void;
   __getInspectable?: (className: string) => object | undefined;
   __wasFreecamActive?: () => boolean;
-  __editorRequestPick?: (declaredType: string | undefined, callbacks: { onResolve: (object: unknown) => void; onReject?: (reason: string) => void; onCancel?: () => void }) => boolean;
+  __editorRequestPick?: (
+    declaredType: string | undefined,
+    callbacks: { onResolve: (assignment: { value: unknown; object: unknown; objectPath: string; objectName: string; colliderId?: string }) => void; onReject?: (reason: string) => void; onCancel?: () => void }
+  ) => boolean;
   __editorCancelPick?: () => void;
   __editorIsPickableField?: (declaredType: string | undefined) => boolean;
-  __editorObjectPath?: (object: unknown) => { objectPath: string; objectName: string } | undefined;
-  __editorDragAssign?: (declaredType: string | undefined, commit: boolean, uuid?: string) => { ok: boolean; reason: string; name?: string; object?: unknown; objectPath?: string; objectName?: string } | undefined;
+  __editorDragAssign?: (declaredType: string | undefined, commit: boolean, uuid?: string) => { ok: boolean; reason: string; name?: string; value?: unknown; objectPath?: string; objectName?: string; colliderId?: string } | undefined;
   __editorDragMime?: string;
+  __setColliderMode?: (active: boolean) => boolean | undefined;
+  __createCollider?: (shape: string) => void;
+  __deleteSelectedCollider?: () => boolean;
+  __toggleColliderVisible?: () => boolean | undefined;
+  __serializeColliders?: () => unknown[] | undefined;
+  __hasColliderChanges?: () => boolean;
+  __markCollidersSaved?: () => void;
+  __getColliderStats?: () => { total: number; enabled: number; narrowTests: number; activePairs: number };
+  __onColliderDirty?: () => void;
+  __setColliderDebug?: (visible: boolean) => boolean | undefined;
+  __toggleColliderDebug?: () => boolean | undefined;
+  __editorAssignmentFor?: (declaredType: string | undefined, object: unknown) => { value: unknown; object: unknown; objectPath: string; objectName: string; colliderId?: string } | undefined;
   __getEditorViewportInfo?: () => { containerWidth: number; containerHeight: number; containerAspect: number; rendererWidth: number; rendererHeight: number; cameraAspect: number; pixelRatio: number } | undefined;
   __getAudioAnalyser?: () => { getFrequencyData: () => Uint8Array } | undefined;
   __isMusicPlaying?: () => boolean;
@@ -201,7 +238,16 @@ export class IonEngine {
   private readonly scheduler = new Scheduler();
   /** Same reasoning as scheduler — owned here so teardown can drop every listener before a hot-reloaded bundle's Game classes (whose closures those listeners captured) get disposed. */
   private readonly bus = new EventBus();
-  private readonly ionContext: IonContext = { scheduler: this.scheduler, bus: this.bus };
+  /**
+   * The ION Collider & Area system's registry. Owned here for the same
+   * reasons as scheduler and bus: the loop is what drives it (so overlap
+   * detection pauses with gameplay instead of firing behind the editor),
+   * and teardown has to be able to retire it wholesale on an in-place
+   * reload — a surviving collider from the old bundle would otherwise sit
+   * in the new scene overlapping the new player.
+   */
+  private readonly colliders = new ColliderManager();
+  private readonly ionContext: IonContext = { scheduler: this.scheduler, bus: this.bus, colliders: this.colliders };
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -248,12 +294,21 @@ export class IonEngine {
     // it doesn't linger visually over a working reload.
     removeCrashOverlay();
 
+    // Bound *before* Game.create(), not after. Everything in the context
+    // (scheduler, bus, collider registry) is constructed by this class's
+    // own field initializers and depends on nothing from Game, so there was
+    // never a reason for the bind to wait — and waiting had a real cost:
+    // every entity constructor runs inside Game.create(), so `Ion.*` threw
+    // its not-yet-booted error for exactly the code most likely to reach
+    // for it. Registering a collider at the point an entity builds its
+    // model (see Player's cylinder collider) needs this ordering.
+    //
+    // Safe against the stale-dispose case above: __disposeGame() has
+    // already run, and unbindIon is context-guarded, so a late teardown
+    // from a superseded bundle can't unbind this one.
+    bindIon(this.ionContext);
     const activeGame = await Game.create(this.canvas);
     this.game = activeGame;
-    // Bind before installDevHooks (and therefore before __onGameReady
-    // fires) so anything reacting to "the game exists now" can already
-    // use Ion.after/tween without tripping its not-yet-booted guard.
-    bindIon(this.ionContext);
     this.installDevHooks(activeGame);
 
     // Every bundle execution bumps this and captures its own copy below —
@@ -290,6 +345,11 @@ export class IonEngine {
               fixedElapsed += fixedStep;
               activeGame.update(fixedStep, fixedElapsed);
               this.scheduler.update(fixedStep);
+              // After update(), so overlaps are evaluated against where
+              // things actually moved to this step rather than a step
+              // behind — and inside the not-paused guard, so trigger
+              // enter/exit doesn't fire behind an open editor.
+              this.colliders.update();
               accumulator -= fixedStep;
               steps++;
             }
@@ -300,6 +360,7 @@ export class IonEngine {
           } else {
             activeGame.update(dt, now / 1000);
             this.scheduler.update(dt);
+            this.colliders.update(); // see the fixed-step branch above for the ordering
           }
         }
         activeGame.render();
@@ -330,6 +391,10 @@ export class IonEngine {
       // bug __gameInstanceGeneration already guards the RAF loop against.
       this.scheduler.clear();
       this.bus.clear();
+      // Same reasoning one line up: a collider from the retired bundle
+      // left in the scene would keep overlapping (and firing enter/exit
+      // into handlers closing over a disposed Game) alongside the new one.
+      this.colliders.clear();
       unbindIon(this.ionContext);
       activeGame.dispose();
     };
@@ -358,6 +423,13 @@ export class IonEngine {
     this.win.__toggleSnap = () => activeGame.toggleSnap();
     this.win.__toggleSpace = () => activeGame.toggleSpace();
     this.win.__frameSelected = () => activeGame.frameSelected();
+    // Ungated, unlike the editor hooks further down: the Engine Room's
+    // Colliders overlay is meant to work over the *running* game with no
+    // editor open. It's still dev-only in effect — the layer it drives is
+    // built behind import.meta.env.DEV, so in production these return
+    // undefined and draw nothing.
+    this.win.__setColliderDebug = (visible) => activeGame.setColliderDebug(visible);
+    this.win.__toggleColliderDebug = () => activeGame.toggleColliderDebug();
     activeGame.onInspectorStateChange((state) => this.win.__onInspectorStateChanged?.(state));
     this.win.__getInspectable = (className) => activeGame.getInspectable(className);
     this.win.__getAudioAnalyser = () => activeGame.getAudioAnalyser();
@@ -373,7 +445,7 @@ export class IonEngine {
 
     this.win.__editorRequestPick = (declaredType, callbacks) =>
       activeGame.requestObjectPick(declaredType, {
-        onResolve: (object) => callbacks.onResolve(object),
+        onResolve: (assignment) => callbacks.onResolve(assignment),
         onReject: callbacks.onReject,
         onCancel: callbacks.onCancel,
       });
@@ -385,11 +457,21 @@ export class IonEngine {
     // rules live in exactly one place (see editor/objectAssignment.ts).
     this.win.__editorIsPickableField = (declaredType) => isAssignableObjectField(declaredType);
     this.win.__getEditorViewportInfo = () => activeGame.getEditorViewportInfo();
-    this.win.__editorObjectPath = (object) => activeGame.editorObjectPath(object as THREE.Object3D);
+    this.win.__editorAssignmentFor = (declaredType, object) => activeGame.editorAssignmentFor(declaredType, object as THREE.Object3D);
     this.win.__editorDragAssign = (declaredType, commit, uuid) => activeGame.editorDragAssign(declaredType, commit, uuid);
     // Exposed so the Control Desk's drop targets match on the same MIME the
     // Hierarchy rows set, without that string being written out twice.
     this.win.__editorDragMime = OBJECT_DRAG_MIME;
+
+    this.win.__setColliderMode = (active) => activeGame.setColliderMode(active);
+    this.win.__createCollider = (shape) => activeGame.createCollider(shape as Parameters<Game["createCollider"]>[0]);
+    this.win.__deleteSelectedCollider = () => activeGame.deleteSelectedCollider();
+    this.win.__toggleColliderVisible = () => activeGame.toggleColliderVisible();
+    this.win.__serializeColliders = () => activeGame.serializeColliders();
+    this.win.__hasColliderChanges = () => activeGame.hasColliderChanges();
+    this.win.__markCollidersSaved = () => activeGame.markCollidersSaved();
+    this.win.__getColliderStats = () => activeGame.getColliderStats();
+    activeGame.onColliderDirty(() => this.win.__onColliderDirty?.());
 
     // Restore the 3D Viewer/Editor after an in-place reload, here rather
     // than in main.ts's hot-accept callback. That callback runs the moment

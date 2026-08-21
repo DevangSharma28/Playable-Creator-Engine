@@ -1,5 +1,6 @@
 import type { Scheduler, ScheduledHandle, SequenceStep, TweenOptions } from "./core/Scheduler";
 import type { EventBus, EventHandle, Listener } from "./core/EventBus";
+import type { ColliderManager } from "./collision/ColliderManager";
 import { Cta, type CtaNetwork } from "./Cta";
 
 /** Re-exported so `import { Ion, Easing } from "./Ion"` is one line, one path — Scheduler.ts already re-exports it from tween.js for the same reason, this just closes the loop for callers going through the facade instead of Scheduler directly. `Easing.Quadratic.Out`, `Easing.Back.Out`, `Easing.Elastic.Out`, ... */
@@ -39,6 +40,7 @@ export { Easing } from "./core/Scheduler";
 export interface IonContext {
   scheduler: Scheduler;
   bus: EventBus;
+  colliders: ColliderManager;
 }
 
 let context: IonContext | undefined;
@@ -72,6 +74,24 @@ export const Ion = {
   /** Seconds of game time since boot — excludes any stretch where gameplay was paused (UI editor, freecam). */
   get time(): number {
     return required().scheduler.now;
+  },
+
+  /**
+   * The ION Collider & Area system — trigger zones, area volumes, and the
+   * player's own collision shape. Not physics: no rigidbodies, no forces,
+   * no gravity, nothing that moves a scene object. See
+   * engine/collision/ColliderManager.ts.
+   *
+   *   const zone = Ion.colliders.box({ name: "PlayerZone", tag: "PlayerZone", isTrigger: true, mask: ["Player"], size: [4, 3, 4] });
+   *   zone.onTriggerEnter("Player", () => hud.showPrompt());
+   *
+   * Unlike the rest of this facade, this one is deliberately usable from an
+   * *entity constructor*: IonEngine binds the context before Game.create()
+   * runs precisely so an entity can register its own collider at the point
+   * it builds its model, rather than deferring to its first update() tick.
+   */
+  get colliders(): ColliderManager {
+    return required().colliders;
   },
 
   /** Run `fn` once, `seconds` from now (game time — pauses with gameplay). */

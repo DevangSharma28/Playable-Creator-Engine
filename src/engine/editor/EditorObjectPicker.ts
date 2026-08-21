@@ -27,6 +27,17 @@ export interface EditorObjectPickerOptions {
   isGizmoBusy: () => boolean;
   /** Notified when a pick request arms or disarms, so the UI can show/clear "click an object…" affordances. */
   onPickStateChange?: (pending: boolean) => void;
+  /**
+   * Last chance to substitute what a viewport click actually selected.
+   *
+   * Exists for collider volumes: their translucent wireframe is a child of
+   * the collider's node, so a raw hit would select the drawing and attach
+   * the transform gizmo to it — dragging the picture of the volume away
+   * from the volume. This maps such a hit back to the collider's own node.
+   * Left as a hook rather than special-cased here so the picker keeps
+   * knowing nothing about colliders.
+   */
+  resolveHit?: (object: THREE.Object3D) => THREE.Object3D;
 }
 
 /**
@@ -166,6 +177,8 @@ export class EditorObjectPicker {
     // intersect below.
     const pickable = this.opts.scene.children.filter((child) => !this.opts.excluded.has(child));
     const hits = this.raycaster.intersectObjects(pickable, true);
-    return hits.length > 0 ? hits[0].object : undefined;
+    if (hits.length === 0) return undefined;
+    const hit = hits[0].object;
+    return this.opts.resolveHit ? this.opts.resolveHit(hit) : hit;
   }
 }

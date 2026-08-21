@@ -368,6 +368,42 @@
       background: var(--eng-audio-hover);
     }
 
+    /* Collider debug overlay — a fourth hue (the same cyan-green the
+       wireframes themselves use for solid volumes), so the button reads as
+       belonging to what it draws. Outlined rather than filled while off:
+       unlike Editor/Builder/3D View this one is a *state* you leave
+       running over gameplay, so it needs an obvious on/off appearance
+       rather than looking permanently armed. */
+    #er-btn-colliders {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      width: 100%;
+      font-family: inherit;
+      font-size: 10.5px;
+      font-weight: 700;
+      color: #86efac;
+      background: transparent;
+      border: 1px solid rgba(74, 222, 128, 0.45);
+      padding: 7px 4px;
+      border-radius: var(--eng-radius-sm);
+      cursor: pointer;
+      margin-bottom: 9px;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    #er-btn-colliders:hover {
+      background: rgba(74, 222, 128, 0.14);
+      border-color: rgba(74, 222, 128, 0.8);
+    }
+
+    #er-btn-colliders.active {
+      color: #06240f;
+      background: #4ade80;
+      border-color: #4ade80;
+    }
+
     /* Audio Reactor panel — dev-only live spectrum of the game's music (see
        the script section's drawSpectrum). Same "eng-panel" chrome as the
        Engine Room dock but a free-floating panel (bottom-left) rather than
@@ -1342,6 +1378,8 @@
       .editor-dock.visible,
       #si-gizmo-toolbar,
       #si-gizmo-toolbar.visible,
+      #si-collider-toolbar,
+      #si-collider-toolbar.visible,
       #er-exit-3d {
         animation: none;
         transition: opacity 0.001s linear, visibility 0s linear;
@@ -2082,6 +2120,297 @@
       gap: 2px;
     }
 
+    /* ------------------------------------------------------------------
+       Configure Colliders — the ION Collider & Area authoring toolbar.
+
+       A second row that rides directly above #si-gizmo-toolbar rather
+       than more buttons inside it: creating a collider, fitting one, and
+       toggling volume visibility are a *mode*, not more transform tools,
+       and folding them into the same row would make an already-eight-wide
+       toolbar unreadable. It only exists while the mode is on, so the
+       normal 3D viewer is unchanged.
+       ------------------------------------------------------------------ */
+    #si-collider-toolbar {
+      display: flex;
+      align-items: center;
+      position: fixed;
+      bottom: 56px;
+      left: 50%;
+      z-index: 70;
+      gap: 3px;
+      padding: 4px 6px;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      border-radius: var(--eng-radius);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
+      transform: translate(-50%, 10px);
+      transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+    }
+
+    #si-collider-toolbar.visible {
+      pointer-events: auto;
+      visibility: visible;
+      opacity: 1;
+      transform: translate(-50%, 0);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    #si-collider-toolbar button {
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--eng-text-dim);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 4px 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    #si-collider-toolbar button:hover:not(.active) {
+      color: var(--eng-text);
+      background: rgba(56, 189, 248, 0.16);
+      border-color: rgba(56, 189, 248, 0.5);
+    }
+
+    #si-collider-toolbar button.active {
+      color: #07202e;
+      background: linear-gradient(180deg, #7dd3fc, #38bdf8);
+      border-color: #7dd3fc;
+    }
+
+    #si-collider-toolbar button.danger:hover {
+      color: #fff;
+      background: rgba(255, 84, 112, 0.24);
+      border-color: rgba(255, 84, 112, 0.6);
+    }
+
+    .si-collider-label {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #7dd3fc;
+      padding: 0 4px 0 2px;
+    }
+
+    /* Live registry counters. Deliberately shows narrow-phase tests, not
+       just collider count: it's the number that tells you whether the
+       broad phase and your tag masks are actually doing their job. */
+    #si-collider-stats {
+      font-size: 9px;
+      color: var(--eng-text-faint);
+      font-variant-numeric: tabular-nums;
+      padding: 0 4px;
+      white-space: nowrap;
+    }
+
+    /* ------------------------------------------------------------------
+       Inspector section panels (see src/engine/editor/InspectorSections.ts).
+       Generic on purpose — the collider panel is the first consumer, not
+       the only intended one, so nothing here is named after colliders.
+       ------------------------------------------------------------------ */
+    .si-insp-section {
+      margin: 8px 0 4px;
+      padding: 6px 0 2px;
+      border-top: 1px solid var(--eng-border);
+    }
+
+    .si-insp-section-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: var(--eng-text-dim);
+      margin-bottom: 6px;
+    }
+
+    .si-insp-badge {
+      font-size: 8px;
+      font-style: normal;
+      font-weight: 800;
+      letter-spacing: 0.07em;
+      padding: 1px 5px;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+
+    .si-insp-badge.tone-trigger {
+      color: #7dd3fc;
+      border-color: rgba(56, 189, 248, 0.5);
+      background: rgba(56, 189, 248, 0.12);
+    }
+
+    .si-insp-badge.tone-solid {
+      color: #86efac;
+      border-color: rgba(74, 222, 128, 0.5);
+      background: rgba(74, 222, 128, 0.12);
+    }
+
+    .si-insp-badge.tone-off {
+      color: var(--eng-text-faint);
+      border-color: var(--eng-border);
+    }
+
+    .si-insp-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+      min-height: 20px;
+    }
+
+    .si-insp-field.stacked {
+      display: block;
+    }
+
+    .si-insp-field-label {
+      flex: 0 0 78px;
+      font-size: 10px;
+      color: var(--eng-text-dim);
+    }
+
+    .si-insp-field.stacked .si-insp-field-label {
+      display: block;
+      margin-bottom: 3px;
+    }
+
+    .si-insp-field input.si-insp-text,
+    .si-insp-field input.si-insp-number {
+      flex: 1;
+      min-width: 0;
+      font-family: inherit;
+      font-size: 10px;
+      color: var(--eng-text);
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 5px;
+    }
+
+    .si-insp-field input:focus {
+      outline: none;
+      border-color: rgba(56, 189, 248, 0.7);
+    }
+
+    .si-insp-switch {
+      flex: 1;
+      font-family: inherit;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--eng-text-faint);
+      background: rgba(0, 0, 0, 0.28);
+      border: 1px solid var(--eng-border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      cursor: pointer;
+      text-align: left;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    .si-insp-switch.on {
+      color: #07202e;
+      background: linear-gradient(180deg, #7dd3fc, #38bdf8);
+      border-color: #7dd3fc;
+    }
+
+    .si-insp-info-value {
+      font-size: 10px;
+      font-weight: 700;
+    }
+
+    .si-insp-info-value.accent-good {
+      color: #86efac;
+    }
+
+    .si-insp-info-value.accent-warn {
+      color: #ff8fa3;
+    }
+
+    .si-insp-objectref {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex: 1;
+      min-width: 0;
+      padding: 2px;
+      border: 1px dashed transparent;
+      border-radius: var(--eng-radius-sm);
+    }
+
+    /* Highlighted only while a valid Hierarchy row is over it — the same
+       "this will accept the drop" affordance Control Desk's own object
+       fields use. */
+    .si-insp-objectref.drop-ok {
+      border-color: rgba(56, 189, 248, 0.8);
+      background: rgba(56, 189, 248, 0.1);
+    }
+
+    .si-insp-objectref-value {
+      flex: 1;
+      min-width: 0;
+      font-size: 10px;
+      color: var(--eng-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .si-insp-mini-btn {
+      font-family: inherit;
+      font-size: 10px;
+      line-height: 1;
+      color: var(--eng-text-dim);
+      background: transparent;
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 5px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .si-insp-mini-btn:hover {
+      color: var(--eng-text);
+      border-color: rgba(56, 189, 248, 0.6);
+    }
+
+    .si-insp-buttonrow {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin: 8px 0 2px;
+    }
+
+    .si-insp-action {
+      font-family: inherit;
+      font-size: 10px;
+      color: var(--eng-text-dim);
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 4px 7px;
+      cursor: pointer;
+    }
+
+    .si-insp-action:hover {
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .si-insp-action.danger:hover {
+      color: #fff;
+      background: rgba(255, 84, 112, 0.25);
+      border-color: rgba(255, 84, 112, 0.6);
+    }
+
     #engine-room-stats {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -2640,6 +2969,13 @@
         Viewer/Editor</button>
       <button id="er-btn-audio" title="Live frequency-spectrum readout of the game's background music">🎧 Audio
         Reactor</button>
+      <!-- Draws collider/trigger volumes over the *running* game — no
+           editor, gameplay proceeding normally, so a trigger can be watched
+           lighting up red as the player walks into it. Independent of the
+           3D Viewer/Editor's own Configure Colliders mode; both drive the
+           same wireframe layer (see Game.colliderDebug). -->
+      <button id="er-btn-colliders" title="Show collider and trigger volumes over the running game (Shift+K)">🧊 Show
+        Colliders</button>
       <div id="engine-room-stats">
         <span>FPS</span><span class="val" id="er-fps">--</span>
         <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
@@ -2819,6 +3155,22 @@
     <button id="si-tool-snap" title="Toggle snapping (X)">🧲</button>
     <button id="si-tool-space" title="Toggle local/world space (C)">🌐</button>
     <button id="si-tool-frame" title="Frame selected (F)">🎯</button>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-tool-colliders" title="Configure Colliders — create and edit the ION collision volumes (K)">🧊</button>
+  </div>
+  <!-- Configure Colliders. Hidden until the mode is on; see its CSS for
+       why it's a separate row rather than more buttons in the toolbar
+       above. Creating with a scene object selected fits the new collider
+       to that object's real geometry bounds and attaches it. -->
+  <div id="si-collider-toolbar">
+    <span class="si-collider-label">Colliders</span>
+    <button id="si-col-add-box" title="New Box Collider — with a scene object selected, it's attached to it and sized to its bounds">＋ Box</button>
+    <button id="si-col-add-sphere" title="New Sphere Collider — with a scene object selected, it's attached to it and sized to its bounds">＋ Sphere</button>
+    <button id="si-col-add-cylinder" title="New Cylinder Collider — with a scene object selected, it's attached to it and sized to its bounds">＋ Cylinder</button>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-col-visible" class="active" title="Show/hide the collider wireframes. Detection keeps running either way.">👁 Volumes</button>
+    <button id="si-col-delete" class="danger" title="Delete the selected collider">🗑</button>
+    <span id="si-collider-stats">—</span>
   </div>
   <div id="device-topbar">
     <span class="label">Device Preview</span>
@@ -3073,7 +3425,17 @@
     // currently active instead of defaulting to the raw window size and
     // staying that way until something else (e.g. clicking a device tab)
     // happens to call applyDeviceFrame() again.
-    window.__onGameReady = applyDeviceFrame;
+    window.__onGameReady = () => {
+      applyDeviceFrame();
+      // The Engine Room's toggles are page state and survive an in-place
+      // reload; the Game that draws for them does not — a fresh instance
+      // comes up with its collider overlay off. Re-assert it here, or the
+      // button would keep claiming "Hide Colliders" over a scene with no
+      // wireframes in it (which is exactly what a save looked like
+      // mid-session).
+      const colliderBtn = document.getElementById("er-btn-colliders");
+      if (colliderBtn && window.__setColliderDebug) window.__setColliderDebug(colliderBtn.classList.contains("active"));
+    };
 
     // ION Engine: version + short commit hash of local HEAD, from
     // scripts/dev-build-api.js's GET /version — same dev-only API as the
@@ -3824,7 +4186,10 @@
           const className = row.dataset.dropClass;
           const fieldName = row.dataset.dropField;
           const instance = typeof window.__getInspectable === "function" ? window.__getInspectable(className) : undefined;
-          if (instance) instance[fieldName] = result.object;
+          // `value`, not the dragged node: a collider field receives the
+          // Collider instance. The engine decided that — see the ⊙ Pick
+          // handler below and EditorRoot.assignmentFor.
+          if (instance) instance[fieldName] = result.value;
           // Identical persistence path to a ⊙ Pick assignment — queued now,
           // written once on Exit Editor (see queueSceneBinding).
           queueSceneBinding({
@@ -3832,6 +4197,7 @@
             fieldName,
             objectPath: result.objectPath || "",
             objectName: result.objectName || "",
+            colliderId: result.colliderId,
           });
           renderControlDesk(true);
         });
@@ -3853,9 +4219,14 @@
         }
         if (typeof window.__editorRequestPick !== "function") return;
         const armed = window.__editorRequestPick(btn.dataset.pickType, {
-          onResolve: (object) => {
+          // The engine hands back what the field should actually receive —
+          // the clicked Object3D for a scene-object field, the Collider
+          // instance for a collider field — plus how to write it down. See
+          // EditorRoot.assignmentFor; deciding it there rather than here
+          // keeps ⊙ Pick and drag-to-assign from ever disagreeing.
+          onResolve: (assignment) => {
             const instance = typeof window.__getInspectable === "function" ? window.__getInspectable(className) : undefined;
-            if (instance) instance[fieldName] = object;
+            if (instance) instance[fieldName] = assignment.value;
             // Assigning onto the live instance only lasts as long as this
             // instance does — the next reload rebuilds the scene and the
             // field is undefined again. Queue it so Exit Editor persists it
@@ -3864,12 +4235,12 @@
             // written now on purpose: writing a watched source file mid-pick
             // hot-reloads the game out from under the session doing the
             // picking. See queueSceneBinding.
-            const id = typeof window.__editorObjectPath === "function" ? window.__editorObjectPath(object) : undefined;
             queueSceneBinding({
               className,
               fieldName,
-              objectPath: (id && id.objectPath) || "",
-              objectName: (id && id.objectName) || object.name || "",
+              objectPath: assignment.objectPath || "",
+              objectName: assignment.objectName || "",
+              colliderId: assignment.colliderId,
             });
             finishPick();
             renderControlDesk(true);
@@ -4008,17 +4379,35 @@
      */
     const pendingSceneBindings = new Map();
 
+    /**
+     * Whether any collider was created, deleted, moved, or reconfigured
+     * this session.
+     *
+     * A single flag rather than a per-collider queue, because
+     * /save-colliders replaces src/game/colliders.json wholesale (see the
+     * endpoint's own comment) — there's nothing to accumulate, only "is
+     * there anything to write". The batching reason is identical to the
+     * scene-bindings map above: colliders.json is in main.ts's module
+     * graph, so writing it mid-session hot-reloads the scene out from
+     * under the editor placing them.
+     */
+    let colliderDirty = false;
+
     function queueSceneBinding(edit) {
       pendingSceneBindings.set(edit.className + "." + edit.fieldName, edit);
       updateExitButtonPending();
     }
 
     function updateExitButtonPending() {
-      const n = pendingSceneBindings.size;
+      const bindings = pendingSceneBindings.size;
+      const n = bindings + (colliderDirty ? 1 : 0);
       const btn = document.getElementById("er-exit-3d");
       btn.textContent = n > 0 ? "\u2715 Exit & Save (" + n + ")" : "\u2715 Exit Editor";
       btn.classList.toggle("has-pending", n > 0);
-      btn.title = n > 0 ? n + " assignment" + (n === 1 ? "" : "s") + " will be written to src/game/sceneBindings.json on exit" : "Exit 3D Viewer/Editor";
+      const parts = [];
+      if (bindings > 0) parts.push(bindings + " assignment" + (bindings === 1 ? "" : "s") + " \u2192 src/game/sceneBindings.json");
+      if (colliderDirty) parts.push("collider changes \u2192 src/game/colliders.json");
+      btn.title = parts.length ? "Written on exit: " + parts.join("; ") : "Exit 3D Viewer/Editor";
     }
 
     /** Writes every queued assignment in one request. Resolves either way — a dead dev API shouldn't trap you inside the editor. */
@@ -4037,6 +4426,35 @@
         updateExitButtonPending();
       } catch (err) {
         console.error("3D Editor: couldn't persist scene assignments — they stay queued for the next exit.", err);
+      }
+    }
+
+    /**
+     * Writes every collider the editor owns to src/game/colliders.json in
+     * one request.
+     *
+     * Must run while the editor is still open: __serializeColliders reads
+     * the live EditorRoot, which stops existing the moment freecam turns
+     * off. Colliders a script created (the Player's cylinder) are excluded
+     * on the engine side — see Collider.persisted.
+     */
+    async function flushColliders() {
+      if (!window.__hasColliderChanges || !window.__hasColliderChanges()) return;
+      const colliders = window.__serializeColliders && window.__serializeColliders();
+      if (!colliders) return;
+      try {
+        const res = await fetch("http://127.0.0.1:8001/save-colliders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ colliders }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "save-colliders failed");
+        window.__markCollidersSaved && window.__markCollidersSaved();
+        colliderDirty = false;
+        updateExitButtonPending();
+      } catch (err) {
+        console.error("3D Editor: couldn't persist colliders — the edits stay in this session only.", err);
       }
     }
 
@@ -4063,7 +4481,16 @@
       gizmoToolbar.classList.toggle("visible", on);
       deviceTopbar.classList.toggle("hidden-for-3d", on);
       moveEditorPanels(on);
-      if (!on) hideEditorPickBanner();
+      if (!on) {
+        hideEditorPickBanner();
+        // Collider mode belongs to an editor session, not to the page: a
+        // fresh EditorRoot is built on the next entry with its wireframes
+        // hidden again, so leaving the button lit would claim a mode that
+        // isn't on.
+        setColliderMode(false);
+        colliderDirty = false;
+        updateExitButtonPending();
+      }
       // The 3D Viewer/Editor always uses the full space between its docks —
       // a letterboxed Portrait/Landscape preview means nothing for a free
       // camera — so force "Real" on entry, remembering whatever mode was
@@ -4099,6 +4526,10 @@
       // Game.ts's applySceneBindings — so it has to land after the editor
       // has stopped being the thing rendering.
       exitViewerBtn.disabled = true;
+      // Colliders first, and both before setFreecamUI(false): each reads
+      // the live EditorRoot, which is torn down the instant freecam turns
+      // off.
+      await flushColliders();
       await flushSceneBindings();
       exitViewerBtn.disabled = false;
       setFreecamUI(false);
@@ -4224,6 +4655,135 @@
     toolFrameBtn.addEventListener("click", () => {
       window.__frameSelected && window.__frameSelected();
     });
+
+    /* ============================================================
+       Configure Colliders — the ION Collider & Area authoring mode.
+
+       Same passthrough shape as the toolbar above (IonEngine's
+       __setColliderMode/__createCollider/... hooks), with one difference
+       worth stating: the *mode* is purely visual — turning it off hides
+       the wireframes and nothing else. Colliders keep detecting, and the
+       registry is untouched, because the collision system is engine
+       runtime and this is only its editor.
+
+       Declared with function declarations (not const arrows) because
+       setFreecamUI, defined earlier in this file, calls setColliderMode
+       on exit — hoisting is what lets that work.
+       ============================================================ */
+    /* Engine Room "Show Colliders" — the in-game debug overlay. Separate
+       from the editor's Configure Colliders mode below and deliberately so:
+       this one runs with gameplay live and no editor open, which is the
+       only way to watch a trigger actually fire. Both drive the same
+       wireframe layer, via IonEngine's __setColliderDebug hook. */
+    const colliderDebugBtn = document.getElementById("er-btn-colliders");
+
+    function paintColliderDebug(on) {
+      colliderDebugBtn.classList.toggle("active", !!on);
+      colliderDebugBtn.innerHTML = on ? "🧊 Hide Colliders" : "🧊 Show Colliders";
+    }
+
+    colliderDebugBtn.addEventListener("click", () => {
+      // Trust the engine's answer, not the requested value — in a build
+      // with no debug layer the hook returns undefined and the button must
+      // not claim to have turned anything on.
+      paintColliderDebug(window.__toggleColliderDebug && window.__toggleColliderDebug());
+    });
+
+    // Shift+K, so it doesn't collide with the editor's own K (Configure
+    // Colliders). Works any time, editor or not — that's the point of it.
+    window.addEventListener("keydown", (e) => {
+      if (!e.shiftKey || e.key.toLowerCase() !== "k") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const active = document.activeElement;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+      e.preventDefault();
+      paintColliderDebug(window.__toggleColliderDebug && window.__toggleColliderDebug());
+    });
+
+    const colliderModeBtn = document.getElementById("si-tool-colliders");
+    const colliderToolbar = document.getElementById("si-collider-toolbar");
+    const colliderStatsEl = document.getElementById("si-collider-stats");
+    let colliderModeOn = false;
+
+    function setColliderMode(on) {
+      // Trust the engine's answer rather than the requested value: with no
+      // editor open the hook returns undefined, and the button must not
+      // light up for a mode that didn't actually start.
+      const applied = window.__setColliderMode && window.__setColliderMode(on);
+      colliderModeOn = !!applied;
+      colliderModeBtn.classList.toggle("active", colliderModeOn);
+      colliderToolbar.classList.toggle("visible", colliderModeOn);
+      if (colliderModeOn) {
+        // Entering the mode always shows the volumes (setActive does), so
+        // the eye button has to start lit — otherwise hiding them, leaving
+        // the mode, and coming back would leave the button claiming
+        // "hidden" over visible wireframes.
+        document.getElementById("si-col-visible").classList.add("active");
+        refreshColliderStats();
+      }
+    }
+
+    function refreshColliderStats() {
+      if (!colliderModeOn || !window.__getColliderStats) return;
+      const s = window.__getColliderStats();
+      if (!s) return;
+      colliderStatsEl.textContent = s.total + " colliders · " + s.enabled + " on · " + s.narrowTests + " tests/frame · " + s.activePairs + " overlapping";
+    }
+
+    colliderModeBtn.addEventListener("click", () => setColliderMode(!colliderModeOn));
+    document.getElementById("si-col-add-box").addEventListener("click", () => {
+      window.__createCollider && window.__createCollider("box");
+      colliderDirty = true;
+      updateExitButtonPending();
+    });
+    document.getElementById("si-col-add-sphere").addEventListener("click", () => {
+      window.__createCollider && window.__createCollider("sphere");
+      colliderDirty = true;
+      updateExitButtonPending();
+    });
+    document.getElementById("si-col-add-cylinder").addEventListener("click", () => {
+      window.__createCollider && window.__createCollider("cylinder");
+      colliderDirty = true;
+      updateExitButtonPending();
+    });
+    const colliderVisibleBtn = document.getElementById("si-col-visible");
+    colliderVisibleBtn.addEventListener("click", () => {
+      const on = window.__toggleColliderVisible && window.__toggleColliderVisible();
+      colliderVisibleBtn.classList.toggle("active", !!on);
+    });
+    document.getElementById("si-col-delete").addEventListener("click", () => {
+      const removed = window.__deleteSelectedCollider && window.__deleteSelectedCollider();
+      if (!removed) {
+        console.warn("3D Editor: select a collider first — colliders created in game code can't be deleted here.");
+        return;
+      }
+      colliderDirty = true;
+      updateExitButtonPending();
+    });
+
+    // The engine's own signal that something changed (a gizmo drag folded
+    // into a collider's offset, an Inspector field edited) — the toolbar
+    // buttons above can't see any of that.
+    window.__onColliderDirty = () => {
+      colliderDirty = true;
+      updateExitButtonPending();
+    };
+
+    // K, matching the single-letter shortcuts SceneInspector already owns
+    // (W/E/R/Q/F/G/H/X/C). Handled here rather than there because the mode
+    // is an editor-chrome concern, and only meaningful while freecam is on.
+    window.addEventListener("keydown", (e) => {
+      if (!freecamActive || e.key.toLowerCase() !== "k") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const active = document.activeElement;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+      e.preventDefault();
+      setColliderMode(!colliderModeOn);
+    });
+
+    // Polled, not per-frame: a counters readout doesn't need 60Hz DOM
+    // writes, and the interval no-ops entirely while the mode is off.
+    setInterval(refreshColliderStats, 400);
 
     window.__onInspectorStateChanged = (state) => {
       toolGridBtn.classList.toggle("active", state.grid);
