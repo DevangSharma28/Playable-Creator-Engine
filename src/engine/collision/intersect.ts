@@ -296,6 +296,168 @@ function boxSegmentDistanceSq(box: BoxWorld, s0: THREE.Vector3, s1: THREE.Vector
   return bsBoxPoint.distanceToSquared(bsSegPoint);
 }
 
+// ---------------------------------------------------------------------------
+// Penetration — how far, and which way, to push one shape out of another
+// ---------------------------------------------------------------------------
+
+/**
+ * How far each shape reaches along `axis` from its own centre — the
+ * support function, exact for all three volumes.
+ *
+ * This is what lets one generic SAT loop below serve every shape pair
+ * instead of six bespoke penetration routines. A cylinder's support is the
+ * one worth reading twice: `halfHeight` scaled by how much the axis points
+ * along it, plus `radius` scaled by how much it points across it, which is
+ * exactly a capped cylinder's silhouette in that direction.
+ */
+function extentAlong(shape: ShapeWorld, axis: THREE.Vector3): number {
+  if (shape.kind === "sphere") return shape.radius;
+  if (shape.kind === "box") {
+    return Math.abs(shape.axes[0].dot(axis)) * shape.half.x + Math.abs(shape.axes[1].dot(axis)) * shape.half.y + Math.abs(shape.axes[2].dot(axis)) * shape.half.z;
+  }
+  const along = Math.abs(shape.axis.dot(axis));
+  const across = Math.sqrt(Math.max(0, 1 - along * along));
+  return shape.halfHeight * along + shape.radius * across;
+}
+
+const MAX_CANDIDATES = 24;
+const candidates: THREE.Vector3[] = Array.from({ length: MAX_CANDIDATES }, () => new THREE.Vector3());
+const axesA: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const axesB: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+const candTmp = new THREE.Vector3();
+const cpTmp = new THREE.Vector3();
+const sepVec = new THREE.Vector3();
+const axisTmp = new THREE.Vector3();
+const bestAxis = new THREE.Vector3();
+
+/** Principal axes of a shape — the directions its own flat faces point. A sphere has none; that's why the centre-to-centre direction is always a candidate. */
+function principalAxes(shape: ShapeWorld, into: THREE.Vector3[]): number {
+  if (shape.kind === "box") {
+    into[0].copy(shape.axes[0]);
+    into[1].copy(shape.axes[1]);
+    into[2].copy(shape.axes[2]);
+    return 3;
+  }
+  if (shape.kind === "cylinder") {
+    into[0].copy(shape.axis);
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * The directions worth testing for this pair.
+ *
+ * For two boxes this is the textbook 15 (3 + 3 face normals, 9 edge cross
+ * products) and the result is the exact MTV. The extra entries are what
+ * make curved surfaces work: the perpendicular from a cylinder's axis
+ * toward the other shape, and the direction from a box's closest point to
+ * a sphere's centre, are the true minimal escape directions in the cases
+ * a face-normal set alone would miss.
+ */
+function buildCandidates(a: ShapeWorld, b: ShapeWorld): number {
+  let n = 0;
+  const add = (v: THREE.Vector3): void => {
+    if (n < MAX_CANDIDATES) candidates[n++].copy(v);
+  };
+  const addNormalized = (v: THREE.Vector3): void => {
+    if (v.lengthSq() > 1e-10) add(v.normalize());
+  };
+
+  const countA = principalAxes(a, axesA);
+  const countB = principalAxes(b, axesB);
+  for (let i = 0; i < countA; i++) add(axesA[i]);
+  for (let i = 0; i < countB; i++) add(axesB[i]);
+
+  // Always useful, and the *only* meaningful axis for sphere↔sphere.
+  candTmp.copy(a.center).sub(b.center);
+  addNormalized(candTmp);
+
+  // Edge/edge for boxes, edge/round-side for cylinders.
+  for (let i = 0; i < countA; i++) {
+    for (let j = 0; j < countB; j++) {
+      candTmp.crossVectors(axesA[i], axesB[j]);
+      addNormalized(candTmp);
+    }
+  }
+
+  // A cylinder's round side: straight out from its axis toward the other shape.
+  if (a.kind === "cylinder") {
+    candTmp.copy(b.center).sub(a.center);
+    candTmp.addScaledVector(a.axis, -candTmp.dot(a.axis));
+    addNormalized(candTmp);
+  }
+  if (b.kind === "cylinder") {
+    candTmp.copy(a.center).sub(b.center);
+    candTmp.addScaledVector(b.axis, -candTmp.dot(b.axis));
+    addNormalized(candTmp);
+  }
+
+  // A sphere against a box corner or edge escapes along the line from the
+  // box's closest point — no face normal points that way.
+  if (a.kind === "sphere" && b.kind === "box") {
+    closestPointOnBox(b, a.center, cpTmp);
+    candTmp.copy(a.center).sub(cpTmp);
+    addNormalized(candTmp);
+  }
+  if (b.kind === "sphere" && a.kind === "box") {
+    closestPointOnBox(a, b.center, cpTmp);
+    candTmp.copy(cpTmp).sub(b.center);
+    addNormalized(candTmp);
+  }
+  return n;
+}
+
+/**
+ * The minimum translation that moves `a` clear of `b`, written into `out`.
+ * Returns false when they aren't overlapping.
+ *
+ * Generic SAT over the candidate set above, using each shape's exact
+ * support function — the smallest positive overlap across every candidate
+ * is the push. Exact for box↔box; for curved pairs the true minimal
+ * direction may sit slightly off the candidate set, in which case the
+ * answer is a *larger* push along a nearby axis. That errs the safe way:
+ * it always fully separates, never under-pushes and leaves you clipped
+ * inside a wall.
+ *
+ * **`up` is what makes this usable for a character.** Given an up vector,
+ * every candidate is projected into the plane perpendicular to it before
+ * being measured, so the result is the minimum *horizontal* escape. Without
+ * it, walking into a low wall resolves upward — the smallest way out of a
+ * knee-high box really is over the top — and the player pops onto the
+ * scenery instead of being stopped by it.
+ */
+export function penetration(a: ShapeWorld, b: ShapeWorld, out: THREE.Vector3, up?: THREE.Vector3): boolean {
+  const count = buildCandidates(a, b);
+  sepVec.copy(a.center).sub(b.center);
+  let best = Infinity;
+  let found = false;
+
+  for (let i = 0; i < count; i++) {
+    axisTmp.copy(candidates[i]);
+    if (up) axisTmp.addScaledVector(up, -axisTmp.dot(up));
+    const lengthSq = axisTmp.lengthSq();
+    if (lengthSq < 1e-8) continue; // degenerate, or purely vertical when up is set
+    axisTmp.multiplyScalar(1 / Math.sqrt(lengthSq));
+    const overlap = extentAlong(a, axisTmp) + extentAlong(b, axisTmp) - Math.abs(sepVec.dot(axisTmp));
+    if (overlap <= 0) return false; // a genuine separating axis — they're apart
+    if (overlap < best) {
+      best = overlap;
+      bestAxis.copy(axisTmp);
+      found = true;
+    }
+  }
+  // Only reachable with `up` set and every candidate parallel to it: the
+  // shapes overlap, but not in any horizontal direction we're allowed to
+  // resolve along. Refusing to move is the right answer.
+  if (!found) return false;
+
+  // Orient the push so it moves `a` away from `b`, not further in.
+  if (sepVec.dot(bestAxis) < 0) bestAxis.negate();
+  out.copy(bestAxis).multiplyScalar(best);
+  return true;
+}
+
 const cpsAB = new THREE.Vector3();
 function closestPointOnSegment(a: THREE.Vector3, b: THREE.Vector3, point: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
   cpsAB.copy(b).sub(a);

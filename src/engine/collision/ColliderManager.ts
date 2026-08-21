@@ -3,13 +3,18 @@ import { Collider } from "./Collider";
 import { BoxCollider, type BoxColliderInit } from "./BoxCollider";
 import { SphereCollider, type SphereColliderInit } from "./SphereCollider";
 import { CylinderCollider, type CylinderColliderInit } from "./CylinderCollider";
-import { shapeContainsPoint, shapesOverlap } from "./intersect";
+import { penetration, shapeContainsPoint, shapesOverlap } from "./intersect";
 
 /** The engine-owned group every collider node lives under. Uppercase on purpose — Cinema_World.glb already contains a mesh group named "Colliders", and these two must never be confused for each other. */
 export const COLLIDERS_GROUP_NAME = "COLLIDERS";
 
 /** Packs two collider ids into one integer key. Must match Collider's MAX_COLLIDERS. */
 const ID_SPAN = 1 << 22;
+
+const pushScratch = new THREE.Vector3();
+const resolveScratch = new THREE.Vector3();
+const startScratch = new THREE.Vector3();
+const appliedScratch = new THREE.Vector3();
 
 interface ActivePair {
   a: Collider;
@@ -23,6 +28,21 @@ interface SweepEntry {
   min: number;
   max: number;
   collider: Collider;
+}
+
+/** Knobs for depenetrate/moveAndSlide. */
+export interface ResolveOptions {
+  /** Only push out of solid colliders carrying one of these tags. Omit for "every solid collider". */
+  tags?: string[];
+  /**
+   * Resolve only in the plane perpendicular to this — pass world up for
+   * anything that walks. See penetration()'s own doc comment for why
+   * omitting it makes a character climb low walls rather than be stopped
+   * by them.
+   */
+  up?: THREE.Vector3;
+  /** moveAndSlide only: push-out passes per move. Default 2 — enough for an inside corner. */
+  iterations?: number;
 }
 
 /** Live counters for the editor's collider panel — cheap to keep, and the only honest way to answer "is my broad phase actually doing anything". */
@@ -407,6 +427,81 @@ export class ColliderManager {
       if (shapesOverlap(probe, collider.world)) hits.push(collider);
     }
     return hits;
+  }
+
+  // ---------------------------------------------------------------------
+  // Blocking
+  // ---------------------------------------------------------------------
+
+  /**
+   * How far `collider` has to move to be clear of every **solid** collider
+   * it's currently inside. Nothing is moved — the caller decides what to do
+   * with the answer, which is what keeps this a detection system rather
+   * than a physics one.
+   *
+   * "Solid" means neither side is a trigger. A trigger is a volume you walk
+   * *through* by definition, so it never contributes a push; that's the
+   * whole distinction between the two.
+   *
+   * Reads the last synced world shapes, so call it after `update()` (or
+   * after `collider.syncWorld()` if you just moved something). Pushes from
+   * several overlaps are summed, which resolves the common cases in one
+   * pass; `moveAndSlide` below iterates for corners.
+   */
+  depenetrate(collider: Collider, options: ResolveOptions = {}, out = new THREE.Vector3()): THREE.Vector3 {
+    out.set(0, 0, 0);
+    if (!collider.enabled || collider.isTrigger) return out;
+    const tags = options.tags;
+    for (const other of this.colliders) {
+      if (other === collider || !other.enabled || other.isTrigger) continue;
+      if (tags && tags.length > 0 && !tags.includes(other.tag)) continue;
+      if (!canPair(collider, other)) continue;
+      const reach = collider.boundingRadius + other.boundingRadius;
+      if (collider.worldCenter.distanceToSquared(other.worldCenter) > reach * reach) continue;
+      if (!penetration(collider.world, other.world, pushScratch, options.up)) continue;
+      out.add(pushScratch);
+    }
+    return out;
+  }
+
+  /**
+   * Move something and let solid colliders stop it — the character-
+   * controller call.
+   *
+   *   Ion.colliders.moveAndSlide(this.collider, this.player.position, delta, { up: UP });
+   *
+   * Applies `delta` to `position`, then pushes back out of anything solid
+   * the volume ended up inside, repeating a couple of times so inside
+   * corners settle instead of oscillating between two walls. `position` is
+   * mutated in place and the actually-applied movement is returned.
+   *
+   * Requires `collider` to be attached to the object that owns `position`,
+   * since that's what makes moving the position move the volume.
+   *
+   * **Still not physics.** There's no velocity, no restitution, no
+   * friction, and nothing else in the scene is touched — a wall doesn't
+   * push back on you, you're simply placed where you'd have to be to not be
+   * inside it. Sliding along a wall falls out of that for free: the push is
+   * perpendicular to the surface, so the component of your movement along
+   * it survives untouched.
+   *
+   * Pass `up` for anything that walks. Without it, the cheapest way out of
+   * a low wall is over the top, and that's what you'll get.
+   */
+  moveAndSlide(collider: Collider, position: THREE.Vector3, delta: THREE.Vector3, options: ResolveOptions = {}): THREE.Vector3 {
+    startScratch.copy(position);
+    position.add(delta);
+    const iterations = Math.max(1, options.iterations ?? 2);
+    for (let pass = 0; pass < iterations; pass++) {
+      // Re-sync each pass: the previous push moved the object, so the
+      // volume's world position is stale by exactly that much.
+      collider.syncWorld();
+      this.depenetrate(collider, options, resolveScratch);
+      if (resolveScratch.lengthSq() < 1e-10) break;
+      position.add(resolveScratch);
+    }
+    collider.syncWorld();
+    return appliedScratch.copy(position).sub(startScratch);
   }
 
   getStats(): ColliderStats {

@@ -101,6 +101,36 @@
         1,
         1
       ]
+    },
+    {
+      "id": "col_mqsc9dboyd",
+      "name": "Cylinder Collider",
+      "shape": "cylinder",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Armature",
+      "attachName": "Armature",
+      "offset": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "radius": 0.5,
+      "height": 2
     }
   ]
 }

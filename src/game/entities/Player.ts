@@ -19,6 +19,18 @@ import { lerp } from "three/src/math/MathUtils.js";
 
 const CROSSFADE_DURATION = 0.2;
 
+/**
+ * World up, handed to every moveAndSlide call.
+ *
+ * Without it a collider resolves along whichever axis is cheapest to
+ * escape, and for a knee-high wall that's straight up — the player would
+ * climb the scenery instead of being stopped by it. See
+ * ColliderManager.moveAndSlide.
+ */
+const UP = new THREE.Vector3(0, 1, 0);
+/** Reused every frame — this runs in update(), where a per-frame Vector3 is garbage the collector has to keep up with. */
+const moveDelta = new THREE.Vector3();
+
 
 // ============================================================================
 // 🎮 PLAYER CLASS
@@ -147,7 +159,7 @@ export class Player {
         child.name === "Main_Character" ||
         child.name === "Arrow" ||
         child.name === "Main_Female_Character_Upgrade_2"
-        // child.name === "Main_Character_Upgrade_1"
+        // child.name === "Main_Character_Upgrade_1"                             
       ) {
         child.visible = false;
       }
@@ -259,8 +271,37 @@ export class Player {
 
     if (moving) {
 
-      this.player.position.x += axis.x * this.speed * dt;
-      this.player.position.z += axis.y * this.speed * dt;
+      // --------------------------------------------------------------------
+      // Move, and let solid colliders stop us
+      // --------------------------------------------------------------------
+      // moveAndSlide applies the delta and then pushes back out of any
+      // non-trigger collider we ended up inside — walls, props, anything
+      // marked solid in the 3D editor's Configure Colliders mode. Still no
+      // physics: nothing pushes back, we're just placed where we'd have to
+      // be in order not to be inside a wall. Sliding along one falls out of
+      // that for free, since the push is perpendicular to the surface and
+      // the along-the-wall part of the movement survives it.
+      //
+      // Triggers are deliberately not solid, so PlayerZone keeps being
+      // something you walk into rather than something that blocks you.
+      const moveSpeed = this.speed * 0.01; // reduce to 30%
+
+      moveDelta.set(
+        axis.x * moveSpeed * dt,
+        0,
+        axis.y * moveSpeed * dt
+      );
+
+      if (this.collider) {
+        Ion.colliders.moveAndSlide(
+          this.collider,
+          this.player.position,
+          moveDelta,
+          { up: UP }
+        );
+      } else {
+        this.player.position.add(moveDelta);
+      }
 
 
       // ----------------------------------------------------------------------

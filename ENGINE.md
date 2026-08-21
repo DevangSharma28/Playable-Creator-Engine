@@ -135,7 +135,7 @@ Touch-anywhere virtual joystick. Invisible until you touch the screen, then appe
 Generic lerp-follow camera — frame-rate-independent exponential smoothing (`1 - 0.001^dt`), takes a world-space focus point and an offset. No game-specific knowledge.
 
 ### `collision/` — the ION Collider & Area system
-Trigger zones, area volumes, and character collision shapes. **Not physics, and not a wrapper around one.** There is no rigidbody, no mass, no velocity, no gravity, no solver, and nothing here ever moves a scene object. The system answers exactly one question, continuously — *which registered volumes overlap right now* — and turns the frame-over-frame change in that answer into enter/stay/exit events. Rapier and its relatives stay entirely out of the bundle.
+Trigger zones, area volumes, character collision shapes, and solid geometry that actually blocks. **Not physics, and not a wrapper around one.** There is no rigidbody, no mass, no velocity, no gravity, no solver. The system answers one question continuously — *which registered volumes overlap right now* — turns the frame-over-frame change in that answer into enter/stay/exit events, and (only when gameplay asks, via `moveAndSlide`) can tell you where something would have to be in order not to be inside a wall. Rapier and its relatives stay entirely out of the bundle.
 
 That's the right trade for a playable ad. Trigger zones, pickup radii, "did the player reach the machine" — none of it wants a simulation step, and all of it has to survive a hard size budget. This costs a few kilobytes of JS and a handful of dot products per frame.
 
@@ -145,8 +145,8 @@ That's the right trade for a playable ad. Trigger zones, pickup radii, "did the 
 | --- | --- |
 | `Collider.ts` | Base class: shape + transform + `tag` + `enabled` + `isTrigger`, the `on*` event subscriptions, and the per-frame transform sync. |
 | `BoxCollider.ts` / `SphereCollider.ts` / `CylinderCollider.ts` | The three volumes. Each owns its dimensions and rebuilds its own world-space shape from the node's decomposed transform. |
-| `intersect.ts` | Every shape-vs-shape test, zero-allocation, with the exactness of each pair stated in the file header. |
-| `ColliderManager.ts` | The registry, the broad phase, and the enter/stay/exit state machine. Reached as `Ion.colliders`. |
+| `intersect.ts` | Every shape-vs-shape test plus `penetration()` (the minimum translation out), zero-allocation, with the exactness of each pair stated in the file header. |
+| `ColliderManager.ts` | The registry, the broad phase, the enter/stay/exit state machine, and `moveAndSlide`/`depenetrate`. Reached as `Ion.colliders`. |
 | `ColliderSerialization.ts` | `src/game/colliders.json` ↔ live registry. `loadColliders` runs in production. |
 | `ColliderTypes.ts` | Shape/data/world-shape types shared by all of the above. |
 
@@ -199,6 +199,26 @@ Every function here borrows from a fixed pool of module-level scratch vectors ra
 
 Nothing traverses the scene graph anywhere in those five steps. Cost scales with the number of *colliders*, not the size of the scene — which is the entire reason for a dedicated registry.
 
+#### Making things solid, without physics
+
+Detection alone doesn't stop anything — the five steps above report overlaps and never move a scene object. That's deliberate, and it's also not what you want when a wall should be a wall. `moveAndSlide` is the bridge:
+
+```ts
+// Player.update(), instead of position.x += ...
+moveDelta.set(axis.x * speed * dt, 0, axis.y * speed * dt);
+Ion.colliders.moveAndSlide(this.collider, this.player.position, moveDelta, { up: UP });
+```
+
+It applies the delta, then pushes back out of every **solid** collider the volume ended up inside, twice by default so inside corners settle instead of oscillating between two walls. Still no physics: no velocity, no restitution, no friction, and nothing else in the scene is touched — you're simply placed where you'd have to be in order not to be inside a wall. **Sliding falls out of that for free**: the push is perpendicular to the surface, so the component of your movement *along* the wall survives untouched.
+
+"Solid" means neither side is a trigger. A trigger is a volume you walk through by definition, so it never contributes a push — that's the whole distinction between the two, and it's why `PlayerZone` stays enterable while `Arena Wall` stops you dead.
+
+The push itself comes from `intersect.penetration()`, a generic SAT over a per-pair candidate axis set, measured with each shape's exact **support function** (a cylinder's is `halfHeight·|axis·L| + radius·√(1−(axis·L)²)`, which is its true silhouette in any direction). One loop therefore serves all six shape pairs instead of six bespoke routines. It's the exact MTV for box↔box; for curved pairs the true minimal direction can sit slightly off the candidate set, in which case the answer is a *larger* push along a nearby axis — which errs the safe way, always fully separating rather than leaving you clipped inside geometry.
+
+**Pass `up` for anything that walks.** Without it every candidate axis is fair game, and the cheapest way out of a knee-high kerb is genuinely *over the top* — so the player climbs the scenery instead of being stopped by it. With `up`, candidates are projected into the horizontal plane before being measured, giving the minimum *horizontal* escape. Measured: a 1.8-tall cylinder standing in a 0.5-tall kerb resolves to `(0, 0.5, 0)` free and `(0.7, 0, 0)` with `up` set.
+
+`depenetrate()` is the same computation without the movement — it returns the correction and leaves the caller to decide what to do with it, for anything that isn't a straightforward character move.
+
 #### Mechanics
 
 **Colliders live in their own `COLLIDERS` group, and *attach* to scene objects rather than parent under them.** Every collider's node sits under one engine-owned group at the scene root; `attachTo` makes it *follow* a scene object by recomputing its world transform from that object's world matrix every frame. Two reasons: a GLB-heavy scene is already hundreds of nodes and salting collision data through it makes both harder to read (and a re-export would blow the colliders away with the model), and attachment then survives the target being re-parented or swapped out entirely. The group is held at identity permanently — `Collider.syncWorld` writes world-space transforms straight into each node's local transform on exactly that assumption. Note the name is uppercase: `Cinema_World.glb` already contains a mesh group called `Colliders`, and the two must never be confused.
@@ -219,6 +239,10 @@ zone.onTriggerEnter("Player", (other) => hud.showPrompt());
 zone.onTriggerStay("Player", () => score.tickBonus());
 zone.onTriggerExit("Player", () => hud.hidePrompt());
 zone.setEnabled(false);                       // fires exit on anything inside
+
+// Solid colliders blocking a character — see "making things solid" above.
+Ion.colliders.moveAndSlide(this.collider, this.player.position, delta, { up: UP });
+Ion.colliders.depenetrate(this.collider, { up: UP });   // the push, without applying it
 
 // An entity registering its own volume, in its own constructor:
 this.collider = Ion.colliders.cylinder({ name: "Player Collider", tag: "Player", radius: 0.4, height: 1.8, attachTo: this.group, position: [0, 0.9, 0] });

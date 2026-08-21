@@ -13,7 +13,7 @@ export { Collider, type ColliderEventHandler, type ColliderEventHandle, type Col
 export { BoxCollider, type BoxColliderInit } from "./BoxCollider";
 export { SphereCollider, type SphereColliderInit } from "./SphereCollider";
 export { CylinderCollider, type CylinderColliderInit } from "./CylinderCollider";
-export { ColliderManager, COLLIDERS_GROUP_NAME, type ColliderStats } from "./ColliderManager";
+export { ColliderManager, COLLIDERS_GROUP_NAME, type ColliderStats, type ResolveOptions } from "./ColliderManager";
 export { loadColliders, colliderFromData, colliderToData } from "./ColliderSerialization";
 export type { ColliderData, CollidersFileData, ColliderShape, ColliderTransformData, ShapeWorld, BoxWorld, SphereWorld, CylinderWorld } from "./ColliderTypes";
-export { shapesOverlap, shapeContainsPoint } from "./intersect";
+export { shapesOverlap, shapeContainsPoint, penetration } from "./intersect";
