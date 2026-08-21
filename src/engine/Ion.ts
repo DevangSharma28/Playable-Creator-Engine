@@ -2,6 +2,9 @@ import type { Scheduler, ScheduledHandle, SequenceStep, TweenOptions } from "./c
 import type { EventBus, EventHandle, Listener } from "./core/EventBus";
 import { Cta, type CtaNetwork } from "./Cta";
 
+/** Re-exported so `import { Ion, Easing } from "./Ion"` is one line, one path — Scheduler.ts already re-exports it from tween.js for the same reason, this just closes the loop for callers going through the facade instead of Scheduler directly. `Easing.Quadratic.Out`, `Easing.Back.Out`, `Easing.Elastic.Out`, ... */
+export { Easing } from "./core/Scheduler";
+
 /**
  * The one-line-call facade over the engine's runtime services.
  *
@@ -59,7 +62,7 @@ function required(): IonContext {
   if (!context) {
     throw new Error(
       "Ion used before IonEngine.boot() finished — Ion's services only exist once a Game has been created. " +
-        "Move this call into gameplay code (a constructor that runs after Game.create(), an update(), or an event handler) rather than module top level."
+      "Move this call into gameplay code (a constructor that runs after Game.create(), an update(), or an event handler) rather than module top level."
     );
   }
   return context;

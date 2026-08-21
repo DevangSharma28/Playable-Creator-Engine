@@ -68,7 +68,6 @@ export class HUD {
   }
 
   onInGameCtaClick(handler: () => void): void {
-    console.log("HUD.onInGameCtaClick — inGameCTA:", this.inGameCTA);
     // Passing the element directly (not a name) — which instance this is
     // called through doesn't actually matter functionally (see
     // setInteractive's own doc comment), but `main` is the semantically

@@ -1,10 +1,10 @@
 import * as THREE from "three";
-import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { DynamicJoystick } from "../engine/core/DynamicJoystick";
 import { InputManager } from "../engine/core/InputManager";
 import { CameraHandler } from "../engine/core/CameraHandler";
 import { ViewHelperWidget } from "../engine/core/ViewHelperWidget";
-import { SceneInspector, type GizmoMode, type InspectorToolState } from "../engine/core/SceneInspector";
+import type { GizmoMode, InspectorToolState } from "../engine/core/SceneInspector";
+import { EditorRoot, type FieldPickCallbacks } from "../engine/editor/EditorRoot";
 import { World } from "./world/World";
 import { Player } from "./entities/Player";
 import { CoinField } from "./entities/CoinField";
@@ -18,6 +18,8 @@ import { MraidAdapter } from "../engine/MraidAdapter";
 import { MindworksAdapter } from "../engine/MindworksAdapter";
 import { Cta } from "../engine/Cta";
 import { setCrashRecoveryUrl } from "../engine/core/CrashOverlay";
+import { applySceneBindings, type SceneBindingsData } from "../engine/SceneBindings";
+import sceneBindingsRaw from "./sceneBindings.json";
 import { SoundHandler } from "./SoundHandler";
 import { manifest, libGlb, libAudio } from "./assets";
 
@@ -55,12 +57,16 @@ export class Game {
   /** Only exists when #er-viewhelper is in the page (the dev-only Engine Room panel) — undefined, and never rendered into, in production. */
   private readonly viewHelper: ViewHelperWidget | undefined;
   private readonly mainLayer: HTMLElement;
-  /** Only set while the dev-only Engine Room "3D View" freecam is active; undefined otherwise (including always in production, nothing there ever calls setFreecam()). */
-  private orbitControls: OrbitControls | undefined;
-  /** The camera freecam actually renders/orbits through — kept separate from this.camera so the CameraHelper gizmo (drawn by SceneInspector) shows a meaningful frustum for the real gameplay camera instead of coinciding with the view you're looking through. */
-  private freecamCamera: THREE.PerspectiveCamera | undefined;
-  private sceneInspector: SceneInspector | undefined;
-  /** Set via onGizmoModeChange(); re-attached to each new SceneInspector instance since one is (re)created per freecam session — see setFreecam(). */
+  /**
+   * The whole dev 3D Viewer/Editor (camera, orbit controls, selection,
+   * hierarchy, inspector, gizmo, picker, viewport sizing), or undefined
+   * when it isn't open — which is always, in production: nothing in the
+   * shipped build ever calls setFreecam(), and the construction below is
+   * additionally gated on import.meta.env.DEV so the whole editor tree is
+   * dead code the production bundle can drop.
+   */
+  private editor: EditorRoot | undefined;
+  /** Set via onGizmoModeChange(); re-attached to each new EditorRoot since one is (re)created per editor session — see setFreecam(). */
   private gizmoModeChangeCallback: ((mode: GizmoMode) => void) | undefined;
   /** Same reasoning as gizmoModeChangeCallback, for grid/helpers/snap/space instead of gizmo mode — see onInspectorStateChange(). */
   private inspectorStateChangeCallback: ((state: InspectorToolState) => void) | undefined;
@@ -69,6 +75,9 @@ export class Game {
   private ended = false;
   /** Wall-clock-free playtime accumulator driving the 15s auto-endcard — only advances inside update(), so it (like everything else in update()) naturally stops while the UI editor or freecam is open instead of firing behind them on real elapsed time. */
   private playTimeMs = 0;
+  /** The most recent explicit size passed to resizeTo() — replayed by applyCurrentSize() when the editor closes and hands sizing back to the game. */
+  private lastManualWidth = 0;
+  private lastManualHeight = 0;
   /** True once something has called resizeTo() explicitly (the dev-only device-frame simulator) — while true, the window's own resize event no longer drives sizing, so the simulator stays in control until it hands back (by calling resizeTo() with the real window size again). Production never sets this; the window listener below is the only thing that ever runs there. */
   private manualSize = false;
 
@@ -115,6 +124,20 @@ export class Game {
       ["CoinField", this.coinField],
       ["SoundHandler", this.soundHandler],
     ]);
+
+    // Persisted "⊙ Pick" assignments from the 3D Viewer/Editor's Control
+    // Desk — a field like Player's `popcornMachine!: THREE.Object3D` gets
+    // the real scene object written onto it here. Applied over the whole
+    // inspectables map rather than class by class, so registering a class
+    // above is the only step needed for its scene fields to persist; and
+    // applied *after* this.scene.add(sceneModel) above, since a binding can
+    // only resolve against objects already in the graph. This is the
+    // counterpart of applyBindings() for UI elements, and it ships: the
+    // JSON is a real import, so the assignment holds in the production
+    // build exactly as it does in the editor.
+    for (const [className, instance] of this.inspectables) {
+      applySceneBindings(instance, className, sceneBindingsRaw as SceneBindingsData, this.scene);
+    }
 
     this.mainLayer = document.getElementById("custom-ui-layer") as HTMLElement;
     const endcardLayer = document.getElementById("endcard-layer") as HTMLElement;
@@ -165,7 +188,12 @@ export class Game {
 
     this.cameraHandler = new CameraHandler(this.camera, CAMERA_OFFSET);
 
-    const viewHelperCanvas = document.getElementById("er-viewhelper") as HTMLCanvasElement | null;
+    // import.meta.env.DEV first, so the whole ViewHelperWidget module (and
+    // the second WebGLRenderer it owns) is statically unreachable in a
+    // production build and drops out of the bundle entirely, rather than
+    // shipping as dead weight guarded only by a DOM lookup that never
+    // finds anything.
+    const viewHelperCanvas = import.meta.env.DEV ? (document.getElementById("er-viewhelper") as HTMLCanvasElement | null) : null;
     this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
 
     window.addEventListener("resize", this.onWindowResize);
@@ -240,6 +268,18 @@ export class Game {
    */
   resizeTo(width: number, height: number): void {
     this.manualSize = true;
+    this.lastManualWidth = width;
+    this.lastManualHeight = height;
+    // While the editor is open it owns the renderer size and its own
+    // camera's projection, measured from the real viewport container (see
+    // EditorViewport). Letting the device-frame path also write the
+    // renderer size and the *gameplay* camera's aspect here would put the
+    // game's logical/design resolution and the editor's viewport
+    // resolution back into the same variable — exactly the coupling that
+    // made the scene render stretched when the editor opened over a
+    // Portrait or Landscape preview. The values are still recorded above,
+    // so exiting the editor restores this size correctly.
+    if (this.editor) return;
     this.cameraHandler.handleResize(width, height);
     this.renderer.setSize(width, height);
     // The explicit target size, not a DOM re-measure — see
@@ -257,89 +297,140 @@ export class Game {
   }
 
   /**
-   * Dev-only: Engine Room "3D View" button — orbits the *live* gameplay
-   * scene/camera (no separate renderer or canvas) rather than opening a
-   * standalone asset viewer, so what you see is exactly what's currently
-   * on screen. main.ts pauses gameplay update() while this is active (same
-   * mechanism as the UI editor pause), so the player/camera don't fight
-   * OrbitControls underneath you; this method only owns the controls
-   * lifecycle and swapping the HUD out of the way.
+   * Dev-only: Engine Room "3D Viewer/Editor" button — opens the editor
+   * over the *live* gameplay scene (no separate renderer, scene, or
+   * canvas), so what you inspect is exactly what's currently running.
+   * IonEngine pauses gameplay update() while this is active (same
+   * mechanism as the UI editor pause), so the player and the gameplay
+   * camera don't fight the orbit controls underneath you.
+   *
+   * This method owns only the session boundary — everything inside is
+   * EditorRoot's (see src/engine/editor/). The whole construction is
+   * behind import.meta.env.DEV so a production build, where this method is
+   * never called anyway, can additionally drop the entire editor module
+   * tree as dead code rather than shipping it unused.
    */
   setFreecam(active: boolean): void {
-    if (active === !!this.orbitControls) return;
+    if (active === !!this.editor) return;
 
     if (active) {
-      // A clone, not this.camera itself — main.ts pauses update() (so
-      // this.camera stops moving) precisely so it stays put as a stable
-      // reference frustum for the CameraHelper gizmo below, instead of
-      // being hijacked as the same camera you're orbiting with.
-      this.freecamCamera = this.camera.clone();
-      this.orbitControls = new OrbitControls(this.freecamCamera, this.renderer.domElement);
-      this.orbitControls.target.copy(this.player.position);
-      this.orbitControls.enableDamping = true;
-      this.mainLayer.style.display = "none"; // HUD/joystick would otherwise sit on top of the canvas and steal drag gestures from OrbitControls
-
+      if (!import.meta.env.DEV) return;
       const hierarchyEl = document.getElementById("si-hierarchy");
       const inspectorEl = document.getElementById("si-inspector");
-      if (hierarchyEl && inspectorEl) {
-        this.sceneInspector = new SceneInspector({
-          scene: this.scene,
-          gameplayCamera: this.camera,
-          viewCamera: this.freecamCamera,
-          renderer: this.renderer,
-          orbitControls: this.orbitControls,
-          hierarchyEl,
-          inspectorEl,
-        });
-        // A fresh SceneInspector instance is created each time freecam
-        // activates, so re-wire any previously-registered listener rather
-        // than relying on it surviving from a prior session.
-        if (this.gizmoModeChangeCallback) this.sceneInspector.addModeChangeListener(this.gizmoModeChangeCallback);
-        if (this.inspectorStateChangeCallback) this.sceneInspector.addStateChangeListener(this.inspectorStateChangeCallback);
-      }
+      if (!hierarchyEl || !inspectorEl) return;
+
+      // The canvas's own container is what the editor measures for
+      // viewport size — never the window, which doesn't account for the
+      // editor's side panels. Falls back to the canvas itself if the dev
+      // page's #device-frame wrapper isn't there for some reason.
+      const viewportContainer = document.getElementById("device-frame") ?? this.renderer.domElement.parentElement ?? this.renderer.domElement;
+
+      this.mainLayer.style.display = "none"; // HUD/joystick would otherwise sit on top of the canvas and steal drag gestures from the orbit controls
+      // The editor owns the keyboard for its session: its W/E/R/Q gizmo
+      // shortcuts collide with this fallback's WASD, and both listen on
+      // `window` where event propagation can't separate them (see
+      // InputManager.setEnabled).
+      this.keyboardInput.setEnabled(false);
+
+      this.editor = new EditorRoot({
+        scene: this.scene,
+        gameplayCamera: this.camera,
+        renderer: this.renderer,
+        viewportContainer: viewportContainer as HTMLElement,
+        hierarchyEl,
+        inspectorEl,
+        initialTarget: this.player.position,
+      });
+      // A fresh EditorRoot is created each session, so re-wire any
+      // previously-registered listener rather than relying on it surviving
+      // from a prior one.
+      if (this.gizmoModeChangeCallback) this.editor.addModeChangeListener(this.gizmoModeChangeCallback);
+      if (this.inspectorStateChangeCallback) this.editor.addStateChangeListener(this.inspectorStateChangeCallback);
     } else {
-      this.orbitControls?.dispose();
-      this.orbitControls = undefined;
-      this.freecamCamera = undefined;
-      this.sceneInspector?.dispose();
-      this.sceneInspector = undefined;
+      this.editor?.dispose();
+      this.editor = undefined;
       this.mainLayer.style.display = "";
-      this.cameraHandler.update(this.player.position, 0); // hands the camera back to gameplay control immediately, rather than leaving it wherever freecam last pointed it until the next real update() tick
+      this.keyboardInput.setEnabled(true);
+      // Hand the renderer and the gameplay camera back to the game's own
+      // sizing. The editor sized both to its panel-bounded viewport; the
+      // dev page re-applies the real device-frame box right after this
+      // returns (see index.html's setFreecamUI -> applyDeviceFrameInstant),
+      // but doing it here too means the state is already coherent for any
+      // frame rendered in between.
+      this.applyCurrentSize();
     }
   }
 
-  /** Dev-only: Engine Room's Move/Rotate/Scale/Select toolbar — a thin passthrough since the gizmo itself lives inside SceneInspector, only constructed while freecam is active. */
-  setGizmoMode(mode: GizmoMode): void {
-    this.sceneInspector?.setMode(mode);
+  /** Re-applies whichever sizing mode is currently in force — the explicit device-frame box, or the real window. */
+  private applyCurrentSize(): void {
+    if (this.manualSize) this.resizeTo(this.lastManualWidth, this.lastManualHeight);
+    else this.handleResize();
   }
 
-  /** Dev-only: lets the Engine Room panel's gizmo-mode buttons stay in sync when the mode changes via keyboard shortcut (W/E/R/Q) instead of a button click. Call once, any time — stored and (re)attached to whichever SceneInspector instance is live, since a new one is created per freecam session. */
+  /**
+   * Dev-only: arms Control Desk's "Pick" for a script field of the given
+   * declared TypeScript type. The next object clicked — in the Hierarchy
+   * or directly in the 3D viewport, interchangeably — is type-checked
+   * against that declaration and handed back. No-op unless the editor is
+   * open, since there's nothing to click in otherwise.
+   */
+  requestObjectPick(declaredType: string | undefined, callbacks: FieldPickCallbacks): boolean {
+    if (!this.editor) return false;
+    this.editor.requestObjectPick(declaredType, callbacks);
+    return true;
+  }
+
+  cancelObjectPick(): void {
+    this.editor?.cancelObjectPick();
+  }
+
+  /** Dev-only: validates (commit=false) or completes (commit=true) a Hierarchy row dropped onto a Control Desk object field — see EditorRoot.dragAssign. */
+  editorDragAssign(declaredType: string | undefined, commit: boolean, uuid?: string): ReturnType<EditorRoot["dragAssign"]> | undefined {
+    return this.editor?.dragAssign(declaredType, commit, uuid);
+  }
+
+  /** Dev-only: stable path for a picked scene object, so Control Desk can persist the assignment (see SceneBindings.ts). */
+  editorObjectPath(object: THREE.Object3D): { objectPath: string; objectName: string } | undefined {
+    return this.editor?.objectPath(object);
+  }
+
+  /** Dev-only: see EditorRoot.getViewportInfo — the readable form of the "never stretched" invariant. */
+  getEditorViewportInfo(): ReturnType<EditorRoot["getViewportInfo"]> | undefined {
+    return this.editor?.getViewportInfo();
+  }
+
+  /** Dev-only: Engine Room's Move/Rotate/Scale/Select toolbar — a thin passthrough; the gizmo lives inside the editor, which only exists while it's open. */
+  setGizmoMode(mode: GizmoMode): void {
+    this.editor?.setGizmoMode(mode);
+  }
+
+  /** Dev-only: lets the editor toolbar's gizmo-mode buttons stay in sync when the mode changes via keyboard shortcut (W/E/R/Q) instead of a button click. Call once, any time — stored and (re)attached to whichever EditorRoot is live, since a new one is created per session. */
   onGizmoModeChange(cb: (mode: GizmoMode) => void): void {
     this.gizmoModeChangeCallback = cb;
-    this.sceneInspector?.addModeChangeListener(cb);
+    this.editor?.addModeChangeListener(cb);
   }
 
-  /** Dev-only: Engine Room's Grid/Helpers/Snap/Space toolbar — thin passthroughs, only meaningful while freecam is active. Each returns the new state so the caller (the toolbar button's click handler) can update its own active-highlight without a round trip through onInspectorStateChange. */
+  /** Dev-only: Engine Room's Grid/Helpers/Snap/Space toolbar — thin passthroughs, only meaningful while the editor is open. Each returns the new state so the caller (the toolbar button's click handler) can update its own active-highlight without a round trip through onInspectorStateChange. */
   toggleGrid(): boolean | undefined {
-    return this.sceneInspector?.toggleGrid();
+    return this.editor?.toggleGrid();
   }
   toggleHelpers(): boolean | undefined {
-    return this.sceneInspector?.toggleHelpers();
+    return this.editor?.toggleHelpers();
   }
   toggleSnap(): boolean | undefined {
-    return this.sceneInspector?.toggleSnap();
+    return this.editor?.toggleSnap();
   }
   toggleSpace(): ("local" | "world") | undefined {
-    return this.sceneInspector?.toggleSpace();
+    return this.editor?.toggleSpace();
   }
   frameSelected(): void {
-    this.sceneInspector?.frameSelected();
+    this.editor?.frameSelected();
   }
 
   /** Same reasoning as onGizmoModeChange, for the toolbar toggles above — keeps the toolbar's active-highlight in sync when a toggle happens via keyboard shortcut (F/G/H/X/C) instead of a button click. */
   onInspectorStateChange(cb: (state: InspectorToolState) => void): void {
     this.inspectorStateChangeCallback = cb;
-    this.sceneInspector?.addStateChangeListener(cb);
+    this.editor?.addStateChangeListener(cb);
   }
 
   /** Dev-only: Engine Room Control Desk's class-name -> live instance lookup — see this.inspectables above and IonEngine's __getInspectable hook. */
@@ -387,9 +478,8 @@ export class Game {
   }
 
   render(): void {
-    const activeCamera = this.freecamCamera ?? this.camera;
-    this.orbitControls?.update();
-    this.sceneInspector?.update();
+    const activeCamera = this.editor?.camera ?? this.camera;
+    this.editor?.update();
     this.renderer.render(this.scene, activeCamera);
     this.viewHelper?.update(activeCamera);
   }
@@ -414,6 +504,18 @@ export class Game {
    */
   dispose(): void {
     window.removeEventListener("resize", this.onWindowResize);
+    // Close the editor first, if it's open. Without this, disposing a Game
+    // mid-editor-session (which is exactly what an in-place hot reload does
+    // while the 3D Viewer/Editor is up) left the whole editor alive:
+    // its window/canvas listeners stayed registered, its helpers stayed in
+    // the discarded scene, and its DOM stayed in the hierarchy/inspector
+    // panels — so clicks in those panels drove a scene nothing was
+    // rendering any more, and every reload stacked another one.
+    this.setFreecam(false);
+    // Owns a second WebGLRenderer (its own tiny canvas/context). Browsers
+    // cap live WebGL contexts, so leaking one per hot reload eventually
+    // starts force-losing them.
+    this.viewHelper?.dispose();
     this.input.dispose();
     this.keyboardInput.dispose();
     this.soundHandler.dispose();

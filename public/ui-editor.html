@@ -3,7 +3,7 @@
 
 <head>
   <meta charset="UTF-8" />
-  <title>UI Layout Editor — Cube Roll</title>
+  <title>UI Layout Editor — ION Engine</title>
   <style>
     :root {
       --bg: #0e0f11;
@@ -185,7 +185,8 @@
       display: none;
     }
 
-    #btn-set-main, #btn-set-endcard {
+    #btn-set-main,
+    #btn-set-endcard {
       display: none;
     }
 
@@ -710,11 +711,30 @@
       border: 1px solid var(--panel-border-soft);
     }
 
-    .layer-item .type-badge.t-image { color: #6fd3ff; background: rgba(111, 211, 255, 0.1); }
-    .layer-item .type-badge.t-text { color: #8ef2a8; background: rgba(142, 242, 168, 0.1); }
-    .layer-item .type-badge.t-rect { color: #d0a8ff; background: rgba(208, 168, 255, 0.1); }
-    .layer-item .type-badge.t-joystick { color: var(--accent); background: var(--accent-dim); }
-    .layer-item .type-badge.t-group { color: #b8bec7; background: rgba(255, 255, 255, 0.06); }
+    .layer-item .type-badge.t-image {
+      color: #6fd3ff;
+      background: rgba(111, 211, 255, 0.1);
+    }
+
+    .layer-item .type-badge.t-text {
+      color: #8ef2a8;
+      background: rgba(142, 242, 168, 0.1);
+    }
+
+    .layer-item .type-badge.t-rect {
+      color: #d0a8ff;
+      background: rgba(208, 168, 255, 0.1);
+    }
+
+    .layer-item .type-badge.t-joystick {
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .layer-item .type-badge.t-group {
+      color: #b8bec7;
+      background: rgba(255, 255, 255, 0.06);
+    }
 
     .layer-item .name {
       flex: 1;
@@ -1387,14 +1407,18 @@
       <button id="btn-add-text" title="Add Text">🔤 Text</button>
       <button id="btn-add-rect" title="Add Rect">▭ Rect</button>
       <button id="btn-add-joystick" title="Add Joystick">🕹️ Joystick</button>
-      <button id="btn-add-group" title="Add an empty Group — a container other elements can be grouped into (drag them in via 'Group Selected')">🗂️ Group</button>
+      <button id="btn-add-group"
+        title="Add an empty Group — a container other elements can be grouped into (drag them in via 'Group Selected')">🗂️
+        Group</button>
       <div class="sep"></div>
       <span class="group-label">Edit</span>
       <button id="btn-undo" class="icon-btn" title="Undo (Ctrl+Z)">↶</button>
       <button id="btn-redo" class="icon-btn" title="Redo (Ctrl+Shift+Z)">↷</button>
       <button id="btn-duplicate" class="icon-btn" title="Duplicate (Ctrl+D)">⧉</button>
-      <button id="btn-group-selected" class="icon-btn" title="Group Selected — combine multiple selected elements into one Group you can move/resize as a unit (Ctrl+G)">⊞</button>
-      <button id="btn-ungroup" class="icon-btn" title="Ungroup — dissolve a selected Group, moving its contents back out (Ctrl+Shift+G)">⊟</button>
+      <button id="btn-group-selected" class="icon-btn"
+        title="Group Selected — combine multiple selected elements into one Group you can move/resize as a unit (Ctrl+G)">⊞</button>
+      <button id="btn-ungroup" class="icon-btn"
+        title="Ungroup — dissolve a selected Group, moving its contents back out (Ctrl+Shift+G)">⊟</button>
       <span class="spacer"></span>
       <span id="editing-label" class="toolbar-label"></span>
       <input type="text" id="layout-name" placeholder="Layout name"
@@ -1438,7 +1462,9 @@
     </div>
 
     <div id="scripts">
-      <div class="panel-header">🧩 Scripts<button id="btn-script-debug" title="Show only private fields — read-only, same as public ones, just a different set">🐞 Debug</button><span class="count" id="script-count">0</span></div>
+      <div class="panel-header">🧩 Scripts<button id="btn-script-debug"
+          title="Show only private fields — read-only, same as public ones, just a different set">🐞 Debug</button><span
+          class="count" id="script-count">0</span></div>
       <div id="script-list">
         <div id="script-empty">Needs the local dev server (npm run dev) — same as Save/Load.</div>
       </div>
@@ -1750,6 +1776,16 @@
         return data.parentId ? elementRect(data.parentId) : canvasEl.getBoundingClientRect();
       }
 
+      // ─── GEOMETRY:BEGIN ───
+      // The source of truth tests/geometry-parity.test.mjs checks
+      // UILayout.ts's own GEOMETRY fence against — see that file and
+      // ENGINE.md's "ui/UILayout.ts" section. Nothing outside this fence
+      // may be assumed by the extracted text (it's evaluated standalone,
+      // closing over `layout`/`containerW`/`containerH` re-supplied by
+      // the test — see tests/lib/geometry-source.mjs's loadEditorGeometry)
+      // — so needsLockedAspect()/visualAspectRatio()/ANCHOR_FRAC just
+      // above stay OUTSIDE the fence and get re-declared by the test
+      // harness instead of moved in here.
       /**
        * The one, uniform design-space-px -> live-screen-px factor for
        * EVERY px field (position or size, locked-aspect or not) — never
@@ -1815,6 +1851,20 @@
       function elemScreenY(d, rectH) {
         return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + pxSignY(d) * (d.yPx || 0) * pxScale() : (d.yPct / 100) * rectH;
       }
+      /**
+       * Text font-size, in live on-screen px — mirrors the inline formula
+       * renderCanvas() actually applies to a text node's style.fontSize
+       * exactly (this function isn't called from there; it's a pure,
+       * standalone twin purpose-built for the GEOMETRY fence, same as
+       * everything else here). NOT the same as UILayout.ts's own
+       * applyFontSize()/elemFontSizePx() — see UILayout.ts's GEOMETRY
+       * fence for that one; tests/geometry-parity.test.mjs is what
+       * actually checks whether these two stayed identical.
+       */
+      function elemFontSizePx(d, liveH) {
+        return (d.fontSizePct || 4) * (liveH / 100);
+      }
+      // ─── GEOMETRY:END ───
       function boxCenterScreenX(d, rectW) {
         return elemScreenX(d, rectW) + elemScreenWidth(d, rectW) * (0.5 - ANCHOR_FRAC[d.anchor].x);
       }
@@ -2581,7 +2631,7 @@
         html += field(
           "Opacity",
           '<div class="opacity-row"><input type="range" min="0" max="1" step="0.01" data-prop="opacity" value="' + data.opacity + '" />' +
-            '<span class="opacity-value" data-for="opacity">' + Number(data.opacity).toFixed(2) + "</span></div>"
+          '<span class="opacity-value" data-for="opacity">' + Number(data.opacity).toFixed(2) + "</span></div>"
         );
         html +=
           '<div class="field"><label>Animation</label><select data-prop="animation">' +

@@ -1,4 +1,4 @@
-# Cube Roll — Playable Ad (Three.js + TypeScript)
+# ION Engine — Playable Ad and Web Game (Three.js + TypeScript)
 
 A tiny playable ad: roll a character around a platform with a virtual
 joystick, collect 6 coins, get an "Install Now" end card either when you

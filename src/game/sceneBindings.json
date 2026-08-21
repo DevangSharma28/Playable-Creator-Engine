@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "bindings": [
+    {
+      "className": "Player",
+      "fieldName": "popcornMachine",
+      "objectPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/sodamachine",
+      "objectName": "sodamachine"
+    }
+  ]
+}

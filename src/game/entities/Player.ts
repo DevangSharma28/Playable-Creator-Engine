@@ -3,8 +3,12 @@
 // ============================================================================
 
 import * as THREE from "three";
-import { Group } from "three/examples/jsm/libs/tween.module.js";
 import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
+import { applySceneBindings, type SceneBindingsData } from "../../engine/SceneBindings";
+import sceneBindingsRaw from "../sceneBindings.json";
+import { Easing } from "../../engine/Ion";
+import { Animator, LoopAnimator } from "../../engine/core/Animator";
+import { lerp } from "three/src/math/MathUtils.js";
 
 
 // ============================================================================
@@ -34,7 +38,7 @@ export class Player {
   private readonly player: THREE.Group;
 
 
-  public me!: THREE.Group
+  public popcornMachine!: THREE.Object3D
 
   // ==========================================================================
   // 🔒 PRIVATE VARIABLES
@@ -47,6 +51,8 @@ export class Player {
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<string, THREE.AnimationAction>();
   private currentAction: THREE.AnimationAction | null = null;
+  /** One-shot guard for revealPopcornMachine() — see its own call site in update() for why this can't just fire from the constructor. */
+  private aAnimator: Animator | undefined
 
 
   // ==========================================================================
@@ -72,6 +78,28 @@ export class Player {
     // ------------------------------------------------------------------------
 
     this.mixer = new THREE.AnimationMixer(this.player);
+
+
+    // ------------------------------------------------------------------------
+    // Editor-Assigned Scene Objects
+    // ------------------------------------------------------------------------
+    // Same pattern (and same reason) as HUD.ts's applyBindings call: Game.ts
+    // also applies scene bindings across its whole inspectables map, but that
+    // runs *after* `new Player(...)` has already returned — so any field
+    // assigned in the 3D editor is still undefined inside this constructor
+    // unless the class populates it itself, right here. The scene graph is
+    // ready by now (Game.ts adds the environment GLB before constructing the
+    // player), so the binding resolves.
+    applySceneBindings(this, "Player", sceneBindingsRaw as SceneBindingsData, scene);
+
+    // Still guarded: a binding only resolves if the object it points at is
+    // actually in the scene. Rename or remove that node in the GLB and this
+    // field goes undefined again — the `!` on its declaration silences the
+    // compiler about that, it doesn't prevent it.
+    if (this.popcornMachine) {
+      this.popcornMachine.visible = true;
+      this.popcornMachine.scale.setScalar(0);
+    }
 
 
     // ------------------------------------------------------------------------
@@ -127,6 +155,11 @@ export class Player {
     // ------------------------------------------------------------------------
 
     scene.add(this.player);
+
+    setTimeout(() => {
+      this.revealPopcornMachine(this.popcornMachine);
+    }, 1000);
+
   }
 
 
@@ -245,6 +278,53 @@ export class Player {
     // ------------------------------------------------------------------------
 
     this.mixer.update(dt);
+
+    // Not the constructor: Player is built *during* Game.create(), which
+    // IonEngine only calls bindIon() after — so Animator (a thin wrapper
+    // over Ion.tween) would throw "used before IonEngine.boot() finished"
+    // if constructed from there. The first real update() tick is the
+    // earliest point in this class's lifecycle where Ion is guaranteed
+    // bound.
+    // if (!this.popcornMachineRevealed && this.popcornMachine) {
+    //   this.popcornMachineRevealed = true;
+    //   this.revealPopcornMachine(this.popcornMachine);
+    // }
+  }
+
+  /**
+   * The popcorn machine's unlock reveal — scale alone reading as "pop in"
+   * needs more than a linear 0->1 ramp (that's a fade with extra steps,
+   * not an unlock moment). Two Animators started together, deliberately
+   * on different curves so they resolve at different times instead of
+   * looking like one shared progress bar driving both properties:
+   *
+   *  - Scale: Elastic.Out springs past 1 and rings back down before
+   *    settling — the "sprung open" bounce of an unlock, not a grow.
+   *  - Rotation: wound back a bit at the start, then Back.Out snaps it
+   *    forward with a single punchy overshoot onto its real facing.
+   *
+   * Both are self-driving (see Animator's own doc comment) — nothing here
+   * needs to touch `update()` again, and both correctly freeze/resume if
+   * the UI editor or 3D freecam opens mid-animation, same as every other
+   * timer in this game.
+   */
+  private revealPopcornMachine(obj: THREE.Object3D): void {
+    new Animator({ time: 0.7, easing: Easing.Elastic.Out, delay: 0 }, (progress) => {
+      obj.scale.setScalar(progress);
+
+    });
+
+    new LoopAnimator({ time: 1, yoyo: true }, (o) => {
+      const t = Easing.Quadratic.InOut(o)
+      obj.scale.setScalar(t);
+    })
+
+    const settledRotationY = obj.rotation.y;
+    const startRotationY = settledRotationY - Math.PI * 0.6;
+    obj.rotation.y = startRotationY;
+    new Animator({ time: 0.5, easing: Easing.Back.Out }, (progress) => {
+      obj.rotation.y = lerp(startRotationY, settledRotationY, progress);
+    });
   }
 }
 

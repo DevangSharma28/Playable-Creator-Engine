@@ -22,6 +22,12 @@ const ACTIVE_FILES = { main: "mainLayout.json", endcard: "endcardLayout.json" };
 // /save-binding, /remove-binding below, and src/engine/Bindings.ts (the
 // runtime side that reads this same file to actually wire fields up).
 const BINDINGS_FILE = path.join(UI_DIR, "bindings.json");
+// "⊙ Pick" assignments from the 3D Viewer/Editor's Control Desk — see
+// /list-scene-bindings, /save-scene-binding, /remove-scene-binding below,
+// and src/engine/SceneBindings.ts (the runtime side that reads this same
+// file). Deliberately a sibling of the game's own source rather than under
+// ui/: these bind fields to 3D scene objects, not to designed UI elements.
+const SCENE_BINDINGS_FILE = path.join(ROOT, "src", "game", "sceneBindings.json");
 const SRC_DIR = path.join(ROOT, "src");
 const SCRIPT_CATEGORIES = { engine: path.join(SRC_DIR, "engine"), game: path.join(SRC_DIR, "game") };
 
@@ -705,6 +711,19 @@ function writeBindings(data) {
   fs.writeFileSync(BINDINGS_FILE, JSON.stringify(data, null, 2));
 }
 
+function readSceneBindings() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SCENE_BINDINGS_FILE, "utf8"));
+    if (!Array.isArray(parsed.bindings)) throw new Error("malformed");
+    return parsed;
+  } catch {
+    return { version: 1, bindings: [] };
+  }
+}
+function writeSceneBindings(data) {
+  fs.writeFileSync(SCENE_BINDINGS_FILE, JSON.stringify(data, null, 2));
+}
+
 // Vite's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
@@ -1107,10 +1126,56 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/list-scene-bindings") {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify(readSceneBindings()));
+    return;
+  }
+
+  // Batched on purpose: the editor holds assignments in memory for the
+  // whole session and flushes them here in one request when you hit Exit
+  // Editor. Writing them one at a time, as they were picked, meant every
+  // pick touched a watched source file and hot-reloaded the game out from
+  // under the editor session that was making them.
+  if (req.method === "POST" && req.url === "/save-scene-bindings") {
+    readRequestBody(req, 1024 * 1024)
+      .then((raw) => {
+        const body = JSON.parse(raw);
+        const edits = Array.isArray(body.edits) ? body.edits : [];
+        const data = readSceneBindings();
+        for (const edit of edits) {
+          const { className, fieldName } = edit;
+          if (!className || !fieldName) throw new Error("Missing className/fieldName");
+          // One binding per class+field either way — assigning over an
+          // existing one replaces it rather than stacking a second.
+          data.bindings = data.bindings.filter((b) => !(b.className === className && b.fieldName === fieldName));
+          if (edit.remove) continue;
+          if (!edit.objectPath && !edit.objectName) throw new Error("Missing objectPath/objectName");
+          data.bindings.push({
+            className,
+            fieldName,
+            objectPath: edit.objectPath || "",
+            objectName: edit.objectName || "",
+          });
+        }
+        writeSceneBindings(data);
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, applied: edits.length, bindings: data.bindings }));
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings)`);
 });

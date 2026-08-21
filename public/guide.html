@@ -479,7 +479,7 @@
 
   <div class="chrome">
     <span class="dot"></span>
-    <span>Ion Engine TECHNOLOGY</span>
+    <span>Ion Engine</span>
     <span class="tag">Guide</span>
   </div>
 
@@ -614,6 +614,55 @@ public speed: number = 5;</code></pre>
     <section class="step">
       <div class="step-num">6</div>
       <div class="step-body">
+        <h2>Inspect and edit the 3D scene</h2>
+        <p>Click <strong>🧭 3D Viewer/Editor</strong> at the top of Engine Room. It orbits the <em>actual</em> running
+          scene, not a separate preview, so what you click is what's really there. Two docks flank the viewport: left is
+          <strong>Hierarchy</strong> (top) + <strong>Scripts</strong> (bottom); right is Exit, a camera-orientation
+          compass, <strong>Inspector</strong>, and <strong>Control Desk</strong>.</p>
+
+        <h3>Hierarchy</h3>
+        <ul>
+          <li>Only the top level starts expanded — click <strong>▸</strong> to open a branch, <strong>▾</strong> to
+            close it. A GLB-heavy scene can be hundreds of objects; this keeps it browsable.</li>
+          <li>Click a row to select it. Selection is shared everywhere — viewport, Inspector, Control Desk all update
+            together.</li>
+          <li>Press <strong>.</strong> any time to jump back to whatever's currently selected — opens whatever was
+            collapsed to reveal it, with a quick flash.</li>
+          <li>Drag a row out and drop it on a Control Desk field to assign it (see below).</li>
+        </ul>
+
+        <h3>Inspector</h3>
+        <ul>
+          <li><strong>Name</strong> — with a 📋 button to copy it.</li>
+          <li><strong>Parent</strong> — click it to jump to the parent object instead.</li>
+          <li><strong>Vertices / Triangles</strong> — shown for a mesh.</li>
+          <li><strong>👁 Visible</strong> — click the eye to show/hide. Slashed eye = hidden.</li>
+          <li><strong>Position / Rotation / Scale</strong> — real inputs; type a value or drag the gizmo in the
+            viewport, both stay in sync.</li>
+        </ul>
+
+        <h3>Assign a scene object to a script field</h3>
+        <p class="dim">Example: <code>Player.ts</code> has <code>public popcornMachine!: THREE.Object3D;</code></p>
+        <ol>
+          <li>Click <code>entities/Player.ts</code> in the <strong>Scripts</strong> list (left).</li>
+          <li>Control Desk shows a <strong>⊙ Pick</strong> button next to <code>popcornMachine</code> automatically —
+            any field typed as an <code>Object3D</code>/<code>Mesh</code>/<code>Group</code>/light/camera gets one.</li>
+          <li>Click <strong>⊙ Pick</strong> then click the object — in the Hierarchy or the viewport, either works —
+            or skip Pick and drag the row straight out of the Hierarchy onto the field.</li>
+          <li>Click <strong>✕ Exit Editor</strong> — that's the actual save. It shows how many are pending, e.g.
+            <strong>✕ Exit &amp; Save (1)</strong>.</li>
+        </ol>
+        <p>Saved assignments survive every reload from then on — written to <code>src/game/sceneBindings.json</code>,
+          re-applied automatically on every boot.</p>
+        <div class="callout">A class that needs the object <strong>inside its own constructor</strong> (not just later,
+          in <code>update()</code>) has to populate it itself — same reason and same pattern as <code>HUD.ts</code>'s
+          <code>applyBindings</code> call. See the code reference below for <code>applySceneBindings</code>.</div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">7</div>
+      <div class="step-body">
         <h2>Write gameplay code with Ion</h2>
         <p class="dim">Everything above is the visual tools. This is for timed beats, tweens, and cross-system events in
           code — without hand-rolling timers or holding direct references between classes.</p>
@@ -643,35 +692,34 @@ Ion.cta(STORE_URL);                                       <span class="c">// a C
             <code>Ion.on&lt;{total: number}&gt;("coin-collected", fn)</code>.
           </li>
         </ul>
+
+        <h3>Animate anything with Animator</h3>
+        <p><code>Ion.tween</code> moves a target's own fields toward a value directly. <code>Animator</code> is for
+          when you want the raw 0→1 progress number yourself — driving two properties together, a custom formula,
+          anything that isn't "move these fields to this value."</p>
+        <pre><code><span class="c">// import { Animator } from "../engine/core/Animator";
+// import { Easing } from "../engine/Ion";</span>
+
+<span class="c">// progress goes 0 -&gt; 1 over 0.5s, eased with Back.Out</span>
+new Animator({ time: 0.5, easing: Easing.Back.Out }, (progress) =&gt; {
+  mesh.scale.setScalar(progress);
+});
+
+<span class="c">// delay is optional; no easing = plain linear; 3rd arg (optional)
+// fires once, right when progress hits 1</span>
+new Animator({ time: 1, delay: 0.3 }, (progress) =&gt; {
+  door.rotation.y = progress * Math.PI;
+}, () =&gt; console.log("door fully open"));</code></pre>
+        <p class="dim">Self-driving, same as <code>Ion.tween</code> — construct it and move on, nothing to call every
+          frame yourself.</p>
+
         <div class="callout">Movement input has a desktop fallback too: <strong>WASD or arrow keys</strong> move the
           player alongside the joystick automatically — no setup, useful for testing at a desk without touching the
           canvas.</div>
         <p class="dim">Full API and reasoning: <code>ENGINE.md</code>'s <code>Ion.ts</code> /
-          <code>core/Scheduler.ts</code>
+          <code>core/Scheduler.ts</code> / <code>core/Animator.ts</code>
           / <code>core/EventBus.ts</code> / <code>core/InputManager.ts</code> sections.
         </p>
-      </div>
-    </section>
-
-    <section class="step">
-      <div class="step-num">7</div>
-      <div class="step-body">
-        <h2>Inspect the 3D scene</h2>
-        <p>Click <strong>🧭 3D View</strong> to freecam the live scene, click any object to select it, and drag the
-          Move/Rotate/Scale gizmo to edit it live. A second toolbar cluster adds five more toggles:</p>
-        <div class="ref-table">
-          <div class="k">Grid <span style="color:var(--text-faint)">— G</span></div>
-          <div class="v">A ground-reference grid, off by default.</div>
-          <div class="k">Helpers <span style="color:var(--text-faint)">— H</span></div>
-          <div class="v">Camera frustum + light helper visibility, on by default.</div>
-          <div class="k">Snap <span style="color:var(--text-faint)">— X</span></div>
-          <div class="v">Fixed increments on the active gizmo instead of freehand.</div>
-          <div class="k">Space <span style="color:var(--text-faint)">— C</span></div>
-          <div class="v">Toggles the gizmo between local and world orientation.</div>
-          <div class="k">Frame <span style="color:var(--text-faint)">— F</span></div>
-          <div class="v">Snaps the camera to fit whatever's currently selected.</div>
-        </div>
-        <p class="dim">Dev-only, same as everything else in this section — none of it ships in the production build.</p>
       </div>
     </section>
 
@@ -710,6 +758,142 @@ Ion.cta(STORE_URL);                                       <span class="c">// a C
       </div>
     </section>
 
+    <h2 style="margin-top:64px;">Engine code reference</h2>
+    <p class="lede" style="margin-bottom:32px;">Steps 1–8 above are the panels and clicks. This is the rest of
+      <code>src/engine/</code> — every reusable class a new playable actually imports, each with the exact
+      signature and a minimal real example. <code>Ion</code>/<code>Animator</code> already got a full walkthrough in
+      step 7; everything below is what's left.</p>
+
+    <h3>Boot</h3>
+    <p><code>src/main.ts</code> does this and nothing else — don't add to it, add to <code>Game.ts</code> instead.</p>
+    <pre><code><span class="c">// src/main.ts</span>
+import { IonEngine } from "./engine/IonEngine";
+
+const canvas = document.getElementById("game") as HTMLCanvasElement;
+IonEngine.boot(canvas);</code></pre>
+    <p class="dim">Optional second argument: <code>{ fixedTimestep: 1/60 }</code> — opts into a fixed-step accumulator
+      instead of variable <code>dt</code>. Turn it on only if you're integrating forces or resolving collisions,
+      where a frame spike needs to run several fixed steps instead of one big one.</p>
+
+    <h3>Wiring scene objects to fields — SceneBindings.ts</h3>
+    <p>The code-side half of step 6's <code>⊙ Pick</code>/drag-and-drop — resolves every saved assignment for a
+      class and writes the real object onto the field.</p>
+    <pre><code><span class="c">// import { applySceneBindings, type SceneBindingsData } from "../../engine/SceneBindings";
+// import sceneBindingsRaw from "../sceneBindings.json";</span>
+
+constructor(scene: THREE.Scene) {
+  applySceneBindings(this, "Player", sceneBindingsRaw as SceneBindingsData, scene);
+  <span class="c">// this.popcornMachine is populated from here on</span>
+}</code></pre>
+    <p class="dim"><code>Game.ts</code> also re-applies it to every class registered in its <code>inspectables</code>
+      map automatically — but only <em>after</em> every constructor has already run. Call it yourself, like above,
+      if a constructor needs the field immediately.</p>
+
+    <h3>Wiring UI elements to fields — Bindings.ts</h3>
+    <p>Same idea, for elements placed in the UI Editor instead of scene objects — the code-side half of step 3.</p>
+    <pre><code><span class="c">// import { applyBindings, type BindingsData } from "../engine/Bindings";
+// import bindingsRaw from "./bindings.json";</span>
+
+constructor() {
+  applyBindings(this, "HUD", bindingsRaw as BindingsData, this.main, this.endcard);
+  <span class="c">// this.moneyIcon (etc.) is populated from here on</span>
+}</code></pre>
+
+    <h3>Reading and driving a designed layout — UILayout.ts</h3>
+    <p>Every <code>UILayout</code> instance (<code>this.mainUI</code>, <code>this.endcardUI</code> in <code>Game.ts</code>)
+      exposes the same handful of runtime methods, regardless of which layout JSON built it:</p>
+    <div class="ref-table">
+      <div class="k"><code>get(name)</code></div>
+      <div class="v">Look up a placed element's node by the name you gave it in the editor.</div>
+      <div class="k"><code>setText(name, text)</code></div>
+      <div class="v">Update a text element's content at runtime.</div>
+      <div class="k"><code>setImage(name, src)</code></div>
+      <div class="v">Swap an image element's source (a dynamic badge/icon).</div>
+      <div class="k"><code>show(name)</code> / <code>hide(name)</code></div>
+      <div class="v">Toggle one element's own visibility.</div>
+      <div class="k"><code>setVisible(bool)</code></div>
+      <div class="v">Show/hide every element this layout placed, as one group.</div>
+      <div class="k"><code>setInteractive(nameOrEl, onClick?)</code></div>
+      <div class="v">Opt an element into receiving clicks — sets pointer-events + cursor, wires the handler.</div>
+      <div class="k"><code>getJoystick(name)</code></div>
+      <div class="v">Returns <code>{ base, knob }</code> for a "joystick"-type element, to wire real input to it.</div>
+    </div>
+    <pre><code>this.ui.setText("scoreLabel", `${this.collected} / ${this.total}`);
+this.ui.setInteractive("ctaButton", () =&gt; Cta.open(STORE_URL));</code></pre>
+
+    <h3>Input — InputManager.ts</h3>
+    <p>Generic tap/swipe/drag + the keyboard-axis fallback (WASD/arrows) — independent of the joystick, for anything
+      the joystick was never meant to cover.</p>
+    <pre><code>const input = new InputManager(window, () =&gt; hud.hideDragHint());  <span class="c">// target, onFirstInput</span>
+
+input.onTap(({ x, y }) =&gt; tryPickUp(x, y));
+input.onSwipe(({ dx, dy, angle }) =&gt; dodge(angle));
+
+<span class="c">// combine with the joystick — joystick wins whenever it's actively held</span>
+const axis = joystick.axis.x || joystick.axis.y ? joystick.axis : input.keyboardAxis;</code></pre>
+    <p class="dim"><code>input.setEnabled(false)</code> suspends it — the 3D Editor does this for its own session,
+      since its W/E/R/Q gizmo shortcuts collide with WASD on the same <code>window</code> keydown listener.</p>
+
+    <h3>The joystick — DynamicJoystick.ts</h3>
+    <pre><code>this.input = new DynamicJoystick(
+  this.mainLayer,       <span class="c">// parent element</span>
+  joystick.base,        <span class="c">// designed base node, from UILayout.getJoystick()</span>
+  joystick.knob,        <span class="c">// designed knob node</span>
+  45,                    <span class="c">// radius, px</span>
+  () =&gt; this.soundHandler.playMusic()  <span class="c">// onFirstInput</span>
+);
+
+<span class="c">// every frame:</span>
+this.player.update(dt, elapsed, this.input.axis);  <span class="c">// { x, y }, both -1..1</span></code></pre>
+
+    <h3>Gameplay camera — CameraHandler.ts</h3>
+    <pre><code>this.cameraHandler = new CameraHandler(this.camera, new THREE.Vector3(0, 12, 12)); <span class="c">// camera, offset</span>
+
+<span class="c">// every frame:</span>
+this.cameraHandler.update(this.player.position, dt); <span class="c">// smoothly follows</span>
+
+<span class="c">// on resize:</span>
+this.cameraHandler.handleResize(width, height);</code></pre>
+
+    <h3>Loading assets — AssetLoader.ts</h3>
+    <p>Preloads everything up front behind one <code>await</code> — a playable can't afford a stutter the first time
+      an asset is needed mid-gameplay, so nothing loads lazily.</p>
+    <pre><code>const loader = new AssetLoader();
+await loader.preload(manifest, (loaded, total) =&gt; updateBar(loaded / total));
+
+const model = loader.getGlb(libGlb.player).scene;     <span class="c">// already resolved, sync</span>
+const clips = loader.getAnimations(libGlb.player);
+const buffer = loader.getAudio(libAudio.MainMusic);
+const tex = loader.getTexture(libTex.coin);</code></pre>
+    <p class="dim"><code>manifest</code> is a plain array of <code>{ kind: "glb"|"audio"|"texture", path }</code> — see
+      <code>game/assets.ts</code>'s <code>libGlb</code>/<code>libAudio</code>/<code>libTex</code> namespaces for the
+      pattern this game's own manifest follows.</p>
+
+    <h3>Adding a new gameplay object — the Entity contract</h3>
+    <p>The minimum shape <code>Game.ts</code> needs to treat something uniformly — not a base class to extend, just
+      an interface to satisfy:</p>
+    <pre><code>interface Entity {
+  readonly object3D: THREE.Object3D;
+  update(dt: number, elapsed: number): void;
+  dispose?(): void;  <span class="c">// optional — for anything spawned/despawned at runtime</span>
+}</code></pre>
+    <p class="dim">Deliberately minimal — a class with extra per-frame inputs (Player needs the joystick axis, for
+      example) just widens its own <code>update()</code> signature. This is a floor, not a framework.</p>
+
+    <h3>Routing the install click — Cta.ts</h3>
+    <p>One call, regardless of which ad network's SDK actually rendered the playable — never call
+      <code>window.open()</code> or a network's API directly.</p>
+    <pre><code>this.hud.onCtaClick(() =&gt; Cta.open(STORE_URL));</code></pre>
+    <p class="dim">Checks Mindworks, Facebook, IronSource, MRAID, in that priority order, then falls back to a plain
+      browser <code>window.open</code> — exactly one handler ever fires.</p>
+
+    <h3>Surviving a crash — CrashOverlay.ts</h3>
+    <pre><code><span class="c">// once, near the top of Game.ts</span>
+setCrashRecoveryUrl(STORE_URL);</code></pre>
+    <p class="dim">That's the only call site needed — if gameplay throws mid-session, the engine's own crash guard
+      (see <code>IonEngine.ts</code>) shows a minimal "Continue" screen wired to this URL automatically. The ad spend
+      isn't a total loss even if something breaks.</p>
+
     <h3 style="margin-top:56px;">Cheat sheet</h3>
     <div class="cheat">
       <div class="cheat-row">
@@ -742,11 +926,31 @@ Ion.cta(STORE_URL);                                       <span class="c">// a C
       </div>
       <div class="cheat-row">
         <div class="q">Inspect the live 3D scene</div>
-        <div class="a"><code>🧭 3D View</code></div>
+        <div class="a"><code>🧭 3D Viewer/Editor</code></div>
       </div>
       <div class="cheat-row">
         <div class="q">Toggle grid / helpers / snap / space / frame in 3D View</div>
         <div class="a">Toolbar, or keys <code>G H X C F</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Assign a scene object to a script field</div>
+        <div class="a">Drag from <strong>Hierarchy</strong> onto the field, or <code>⊙ Pick</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Find the selected object in the Hierarchy</div>
+        <div class="a">Press <code>.</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Hide/show an object</div>
+        <div class="a">Select it → 👁 in the Inspector</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Copy an object's name</div>
+        <div class="a">Select it → 📋 next to Name in the Inspector</div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Make a scene-object assignment stick</div>
+        <div class="a"><code>✕ Exit Editor</code> — that's what actually saves it</div>
       </div>
       <div class="cheat-row">
         <div class="q">Test movement without a touchscreen</div>
@@ -759,6 +963,10 @@ Ion.cta(STORE_URL);                                       <span class="c">// a C
       <div class="cheat-row">
         <div class="q">Write a timed beat, tween, or event in code</div>
         <div class="a"><code>Ion.after/tween/on/emit</code></div>
+      </div>
+      <div class="cheat-row">
+        <div class="q">Animate a custom 0→1 progress value</div>
+        <div class="a"><code>new Animator({ time, delay }, progress =&gt; ..., onDone)</code></div>
       </div>
       <div class="cheat-row">
         <div class="q">Check a build for ad-network rejects</div>

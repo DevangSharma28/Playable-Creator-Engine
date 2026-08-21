@@ -31,6 +31,11 @@ function needsLockedAspect(data: UIElementData): boolean {
   return data.type === "joystick" || data.lockAspect === true;
 }
 
+/** Mirrors tools/ui-editor.html's visualAspectRatio() exactly — the ratio is captured once at lock time (see UILayoutTypes.ts's aspectRatio field), never recomputed from live width/height. */
+function visualAspectRatio(d: UIElementData): number {
+  return d.aspectRatio ?? 1;
+}
+
 const ANIMATION_CSS: Record<Exclude<UIAnimation, "none">, string> = {
   pulse: "ui-anim-pulse 1.2s ease-in-out infinite",
   bob: "ui-anim-bob 1.6s ease-in-out infinite",
@@ -173,21 +178,6 @@ export class UILayout {
     }
   }
 
-  /**
-   * The one, uniform design-space-px -> live-screen-px factor for EVERY
-   * px field (position or size, locked-aspect or not) — never
-   * scaleX/scaleY independently. Mirrors tools/ui-editor.html's own
-   * pxScale() exactly. A `%` field is meant to keep stretching to fill
-   * the real container exactly like plain CSS `%` always has (so it's
-   * left alone, resolved natively — see applyGeometry); a `px` field
-   * means a physical size/offset that should stay proportioned the same
-   * on any aspect ratio, not stretched differently per axis, hence one
-   * shared factor (the more-constrained axis) for both.
-   */
-  private pxScale(): number {
-    return Math.min(this.scaleX, this.scaleY);
-  }
-
   /** Sets an element's left/top/width/height/transform for the current live size — called for every element both from updateScale() (after a resize) and once at construction time (via the constructor's own initial updateScale() call). Mirrors tools/ui-editor.html's renderCanvas() geometry block exactly. */
   private applyGeometry(data: UIElementData, wrapper: HTMLElement): void {
     const px = this.pxScale();
@@ -230,6 +220,98 @@ export class UILayout {
   /** `fontSizePct`% of the container's current real height, as a literal px value — mirrors tools/ui-editor.html's own text font-size formula exactly (there: `fontSizePct * (canvasEl's real height / 100)`). */
   private applyFontSize(data: UIElementData, node: HTMLElement): void {
     node.style.fontSize = `${((data.fontSizePct ?? 4) / 100) * this.liveHeight}px`;
+  }
+
+  // ─── GEOMETRY:BEGIN ───
+  // Pure-number twins of applyGeometry()'s own calc()-string geometry and
+  // applyFontSize()'s own font-size formula, additive only (neither of
+  // those two methods is touched or called from here) — this fence and
+  // tests/geometry-parity.test.mjs are what make ENGINE.md's "these
+  // formulas are written to be identical to tools/ui-editor.html's own
+  // pxScale()/elemScreenWidth()/elemScreenHeight()/elemScreenX()/
+  // elemScreenY()/renderCanvas() geometry and its text font-size formula"
+  // claim mechanically enforced instead of just asserted in prose. Written
+  // to mirror each side's REAL existing formula exactly, operator for
+  // operator and operation-order for operation-order — not a rewritten
+  // "equivalent" version — so a genuine divergence between the two files
+  // shows up here instead of being normalized away. If you change the
+  // *meaning* of any formula in this fence, change tools/ui-editor.html's
+  // matching GEOMETRY fence in the same commit, or this suite fails on
+  // purpose.
+
+  /**
+   * The one, uniform design-space-px -> live-screen-px factor for EVERY px
+   * field — mirrors tools/ui-editor.html's own pxScale() exactly (see its
+   * doc comment there, and applyGeometry()'s own doc comment above, for
+   * the full reasoning).
+   */
+  private pxScale(): number {
+    return Math.min(this.scaleX, this.scaleY);
+  }
+
+  /** Mirrors tools/ui-editor.html's elemScreenWidth() exactly. */
+  private elemScreenWidth(d: UIElementData, rectW: number): number {
+    return d.widthUnit === "px" ? (d.widthPx ?? 0) * this.pxScale() : (d.widthPct / 100) * rectW;
+  }
+
+  /** Mirrors tools/ui-editor.html's elemScreenHeight() exactly. */
+  private elemScreenHeight(d: UIElementData, rectW: number, rectH: number): number {
+    if (needsLockedAspect(d)) return this.elemScreenWidth(d, rectW) / visualAspectRatio(d);
+    return d.heightUnit === "px" ? (d.heightPx ?? 0) * this.pxScale() : (d.heightPct / 100) * rectH;
+  }
+
+  /** Mirrors tools/ui-editor.html's pxSignX() exactly. */
+  private pxSignX(d: UIElementData): number {
+    return ANCHOR_FRAC[d.anchor].x === 1 ? -1 : 1;
+  }
+
+  /** Mirrors tools/ui-editor.html's pxSignY() exactly. */
+  private pxSignY(d: UIElementData): number {
+    return ANCHOR_FRAC[d.anchor].y === 1 ? -1 : 1;
+  }
+
+  /** Mirrors tools/ui-editor.html's elemScreenX() exactly. */
+  private elemScreenX(d: UIElementData, rectW: number): number {
+    return d.xUnit === "px" ? ANCHOR_FRAC[d.anchor].x * rectW + this.pxSignX(d) * (d.xPx ?? 0) * this.pxScale() : (d.xPct / 100) * rectW;
+  }
+
+  /** Mirrors tools/ui-editor.html's elemScreenY() exactly. */
+  private elemScreenY(d: UIElementData, rectH: number): number {
+    return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + this.pxSignY(d) * (d.yPx ?? 0) * this.pxScale() : (d.yPct / 100) * rectH;
+  }
+
+  /**
+   * Mirrors applyFontSize()'s own formula exactly, operation-order
+   * included — NOT tools/ui-editor.html's inline font-size line (that one
+   * is a real, deliberately-uncorrected divergence: it defaults a falsy
+   * `fontSizePct` (including an explicit `0`) to 4, this one only
+   * defaults a missing one (`?? `) — see tests/geometry-parity.test.mjs's
+   * own findings if that's ever resolved.
+   */
+  private elemFontSizePx(d: UIElementData, liveH: number): number {
+    return ((d.fontSizePct ?? 4) / 100) * liveH;
+  }
+  // ─── GEOMETRY:END ───
+
+  /**
+   * Test-only seam (tests/lib/geometry-source.mjs) — bound pure functions
+   * for every formula in the GEOMETRY fence above, so a Node test can call
+   * them without constructing a real UILayout (which needs a live
+   * `HTMLElement` container and touches `document`). Additive: nothing
+   * above is changed to support this, and nothing else in this class
+   * calls it.
+   */
+  public __geometry() {
+    return {
+      pxScale: () => this.pxScale(),
+      elemScreenWidth: (d: UIElementData, rectW: number) => this.elemScreenWidth(d, rectW),
+      elemScreenHeight: (d: UIElementData, rectW: number, rectH: number) => this.elemScreenHeight(d, rectW, rectH),
+      pxSignX: (d: UIElementData) => this.pxSignX(d),
+      pxSignY: (d: UIElementData) => this.pxSignY(d),
+      elemScreenX: (d: UIElementData, rectW: number) => this.elemScreenX(d, rectW),
+      elemScreenY: (d: UIElementData, rectH: number) => this.elemScreenY(d, rectH),
+      elemFontSizePx: (d: UIElementData, liveH: number) => this.elemFontSizePx(d, liveH),
+    };
   }
 
   /** Look up a placed element's content node by the `name` you gave it in the editor. */

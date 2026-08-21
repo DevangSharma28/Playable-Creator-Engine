@@ -1,9 +1,12 @@
+import type * as THREE from "three";
 import { Game } from "../game/Game";
 import type { UILayout } from "./ui/UILayout";
 import { Scheduler } from "./core/Scheduler";
 import { EventBus } from "./core/EventBus";
 import { bindIon, unbindIon, type IonContext } from "./Ion";
 import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
+import { isAssignableObjectField } from "./editor/objectAssignment";
+import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
 
 /**
  * Dev-only hooks the Engine Room panel (index.html, the dev entry — see
@@ -62,6 +65,15 @@ import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
  * active, until something else (e.g. clicking a device-preview tab)
  * happens to call applyDeviceFrame() again.
  *
+ * __editorRequestPick / __editorCancelPick: Control Desk's "Pick" flow —
+ * arms the 3D Viewer/Editor to hand back the next scene object the user
+ * clicks (in the Hierarchy or the viewport, interchangeably), type-checked
+ * against the field's declared TypeScript type. Same no-serialization
+ * reasoning as __getInspectable below: the resolved object is the real
+ * live THREE.Object3D, so assigning it to a field assigns the actual scene
+ * object, not a copy or an id. __editorRequestPick returns false when the
+ * editor isn't open (nothing to click in).
+ *
  * __getInspectable: the Engine Room panel's Control Desk (a live public-
  * field viewer/editor, keyed by class name) calls this to reach an actual
  * running instance — Player, CoinField, World, Game itself, whatever
@@ -103,6 +115,14 @@ type EngineWindow = Window & {
   __frameSelected?: () => void;
   __onInspectorStateChanged?: (state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void;
   __getInspectable?: (className: string) => object | undefined;
+  __wasFreecamActive?: () => boolean;
+  __editorRequestPick?: (declaredType: string | undefined, callbacks: { onResolve: (object: unknown) => void; onReject?: (reason: string) => void; onCancel?: () => void }) => boolean;
+  __editorCancelPick?: () => void;
+  __editorIsPickableField?: (declaredType: string | undefined) => boolean;
+  __editorObjectPath?: (object: unknown) => { objectPath: string; objectName: string } | undefined;
+  __editorDragAssign?: (declaredType: string | undefined, commit: boolean, uuid?: string) => { ok: boolean; reason: string; name?: string; object?: unknown; objectPath?: string; objectName?: string } | undefined;
+  __editorDragMime?: string;
+  __getEditorViewportInfo?: () => { containerWidth: number; containerHeight: number; containerAspect: number; rendererWidth: number; rendererHeight: number; cameraAspect: number; pixelRatio: number } | undefined;
   __getAudioAnalyser?: () => { getFrequencyData: () => Uint8Array } | undefined;
   __isMusicPlaying?: () => boolean;
   __disposeGame?: () => void;
@@ -342,6 +362,49 @@ export class IonEngine {
     this.win.__getInspectable = (className) => activeGame.getInspectable(className);
     this.win.__getAudioAnalyser = () => activeGame.getAudioAnalyser();
     this.win.__isMusicPlaying = () => activeGame.isMusicPlaying();
+    // Editor-only hooks, gated so a production build drops not just these
+    // assignments but the entire editor module tree they reach into —
+    // objectAssignment's type table and EditorDragSource's MIME constant
+    // are real code and real strings, and an ungated import pulls them in
+    // even when nothing ever calls the hook. Everything above stays
+    // ungated: those are plain closures over the Game that's already in
+    // the bundle, so they cost nothing beyond their own bytes.
+    if (!import.meta.env.DEV) return this.win.__onGameReady?.();
+
+    this.win.__editorRequestPick = (declaredType, callbacks) =>
+      activeGame.requestObjectPick(declaredType, {
+        onResolve: (object) => callbacks.onResolve(object),
+        onReject: callbacks.onReject,
+        onCancel: callbacks.onCancel,
+      });
+    this.win.__editorCancelPick = () => activeGame.cancelObjectPick();
+    // Available whenever the game is booted, not only while the editor is
+    // open — Control Desk needs it to decide which fields get a "Pick"
+    // button at render time, and it renders regardless of editor state.
+    // Exposed rather than reimplemented in index.html so the declared-type
+    // rules live in exactly one place (see editor/objectAssignment.ts).
+    this.win.__editorIsPickableField = (declaredType) => isAssignableObjectField(declaredType);
+    this.win.__getEditorViewportInfo = () => activeGame.getEditorViewportInfo();
+    this.win.__editorObjectPath = (object) => activeGame.editorObjectPath(object as THREE.Object3D);
+    this.win.__editorDragAssign = (declaredType, commit, uuid) => activeGame.editorDragAssign(declaredType, commit, uuid);
+    // Exposed so the Control Desk's drop targets match on the same MIME the
+    // Hierarchy rows set, without that string being written out twice.
+    this.win.__editorDragMime = OBJECT_DRAG_MIME;
+
+    // Restore the 3D Viewer/Editor after an in-place reload, here rather
+    // than in main.ts's hot-accept callback. That callback runs the moment
+    // the new module's top-level code has executed — which is while
+    // start() is still awaiting Game.create(), so at that point
+    // __setFreecamActive is still the *previous* instance's closure,
+    // pointing at a Game that was just disposed. Its own
+    // already-in-freecam guard turned the call into a no-op, and the new
+    // Game never entered the editor at all: the dev page kept showing the
+    // editor chrome while gameplay quietly resumed underneath it. Doing it
+    // here means the hooks above are already this instance's, and the Game
+    // they close over is the live one.
+    if (this.win.__wasFreecamActive?.()) {
+      this.win.__setFreecamActive?.(true);
+    }
 
     // Must be last: __onGameReady's whole job is to trigger a resize
     // against the now-ready activeGame (see its doc comment above), so

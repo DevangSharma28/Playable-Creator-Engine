@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-  <title>Cube Roll — DEV PREVIEW</title>
+  <title>ION Engine — DEV PREVIEW</title>
   <style>
     :root {
       --eng-bg: #0a0b0d;
@@ -464,42 +464,47 @@
        button. Stays in this exact spot regardless of anything else this
        mode changes (device-topbar hiding, panel contents, ...) — it's the
        one fixed anchor you can always find to get back out. */
+    /* Now the first control in the right dock rather than a floating
+       button — it reads as the mode's own title bar, and the dock's own
+       show/hide transition covers its entrance. */
     #er-exit-3d {
       display: flex;
-      position: fixed;
-      top: 54px;
-      right: 10px;
-      z-index: 71;
+      width: 100%;
       align-items: center;
-      gap: 8px;
+      justify-content: center;
+      gap: 6px;
       font-family: inherit;
-      font-size: 11.5px;
+      font-size: 10px;
       font-weight: 700;
+      letter-spacing: 0.02em;
       color: #ffe066;
-      background: linear-gradient(180deg, #142c78, #0b1f5c);
-      border: 1px solid #ffe066;
-      border-radius: var(--eng-radius);
-      padding: 9px 15px;
+      background: rgba(20, 44, 120, 0.55);
+      border: 1px solid rgba(255, 224, 102, 0.55);
+      border-radius: var(--eng-radius-sm);
+      padding: 4px 10px;
       cursor: pointer;
-      pointer-events: none;
-      visibility: hidden;
-      opacity: 0;
-      /* Scales in rather than sliding — it's the one control here treated
-         as "you just entered a special mode" (see the comment above), so
-         it announces itself differently from the panels that just dock
-         into place. */
-      transform: scale(0.9);
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), 0 0 18px rgba(255, 224, 102, 0.15);
-      transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
     }
 
-    #er-exit-3d.visible {
-      pointer-events: auto;
-      visibility: visible;
-      opacity: 1;
-      transform: scale(1);
-      transition: opacity 0.2s ease, transform 0.2s ease;
+    #er-exit-3d:hover {
+      background: rgba(27, 58, 151, 0.75);
+      border-color: #ffe066;
     }
+
+    #er-exit-3d:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    /* Queued scene assignments waiting to be written — the button is the
+       only thing that flushes them, so it says so rather than leaving the
+       pending state invisible. */
+    #er-exit-3d.has-pending {
+      color: #1a1204;
+      background: linear-gradient(180deg, var(--eng-accent-hover), var(--eng-accent));
+      border-color: var(--eng-accent-hover);
+    }
+
 
     #er-exit-3d:hover {
       background: linear-gradient(180deg, #1a3690, #0e256e);
@@ -651,6 +656,7 @@
       border-color: rgba(74, 222, 128, 0.35);
       background: rgba(74, 222, 128, 0.08);
     }
+
     #builder-freshness.fresh .dot {
       background: var(--eng-ok);
       box-shadow: 0 0 6px 1px rgba(74, 222, 128, 0.8);
@@ -661,6 +667,7 @@
       border-color: rgba(255, 204, 77, 0.35);
       background: rgba(255, 204, 77, 0.08);
     }
+
     #builder-freshness.stale .dot {
       background: var(--eng-warn);
       box-shadow: 0 0 6px 1px rgba(255, 204, 77, 0.8);
@@ -811,18 +818,35 @@
     }
 
     @keyframes builder-aurora {
-      0% { background-position: 0% 50%; }
-      100% { background-position: 300% 50%; }
+      0% {
+        background-position: 0% 50%;
+      }
+
+      100% {
+        background-position: 300% 50%;
+      }
     }
 
     @keyframes builder-icon-wobble {
-      0%, 100% { transform: rotate(0deg) translateY(0); }
-      50% { transform: rotate(-14deg) translateY(-1px); }
+
+      0%,
+      100% {
+        transform: rotate(0deg) translateY(0);
+      }
+
+      50% {
+        transform: rotate(-14deg) translateY(-1px);
+      }
     }
 
     @keyframes builder-icon-spin {
-      from { transform: rotate(0deg); }
-      to { transform: rotate(360deg); }
+      from {
+        transform: rotate(0deg);
+      }
+
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     /* Secondary to Build Now's hero treatment on purpose — this only ever
@@ -959,6 +983,7 @@
     #report-modal-body::-webkit-scrollbar {
       width: 6px;
     }
+
     #report-modal-body::-webkit-scrollbar-thumb {
       background: rgba(255, 255, 255, 0.22);
       border-radius: 999px;
@@ -1034,9 +1059,17 @@
       line-height: 1.2;
     }
 
-    .report-card-value.ok { color: var(--eng-ok); }
-    .report-card-value.warn { color: var(--eng-warn); }
-    .report-card-value.bad { color: var(--eng-danger); }
+    .report-card-value.ok {
+      color: var(--eng-ok);
+    }
+
+    .report-card-value.warn {
+      color: var(--eng-warn);
+    }
+
+    .report-card-value.bad {
+      color: var(--eng-danger);
+    }
 
     .report-card-sub {
       margin-top: 3px;
@@ -1299,64 +1332,89 @@
     }
 
     @media (prefers-reduced-motion: reduce) {
+
       #builder-build-btn,
       #builder-build-btn.building,
       #builder-build-btn .icon,
       #builder-build-btn:hover:not(:disabled) .icon,
       #builder-build-btn.building .icon,
-      #si-hierarchy,
-      #si-inspector,
-      #si-hierarchy.visible,
-      #si-inspector.visible,
+      .editor-dock,
+      .editor-dock.visible,
       #si-gizmo-toolbar,
       #si-gizmo-toolbar.visible,
-      #er-exit-3d,
-      #er-exit-3d.visible {
+      #er-exit-3d {
         animation: none;
         transition: opacity 0.001s linear, visibility 0s linear;
       }
     }
 
-    /* Scene hierarchy + inspector: dev-only, only meaningful while freecam
-       is active (see script section) — same visual language as the Engine
-       Room panel, just repositioned so they don't collide with it (which
-       is hidden anyway while these show). SceneInspector.ts writes directly
-       into these elements' innerHTML, so any static header lives in CSS
-       (::before), not real DOM, or it would be wiped on every rebuild.
-       Entrance is opacity+slide, not a hard display swap — visibility
-       (not display) is what actually removes them from hit-testing while
-       hidden, so the transition has something to animate instead of
-       snapping instantly. Each panel slides in from whichever screen edge
-       it's docked to (hierarchy from the left, inspector from the right),
-       so the motion reads as "sliding into its own dock," not a generic
-       fade every floating panel in this app would use. */
-    #si-hierarchy,
-    #si-inspector {
+    /* ============================================================
+       3D Viewer/Editor docks — two full-height panels flanking the
+       viewport. Widths live in CSS variables because the script's own
+       currentInsets() reads them back (see EDITOR_LEFT_W/EDITOR_RIGHT_W),
+       so the space #device-frame is laid out into and the space these
+       actually occupy can never drift apart. That matters more than usual
+       here: #device-frame IS the editor viewport, and EditorViewport
+       measures it with a ResizeObserver to drive the renderer and camera
+       projection. Get the reservation wrong and the canvas would sit
+       partly underneath a dock; the projection would still be correct
+       (it follows the real box), it would just be cropped.
+       Visibility (not display) toggles them, so the transition has
+       something to animate instead of snapping.
+       ============================================================ */
+    /* clamp(), not fixed widths: currentInsets() reserves exactly these
+       for the viewport, so two fixed docks wider than the window together
+       would leave #device-frame with a negative/near-zero box — at a narrow
+       9:16 window (540px) a fixed 264+316 left the viewport ~2px wide and
+       the 3D view effectively gone. Scaling with viewport width keeps a
+       usable viewport at every aspect the editor has to support, while the
+       upper bounds stop the docks bloating on a wide monitor. */
+    :root {
+      --editor-left-w: clamp(170px, 22vw, 300px);
+      --editor-right-w: clamp(170px, 24vw, 316px);
+    }
+
+    .editor-dock {
       position: fixed;
+      /* border-box so the CSS variable above IS the space this occupies.
+         Without it, padding and border land *outside* the declared width
+         and the dock covers ~21px more than currentInsets() reserved — the
+         viewport would sit partly underneath it. Same reasoning (and same
+         scoped, non-global approach) as #device-frame's own box-sizing. */
+      box-sizing: border-box;
+      top: 0;
+      bottom: 0;
       z-index: 70;
-      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
-      border: 1px solid var(--eng-border);
-      border-radius: var(--eng-radius);
-      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 10px;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel) 45%, var(--eng-panel-2));
       font-size: 11px;
       color: var(--eng-text);
       pointer-events: none;
       visibility: hidden;
       opacity: 0;
-      backdrop-filter: blur(8px);
       transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
     }
 
-    #si-hierarchy {
+    #editor-left {
+      left: 0;
+      width: var(--editor-left-w);
+      border-right: 1px solid var(--eng-border);
+      box-shadow: 10px 0 30px rgba(0, 0, 0, 0.45);
       transform: translateX(-14px);
     }
 
-    #si-inspector {
+    #editor-right {
+      right: 0;
+      width: var(--editor-right-w);
+      border-left: 1px solid var(--eng-border);
+      box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
       transform: translateX(14px);
     }
 
-    #si-hierarchy.visible,
-    #si-inspector.visible {
+    .editor-dock.visible {
       pointer-events: auto;
       visibility: visible;
       opacity: 1;
@@ -1364,8 +1422,51 @@
       transition: opacity 0.2s ease, transform 0.2s ease;
     }
 
-    #si-hierarchy::before,
-    #si-inspector::before {
+    /* Each pane is its own bordered card that scrolls independently, so a
+       long hierarchy never pushes Scripts off the bottom of the dock. */
+    .editor-pane {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      background: rgba(0, 0, 0, 0.22);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius);
+      overflow: hidden;
+    }
+
+    /* Left dock: Hierarchy over Scripts, split evenly (flex: 1 1 0 on both
+       — equal share of the dock regardless of content height, which is
+       what "roughly 50/50" needs; flex-basis auto would let the taller
+       content win). */
+    #editor-left .editor-pane {
+      flex: 1 1 0;
+    }
+
+    /* Right dock: Exit and the view helper are fixed-height chrome at the
+       top; Inspector and Control Desk share what's left. Control Desk gets
+       the larger share — it's the panel with the most to show. */
+    .editor-right-top {
+      flex-shrink: 0;
+    }
+
+    .editor-viewhelper-slot {
+      flex-shrink: 0;
+      display: flex;
+      justify-content: center;
+    }
+
+    #editor-pane-inspector {
+      flex: 1 1 0;
+    }
+
+    #editor-pane-controldesk {
+      flex: 1.35 1 0;
+      padding: 8px;
+    }
+
+    .editor-pane-title {
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -1377,70 +1478,239 @@
       color: var(--eng-text-dim);
       border-bottom: 1px solid var(--eng-border-soft);
       background: rgba(255, 255, 255, 0.015);
-      border-radius: var(--eng-radius) var(--eng-radius) 0 0;
-      margin: -1px -1px 6px -1px;
+    }
+
+    /* The Scripts and Control Desk blocks are moved in here bodily from
+       the Engine Room dock (see moveEditorPanels), so they arrive with
+       that dock's own layout assumptions — these re-fit them to a pane. */
+    #editor-pane-scripts>#er-scripts-block,
+    #editor-pane-controldesk>#er-controldesk-block {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-height: 0;
+      padding: 8px;
+    }
+
+    #editor-pane-scripts>#er-scripts-block {
+      padding: 8px 8px 8px 8px;
+    }
+
+    /* In the Engine Room dock this list is capped to ~5 rows so it can't
+       push Control Desk off the bottom. In its own dedicated half-pane
+       there's nothing below it to protect, so it takes the whole pane. */
+    #editor-pane-scripts #er-scripts-list {
+      flex: 1;
+      max-height: none;
+      margin-bottom: 0;
+    }
+
+    #editor-pane-controldesk #er-controldesk-body {
+      flex: 1;
+      min-height: 0;
+    }
+
+    /* Pick mode: a single hint bar so it's obvious the next click means
+       "assign this", not "select this" — the crosshair cursor alone is too
+       quiet for a mode that changes what clicking does. */
+    #editor-pick-banner {
+      position: fixed;
+      top: 12px;
+      left: 50%;
+      transform: translateX(-50%) translateY(-8px);
+      z-index: 80;
+      padding: 8px 16px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 600;
+      color: #10203f;
+      background: linear-gradient(180deg, #9fe3ff, #63c8f5);
+      border: 1px solid #cdefff;
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.16s ease, transform 0.16s ease, visibility 0s linear 0.16s;
+    }
+
+    #editor-pick-banner.visible {
+      visibility: visible;
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+      transition: opacity 0.16s ease, transform 0.16s ease;
+    }
+
+    #editor-pick-banner b {
+      font-family: var(--eng-mono);
+      background: rgba(16, 32, 63, 0.16);
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+
+    /* Hierarchy rows are drag sources for Control Desk object fields.
+       grab/grabbing rather than the default arrow so the affordance is
+       discoverable without a tooltip — the row is still click-to-select,
+       the drag is the second gesture on the same element. */
+    #si-hierarchy .si-row {
+      cursor: grab;
+    }
+
+    #si-hierarchy .si-row:active {
+      cursor: grabbing;
+    }
+
+    #si-hierarchy .si-row.dragging {
+      opacity: 0.45;
+    }
+
+    /* Drop feedback on the field being hovered. Validated on dragover (see
+       wireDropTarget), so a type mismatch reads as refused *before* the
+       user lets go rather than failing silently afterwards. */
+    .er-cd-field.drop-ok {
+      background: rgba(125, 211, 252, 0.16);
+      box-shadow: inset 0 0 0 1px rgba(125, 211, 252, 0.55);
+      border-radius: var(--eng-radius-sm);
+    }
+
+    .er-cd-field.drop-bad {
+      background: var(--eng-danger-soft);
+      box-shadow: inset 0 0 0 1px var(--eng-danger);
+      border-radius: var(--eng-radius-sm);
+      cursor: no-drop;
+    }
+
+    /* Control Desk: object-field assignment row (the Pick flow). */
+    .er-cd-pick {
+      font-family: inherit;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--eng-blue, #7dd3fc);
+      background: rgba(125, 211, 252, 0.12);
+      border: 1px solid rgba(125, 211, 252, 0.35);
+      border-radius: var(--eng-radius-sm);
+      padding: 2px 6px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+
+    .er-cd-pick:hover {
+      background: rgba(125, 211, 252, 0.24);
+      color: #d8f2ff;
+    }
+
+    .er-cd-pick.picking {
+      color: #10203f;
+      background: #9fe3ff;
+      border-color: #cdefff;
+    }
+
+    .er-cd-unpick {
+      font-family: inherit;
+      font-size: 9px;
+      font-weight: 700;
+      color: var(--eng-text-faint);
+      background: transparent;
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 2px 5px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .er-cd-unpick:hover {
+      color: var(--eng-danger);
+      border-color: var(--eng-danger);
+    }
+
+    /* Hierarchy + Inspector are now *content regions inside* the editor
+       docks below, not free-floating panels — the dock owns the chrome
+       (border, background, header), these just scroll inside their pane.
+       They keep their own ids because SceneInspector's replacement
+       (src/engine/editor/EditorHierarchy.ts / EditorInspector.ts) writes
+       directly into them by id. */
+    #si-hierarchy,
+    #si-inspector {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      font-size: 11px;
+      color: var(--eng-text);
+    }
+
+    #si-inspector {
+      padding: 0 10px 8px;
+    }
+
+    /* Thin, solid, no track background — the platform-default scrollbar
+       these two panes used to fall back to (they weren't in the shared
+       thin-scrollbar group other editor panels already use) is a fat gray
+       bar with its own opaque track, which reads as visually "loose" next
+       to everything else in the dock. Solid (not the ~0.22-alpha thumb
+       used elsewhere) because a barely-there thumb is the wrong call on a
+       panel this narrow — you want to see at a glance that there's more
+       tree below the fold. */
+    #si-hierarchy,
+    #si-inspector {
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255, 255, 255, 0.4) transparent;
+    }
+
+    #si-hierarchy::-webkit-scrollbar,
+    #si-inspector::-webkit-scrollbar {
+      width: 4px;
+    }
+
+    #si-hierarchy::-webkit-scrollbar-track,
+    #si-inspector::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    #si-hierarchy::-webkit-scrollbar-thumb,
+    #si-inspector::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.4);
+      border-radius: 999px;
+    }
+
+    #si-hierarchy::-webkit-scrollbar-thumb:hover,
+    #si-inspector::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.62);
     }
 
     /* Live object count, no JS involved — a pure CSS counter, incremented
-       once per .si-row SceneInspector.ts renders anywhere inside this
-       panel (nested rows included, `counter-increment` doesn't care about
-       DOM depth) and reset back to 0 on this panel itself, so it stays in
-       sync automatically every time renderHierarchy() rebuilds the rows,
-       without SceneInspector needing to know this badge exists at all.
-       Rendered via ::after, not ::before — a counter's value at any point
-       reflects every counter-increment that precedes it in tree order,
-       and ::before is generated *before* the real .si-row children it
-       would be counting (so it'd always read back the reset value, 0);
-       ::after comes after all of them, so by the time its content is
-       evaluated every row has already been counted. Position:absolute
-       (against #si-hierarchy's own position:fixed, its nearest positioned
-       ancestor) pulls it back up into the header corner despite being
-       last in the actual DOM/tree order — paint position and counter
-       order are independent, only the latter cares about tree order. */
-    #si-hierarchy {
+       once per .si-row the hierarchy renders anywhere inside this panel
+       (nested rows included, `counter-increment` doesn't care about DOM
+       depth) and reset on the pane, so it stays in sync automatically on
+       every rebuild without the hierarchy needing to know this badge
+       exists. ::after, not ::before: a counter's value reflects every
+       counter-increment preceding it in tree order, so a ::before placed
+       ahead of the rows it counts would always read back the reset value. */
+    #editor-pane-hierarchy {
       counter-reset: si-row-count;
     }
 
-    #si-hierarchy::after {
+    #editor-pane-hierarchy::after {
       content: counter(si-row-count);
       position: absolute;
-      top: 8px;
-      right: 10px;
+      top: 9px;
+      right: 11px;
       font-family: var(--eng-mono);
       font-size: 9.5px;
       font-weight: 800;
       color: var(--eng-text-faint);
       font-variant-numeric: tabular-nums;
-    }
-
-    #si-hierarchy::before {
-      content: "\1F5C2  Hierarchy";
-    }
-
-    #si-inspector::before {
-      content: "\1F50E  Inspector";
-    }
-
-    /* 54px = the docked #device-topbar's 44px height + a 10px margin —
-       kept below in the script as TOP_BAR_HEIGHT; update both together. */
-    #si-hierarchy {
-      top: 54px;
-      left: 10px;
-      width: 216px;
-      max-height: calc(78vh - 44px);
-      overflow-y: auto;
-      padding-bottom: 6px;
+      pointer-events: none;
     }
 
     .si-row {
       counter-increment: si-row-count;
+      display: flex;
+      align-items: center;
+      gap: 3px;
       margin: 0 6px 1px;
-      padding: 4px 7px;
+      padding: 4px 7px 4px 4px;
       border-radius: var(--eng-radius-sm);
       cursor: pointer;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
       border-left: 2px solid transparent;
       transition: background 0.1s ease;
     }
@@ -1456,16 +1726,53 @@
       font-weight: 700;
     }
 
-    /* Below #er-exit-3d (also top-right, ~54px tall itself), not level
-       with it — they'd otherwise land in the same spot and stack on top
-       of each other. */
-    #si-inspector {
-      top: 100px;
-      right: 10px;
-      width: 222px;
-      max-height: calc(100vh - 116px);
-      overflow-y: auto;
-      padding: 0 10px 10px;
+    /* Momentary highlight for "." reveal — a couple of quick pulses so a
+       row that was already on-screen still visibly announces itself,
+       not just one that had to scroll into view. */
+    .si-row.flash {
+      animation: si-row-flash 0.65s ease-out;
+    }
+
+    @keyframes si-row-flash {
+
+      0%,
+      40%,
+      80% {
+        background: rgba(125, 211, 252, 0.4);
+      }
+
+      20%,
+      60%,
+      100% {
+        background: transparent;
+      }
+    }
+
+    /* Expand/collapse chevron — a fixed-width hit target regardless of
+       whether a row has children, so sibling rows' labels stay aligned
+       into one column instead of leaf rows drifting left. */
+    .si-row-toggle {
+      flex-shrink: 0;
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9px;
+      color: var(--eng-text-faint);
+      border-radius: 3px;
+    }
+
+    .si-row-toggle:not(.si-row-toggle-spacer):hover {
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .si-row-label {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+      min-width: 0;
     }
 
     .si-insp-empty {
@@ -1476,7 +1783,9 @@
 
     .si-insp-row {
       display: flex;
+      align-items: center;
       justify-content: space-between;
+      gap: 6px;
       padding: 2.5px 0;
       font-family: var(--eng-mono);
       font-size: 10.5px;
@@ -1486,11 +1795,76 @@
       color: var(--eng-text-faint);
       font-family: var(--eng-sans);
       font-size: 11px;
+      flex-shrink: 0;
     }
 
     .si-insp-row b {
       font-variant-numeric: tabular-nums;
       color: var(--eng-text);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      min-width: 0;
+    }
+
+    /* Name row: the value grows to fill the gap and the copy button
+       stays put at a fixed width, rather than the button drifting with a
+       long/short name the way it would inside a plain flex row. */
+    .si-insp-name-row b {
+      flex: 1;
+      text-align: right;
+      margin-right: 2px;
+    }
+
+    .si-insp-copy-btn {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      color: var(--eng-text-faint);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--eng-radius-sm);
+      cursor: pointer;
+    }
+
+    .si-insp-copy-btn:hover {
+      color: var(--eng-text);
+      border-color: var(--eng-border);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .si-insp-copy-btn.copied {
+      color: #8ef2a8;
+      font-size: 11px;
+      font-weight: 800;
+    }
+
+    /* Parent: a link, not a readout — same visual language as the copy
+       button (transparent until hovered) so it doesn't compete with the
+       real data rows around it. */
+    .si-insp-parent-link {
+      font-family: var(--eng-mono);
+      font-size: 10.5px;
+      font-weight: 700;
+      color: var(--eng-blue, #7dd3fc);
+      background: transparent;
+      border: none;
+      padding: 1px 4px;
+      border-radius: var(--eng-radius-sm);
+      cursor: pointer;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100%;
+    }
+
+    .si-insp-parent-link:hover {
+      background: rgba(125, 211, 252, 0.14);
+      text-decoration: underline;
     }
 
     .si-insp-sub {
@@ -1504,21 +1878,52 @@
       color: var(--eng-accent);
     }
 
-    /* Visible toggle — a real checkbox now (SceneInspector's inspector
-       fields became editable, not just readouts; see its buildInspectorFields). */
+    /* Visible toggle — an eye-icon button rather than a checkbox, so its
+       own state reads at a glance the way an actual eye does: open =
+       shown, slashed = hidden. Same icon-button treatment as the copy
+       button above, just larger (this one's the primary action in this
+       row, not an incidental one next to a value). */
     .si-insp-visible-row {
       display: flex;
       align-items: center;
       gap: 7px;
-      padding: 6px 0 2px;
-      cursor: pointer;
-      font-size: 11px;
-      color: var(--eng-text-dim);
+      padding: 7px 0 3px;
     }
 
-    .si-insp-visible-row input {
-      accent-color: var(--eng-accent);
+    .si-insp-eye-btn {
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      padding: 0;
+      color: var(--eng-accent);
+      background: var(--eng-accent-soft);
+      border: 1px solid rgba(232, 150, 30, 0.35);
+      border-radius: var(--eng-radius-sm);
       cursor: pointer;
+      transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    }
+
+    .si-insp-eye-btn:hover {
+      border-color: var(--eng-accent);
+    }
+
+    .si-insp-eye-btn.off {
+      color: var(--eng-text-faint);
+      background: rgba(255, 255, 255, 0.04);
+      border-color: var(--eng-border);
+    }
+
+    .si-insp-eye-btn.off:hover {
+      color: var(--eng-text-dim);
+      border-color: #3a3e45;
+    }
+
+    .si-insp-visible-row span {
+      font-size: 11px;
+      color: var(--eng-text-dim);
     }
 
     /* Position/Rotation/Scale — three axis fields per row, each a small
@@ -2231,8 +2636,10 @@
         <button id="er-btn-editor" title="Open the UI layout editor">✏️ Editor</button>
         <button id="er-btn-build" class="primary" title="Open the Builder panel">🛠 Builder</button>
       </div>
-      <button id="er-btn-viewer" title="Orbit, select, and edit objects in the live gameplay scene">🧭 3D Viewer/Editor</button>
-      <button id="er-btn-audio" title="Live frequency-spectrum readout of the game's background music">🎧 Audio Reactor</button>
+      <button id="er-btn-viewer" title="Orbit, select, and edit objects in the live gameplay scene">🧭 3D
+        Viewer/Editor</button>
+      <button id="er-btn-audio" title="Live frequency-spectrum readout of the game's background music">🎧 Audio
+        Reactor</button>
       <div id="engine-room-stats">
         <span>FPS</span><span class="val" id="er-fps">--</span>
         <span>Draw calls</span><span class="val" id="er-drawcalls">--</span>
@@ -2243,20 +2650,31 @@
           <canvas id="er-viewhelper" width="64" height="64"></canvas>
         </div>
       </div>
+      <!-- These two blocks are physically relocated into the 3D
+           Viewer/Editor's side panels while it's open (Scripts to the left
+           panel's lower half, Control Desk to the right panel) and moved
+           back here on exit — see moveEditorPanels() below. They're moved,
+           not duplicated: the Control Desk logic further down holds direct
+           element references, so relocating the nodes keeps every bit of it
+           working with no second implementation to keep in sync. -->
       <div id="engine-room-scripts">
-        <div class="er-section-title">📜 Scripts <span class="count" id="er-scripts-count"></span></div>
-        <div id="er-scripts-list"></div>
-        <div class="er-section-title">
-          🕹 Control Desk
-          <span class="er-cd-actions">
-            <button type="button" id="er-cd-debug" title="Also show private/protected fields, read-only, dimmed">🐞
-              Debug</button>
-            <button type="button" id="er-cd-save"
-              title="Write the live values of editable fields back into the script's source" disabled>💾 Save</button>
-          </span>
+        <div id="er-scripts-block">
+          <div class="er-section-title">📜 Scripts <span class="count" id="er-scripts-count"></span></div>
+          <div id="er-scripts-list"></div>
         </div>
-        <div id="er-controldesk-body">
-          <div class="er-cd-empty">Select a script above to inspect its live public fields.</div>
+        <div id="er-controldesk-block">
+          <div class="er-section-title">
+            🕹 Control Desk
+            <span class="er-cd-actions">
+              <button type="button" id="er-cd-debug" title="Also show private/protected fields, read-only, dimmed">🐞
+                Debug</button>
+              <button type="button" id="er-cd-save"
+                title="Write the live values of editable fields back into the script's source" disabled>💾 Save</button>
+            </span>
+          </div>
+          <div id="er-controldesk-body">
+            <div class="er-cd-empty">Select a script above to inspect its live public fields.</div>
+          </div>
         </div>
       </div>
       <div id="engine-room-footer">
@@ -2285,15 +2703,18 @@
         </div>
         <div class="builder-section">
           <div class="builder-section-label">Compression</div>
-          <label class="builder-checkbox-row" title="KHR_mesh_quantization + EXT_meshopt_compression — compact 16-bit-equivalent vertex precision, entropy-coded on top. Quantization bounds are computed per-mesh, so precision holds even on a huge environment. Natively supported by GLTFLoader — nothing extra to ship.">
+          <label class="builder-checkbox-row"
+            title="KHR_mesh_quantization + EXT_meshopt_compression — compact 16-bit-equivalent vertex precision, entropy-coded on top. Quantization bounds are computed per-mesh, so precision holds even on a huge environment. Natively supported by GLTFLoader — nothing extra to ship.">
             <input type="checkbox" id="builder-halffloat" checked />
             <span>Half Float mesh compression <span class="dim">— smaller GLBs, visually lossless</span></span>
           </label>
         </div>
         <div class="builder-section" style="margin-bottom: 0;">
           <div class="builder-section-label">Actions</div>
-          <button type="button" id="builder-build-btn"><span class="icon">🚀</span><span id="builder-build-btn-text">Build Now</span></button>
-          <button type="button" id="builder-report-btn" title="Build first — nothing to show yet" disabled><span class="icon">📊</span> Build Report</button>
+          <button type="button" id="builder-build-btn"><span class="icon">🚀</span><span
+              id="builder-build-btn-text">Build Now</span></button>
+          <button type="button" id="builder-report-btn" title="Build first — nothing to show yet" disabled><span
+              class="icon">📊</span> Build Report</button>
         </div>
       </div>
     </div>
@@ -2323,7 +2744,8 @@
             <div id="report-assets"></div>
           </div>
           <div id="report-unused-block" class="report-block">
-            <div class="report-block-label">🗑 Unused <span class="dim">— found in assets/, not referenced anywhere</span></div>
+            <div class="report-block-label">🗑 Unused <span class="dim">— found in assets/, not referenced
+                anywhere</span></div>
             <div id="report-unused"></div>
           </div>
           <div class="report-block">
@@ -2334,9 +2756,41 @@
       </div>
     </div>
   </div>
-  <button id="er-exit-3d" title="Exit 3D Viewer/Editor">Exit Editor</button>
-  <div id="si-hierarchy"></div>
-  <div id="si-inspector"></div>
+  <!-- 3D Viewer/Editor chrome: two full-height docks flanking the
+       viewport. The viewport itself is #device-frame (the same canvas
+       container the device-preview uses) — currentInsets() reserves these
+       two widths so it's laid out *between* them rather than underneath
+       them, and EditorViewport measures that container with a
+       ResizeObserver to drive the renderer/camera. That's what keeps the
+       scene undistorted at any panel width or window aspect: the projection
+       follows the real box, and nothing scales the world to fit. -->
+  <div id="editor-left" class="editor-dock">
+    <div class="editor-pane" id="editor-pane-hierarchy">
+      <div class="editor-pane-title">🌳 Hierarchy</div>
+      <div id="si-hierarchy"></div>
+    </div>
+    <div class="editor-pane" id="editor-pane-scripts">
+      <!-- #er-scripts-block is moved in here while the editor is open -->
+    </div>
+  </div>
+
+  <div id="editor-right" class="editor-dock">
+    <div class="editor-right-top">
+      <button id="er-exit-3d" title="Exit 3D Viewer/Editor">✕ Exit Editor</button>
+    </div>
+    <div class="editor-viewhelper-slot" id="editor-pane-viewhelper">
+      <!-- #engine-room-viewhelper-wrap is moved in here while the editor is open -->
+    </div>
+    <div class="editor-pane" id="editor-pane-inspector">
+      <div class="editor-pane-title">🎛 Inspector</div>
+      <div id="si-inspector"></div>
+    </div>
+    <div class="editor-pane" id="editor-pane-controldesk">
+      <!-- #er-controldesk-block is moved in here while the editor is open -->
+    </div>
+  </div>
+  <div id="editor-pick-banner">Click an object — in the Hierarchy or the viewport — to assign it. <b>Esc</b> to cancel.
+  </div>
   <div id="audio-reactor" class="eng-panel">
     <div class="eng-panel-header">
       <span class="dot"></span>
@@ -2346,7 +2800,8 @@
     <div id="audio-reactor-body">
       <div id="ar-empty">Waiting for the game to load…</div>
       <div id="ar-live" style="display:none">
-        <div id="ar-status"><span class="dot"></span><span id="ar-status-text">Stopped</span><span id="ar-level">— / 255</span></div>
+        <div id="ar-status"><span class="dot"></span><span id="ar-status-text">Stopped</span><span id="ar-level">— /
+            255</span></div>
         <canvas id="ar-canvas" width="236" height="72"></canvas>
       </div>
     </div>
@@ -2475,7 +2930,34 @@
       // reserve the space it would have used; the freecam viewport gets
       // the full height instead of leaving a blank strip where the bar
       // used to be.
-      return { top: freecamActive ? 0 : TOP_BAR_HEIGHT, left: 0, right: freecamActive ? 0 : ENGINE_ROOM_WIDTH };
+      // In the 3D Viewer/Editor the two editor docks reserve real space on
+      // both sides, and #device-frame — which IS the editor viewport — is
+      // laid out strictly between them. Widths come from the same CSS
+      // variables the docks are sized by, read back rather than duplicated
+      // as literals here, so the reservation and the actual panels can't
+      // drift apart.
+      if (freecamActive) {
+        return { top: 0, left: editorDockWidth("editor-left"), right: editorDockWidth("editor-right") };
+      }
+      return { top: TOP_BAR_HEIGHT, left: 0, right: ENGINE_ROOM_WIDTH };
+    }
+
+    /**
+     * Occupied width of an editor dock — measured off the element, not read
+     * from its CSS variable.
+     *
+     * The variable is a clamp(), and a custom property's computed value is
+     * an unresolved token stream ("clamp(150px, 20vw, 264px)"), not a
+     * length — parseFloat on it yields NaN, which silently became a 0 inset
+     * and let the viewport lay out full-width *underneath* both docks. The
+     * element's own border-box rect is the truth, resolves clamp() for
+     * free, and stays right if the widths ever become responsive in some
+     * other way. Works while the dock is hidden too: it's visibility-hidden
+     * (still laid out), not display:none.
+     */
+    function editorDockWidth(id) {
+      const el = document.getElementById(id);
+      return el ? el.getBoundingClientRect().width : 0;
     }
 
     function applyDeviceFrame() {
@@ -3217,6 +3699,9 @@
         cdBody.querySelectorAll("[data-field]").forEach((el) => {
           el.addEventListener(el.type === "checkbox" ? "change" : "input", onFieldEdit);
         });
+        cdBody.querySelectorAll("[data-pick]").forEach((el) => el.addEventListener("click", onPickClick));
+        cdBody.querySelectorAll("[data-unpick]").forEach((el) => el.addEventListener("click", onUnpickClick));
+        cdBody.querySelectorAll("[data-drop-field]").forEach(wireDropTarget);
       }
 
       function renderField(className, field, value, live) {
@@ -3235,6 +3720,31 @@
           const text = escapeHtml(summarize(value));
           control = '<span class="readonly-val" title="' + text + '">' + text + "</span>";
         }
+        // Scene-object fields (THREE.Object3D, THREE.Mesh, ...) get a Pick
+        // action: arm the 3D Viewer/Editor, then click the object either in
+        // the Hierarchy or directly in the viewport. What lands in the field
+        // is the real live object — same document, no serialization, exactly
+        // like __getInspectable's own contract. Which types qualify is
+        // decided by the engine (__editorIsPickableField -> objectAssignment
+        // .ts) rather than re-derived here, so there's one rule, not two.
+        const pickable = !isPrivate && typeof window.__editorIsPickableField === "function" && window.__editorIsPickableField(field.type);
+        // Object-capable fields double as drop targets for a Hierarchy row
+        // drag — the same assignment the ⊙ Pick button makes, just a
+        // different gesture (and the same dual affordance the UI editor's
+        // Layers -> Scripts panel already offers for UI elements). The
+        // declared type rides on the element so the drop handler can
+        // type-check without re-deriving which field it landed on.
+        const dropAttrs = pickable ? ' data-drop-class="' + className + '" data-drop-field="' + field.name + '" data-drop-type="' + escapeHtml(field.type || "") + '"' : "";
+        if (pickable) {
+          const armed = pickingField && pickingField.className === className && pickingField.fieldName === field.name;
+          control +=
+            '<button type="button" class="er-cd-pick' + (armed ? " picking" : "") + '" data-pick="' + field.name + '" data-pick-class="' + className + '" data-pick-type="' + escapeHtml(field.type || "") + '" title="Assign a scene object by clicking it in the Hierarchy or the 3D viewport">' +
+            (armed ? "◎ picking…" : "⊙ Pick") +
+            "</button>";
+          if (live && value !== undefined && value !== null) {
+            control += '<button type="button" class="er-cd-unpick" data-unpick="' + field.name + '" data-unpick-class="' + className + '" title="Clear this assignment">✕</button>';
+          }
+        }
         // Live, not static: field.assigned only reflects whether the
         // *declaration itself* has an initializer (e.g. `x: number;` has
         // none, even though the constructor always assigns a real value a
@@ -3249,7 +3759,7 @@
         const assignedClass = assigned ? "yes" : "no";
         const assignedLabel = assigned ? "assigned" : "undefined";
         return (
-          '<div class="er-cd-field' + (isPrivate ? " private" : "") + '"><span class="name" title="' + field.name + " : " + (field.type || "") + '">' + field.name + "</span>" +
+          '<div class="er-cd-field' + (isPrivate ? " private" : "") + '"' + dropAttrs + '><span class="name" title="' + field.name + " : " + (field.type || "") + '">' + field.name + "</span>" +
           '<span class="er-cd-assigned ' + assignedClass + '">' + assignedLabel + "</span>" +
           control +
           "</div>"
@@ -3270,6 +3780,151 @@
 
       function escapeHtml(s) {
         return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+      }
+
+      /**
+       * Makes one Control Desk field row accept a Hierarchy row drag.
+       *
+       * dragover has to preventDefault() on every single event or the
+       * browser refuses the drop entirely (its default for a dragover is
+       * "not a drop target"), which is also the only way to set a drop
+       * effect. Validation happens on hover via __editorDragAssign's
+       * commit:false mode, so an incompatible type shows as refused before
+       * the user lets go rather than failing afterwards — the payload
+       * itself is unreadable until drop (see EditorDragSource), which is
+       * exactly why the engine keeps the dragged object alongside it.
+       */
+      function wireDropTarget(row) {
+        const declaredType = row.dataset.dropType;
+
+        row.addEventListener("dragover", (e) => {
+          const mime = window.__editorDragMime;
+          if (!mime || !e.dataTransfer || !e.dataTransfer.types.includes(mime)) return;
+          e.preventDefault();
+          const verdict = typeof window.__editorDragAssign === "function" ? window.__editorDragAssign(declaredType, false) : undefined;
+          const okay = !!(verdict && verdict.ok);
+          e.dataTransfer.dropEffect = okay ? "copy" : "none";
+          row.classList.toggle("drop-ok", okay);
+          row.classList.toggle("drop-bad", !okay);
+        });
+
+        row.addEventListener("dragleave", () => row.classList.remove("drop-ok", "drop-bad"));
+
+        row.addEventListener("drop", (e) => {
+          const mime = window.__editorDragMime;
+          if (!mime || !e.dataTransfer || !e.dataTransfer.types.includes(mime)) return;
+          e.preventDefault();
+          row.classList.remove("drop-ok", "drop-bad");
+          const uuid = e.dataTransfer.getData(mime);
+          const result = typeof window.__editorDragAssign === "function" ? window.__editorDragAssign(declaredType, true, uuid) : undefined;
+          if (!result || !result.ok) {
+            cdPickHint((result && result.reason) || "That object can't be assigned to this field.");
+            return;
+          }
+          const className = row.dataset.dropClass;
+          const fieldName = row.dataset.dropField;
+          const instance = typeof window.__getInspectable === "function" ? window.__getInspectable(className) : undefined;
+          if (instance) instance[fieldName] = result.object;
+          // Identical persistence path to a ⊙ Pick assignment — queued now,
+          // written once on Exit Editor (see queueSceneBinding).
+          queueSceneBinding({
+            className,
+            fieldName,
+            objectPath: result.objectPath || "",
+            objectName: result.objectName || "",
+          });
+          renderControlDesk(true);
+        });
+      }
+
+      /** The field currently awaiting a picked object, or null. Only ever one at a time — arming a second replaces the first (EditorObjectPicker enforces the same). */
+      let pickingField = null;
+
+      function onPickClick(e) {
+        const btn = e.currentTarget;
+        const className = btn.dataset.pickClass;
+        const fieldName = btn.dataset.pick;
+        // Clicking the armed button again disarms it, so Pick is a toggle
+        // rather than something you can only escape with the Esc key.
+        if (pickingField && pickingField.className === className && pickingField.fieldName === fieldName) {
+          window.__editorCancelPick && window.__editorCancelPick();
+          finishPick();
+          return;
+        }
+        if (typeof window.__editorRequestPick !== "function") return;
+        const armed = window.__editorRequestPick(btn.dataset.pickType, {
+          onResolve: (object) => {
+            const instance = typeof window.__getInspectable === "function" ? window.__getInspectable(className) : undefined;
+            if (instance) instance[fieldName] = object;
+            // Assigning onto the live instance only lasts as long as this
+            // instance does — the next reload rebuilds the scene and the
+            // field is undefined again. Queue it so Exit Editor persists it
+            // to src/game/sceneBindings.json, which Game.ts re-applies on
+            // every boot (see engine/SceneBindings.ts). Queued rather than
+            // written now on purpose: writing a watched source file mid-pick
+            // hot-reloads the game out from under the session doing the
+            // picking. See queueSceneBinding.
+            const id = typeof window.__editorObjectPath === "function" ? window.__editorObjectPath(object) : undefined;
+            queueSceneBinding({
+              className,
+              fieldName,
+              objectPath: (id && id.objectPath) || "",
+              objectName: (id && id.objectName) || object.name || "",
+            });
+            finishPick();
+            renderControlDesk(true);
+          },
+          // The pick stays armed after a type mismatch (see
+          // EditorObjectPicker.offerObject) — just say why and let the next
+          // click try again, rather than making the user re-arm every miss.
+          onReject: (reason) => {
+            cdPickHint(reason);
+          },
+          onCancel: () => finishPick(),
+        });
+        if (!armed) {
+          // Returns false when the editor isn't open — there's nothing to
+          // click in, so say so instead of silently doing nothing.
+          cdPickHint("Open the 3D Viewer/Editor first — picking needs a scene to click in.");
+          return;
+        }
+        pickingField = { className, fieldName };
+        showEditorPickBanner();
+        renderControlDesk(true);
+      }
+
+      function finishPick() {
+        pickingField = null;
+        hideEditorPickBanner();
+        renderControlDesk(true);
+      }
+
+      function onUnpickClick(e) {
+        const btn = e.currentTarget;
+        const className = btn.dataset.unpickClass;
+        const fieldName = btn.dataset.unpick;
+        const instance = typeof window.__getInspectable === "function" ? window.__getInspectable(className) : undefined;
+        if (instance) instance[fieldName] = undefined;
+        // Same deferral as assigning — clearing a field has to outlive this
+        // session too, or the old binding comes straight back on reload.
+        queueSceneBinding({ className, fieldName, remove: true });
+        renderControlDesk(true);
+      }
+
+      /** Transient one-line message under the Control Desk title — used for pick rejections, which are expected and shouldn't read as errors. */
+      function cdPickHint(message) {
+        let hint = document.getElementById("er-cd-pick-hint");
+        if (!hint) {
+          hint = document.createElement("div");
+          hint.id = "er-cd-pick-hint";
+          hint.className = "er-cd-empty";
+          hint.style.color = "var(--eng-warn, #ffcc66)";
+          hint.style.fontStyle = "normal";
+          cdBody.parentElement.insertBefore(hint, cdBody);
+        }
+        hint.textContent = message;
+        clearTimeout(cdPickHint.timer);
+        cdPickHint.timer = setTimeout(() => hint.remove(), 3600);
       }
 
       function onFieldEdit(e) {
@@ -3299,22 +3954,120 @@
     // editor-open handler above already hides.
     const viewerBtn = document.getElementById("er-btn-viewer");
     const exitViewerBtn = document.getElementById("er-exit-3d");
-    const hierarchyPanel = document.getElementById("si-hierarchy");
-    const inspectorPanel = document.getElementById("si-inspector");
     const gizmoToolbar = document.getElementById("si-gizmo-toolbar");
+    const editorLeft = document.getElementById("editor-left");
+    const editorRight = document.getElementById("editor-right");
+    const editorScriptsPane = document.getElementById("editor-pane-scripts");
+    const editorControlDeskPane = document.getElementById("editor-pane-controldesk");
+    const editorViewHelperSlot = document.getElementById("editor-pane-viewhelper");
+    const engineRoomScripts = document.getElementById("engine-room-scripts");
+    const scriptsBlock = document.getElementById("er-scripts-block");
+    const controlDeskBlock = document.getElementById("er-controldesk-block");
+    const viewHelperWrap = document.getElementById("engine-room-viewhelper-wrap");
+    const engineRoomBody = document.getElementById("engine-room-body");
+
+    /**
+     * Relocates the Scripts block, Control Desk block, and the view-helper
+     * gizmo between the Engine Room dock and the editor docks.
+     *
+     * These are *moved*, not duplicated. Every one of them is driven by
+     * JS that holds direct element references (the Control Desk IIFE
+     * above; ViewHelperWidget's canvas, which keeps its WebGL context
+     * across a re-parent) — so relocating the nodes carries all of that
+     * behavior along with them, with no second copy of Control Desk to
+     * keep in sync and no need for the editor to know how any of it works.
+     */
+    function moveEditorPanels(intoEditor) {
+      if (intoEditor) {
+        editorScriptsPane.appendChild(scriptsBlock);
+        editorControlDeskPane.appendChild(controlDeskBlock);
+        if (viewHelperWrap) editorViewHelperSlot.appendChild(viewHelperWrap);
+      } else {
+        engineRoomScripts.appendChild(scriptsBlock);
+        engineRoomScripts.appendChild(controlDeskBlock);
+        // Back to its original slot: after the stats readout, before the
+        // scripts section — appendChild would drop it at the bottom.
+        if (viewHelperWrap) engineRoomBody.insertBefore(viewHelperWrap, engineRoomScripts);
+      }
+    }
+
+    /**
+     * Scene-object assignments made during this editor session, held in
+     * memory until Exit Editor flushes them (POST /save-scene-bindings).
+     *
+     * Deferred deliberately. src/game/sceneBindings.json is a real source
+     * file inside main.ts's module graph, so writing it triggers Vite's
+     * watcher and hot-reloads the game — mid-session that tears down the
+     * very scene you're picking objects out of, right as you pick them.
+     * Batching to a single write on exit means exactly one reload, at the
+     * moment you've said you're done, which is also when re-applying the
+     * bindings is what you actually want to see.
+     *
+     * Keyed by class+field so re-assigning the same field twice in one
+     * session collapses to one edit rather than two conflicting ones.
+     */
+    const pendingSceneBindings = new Map();
+
+    function queueSceneBinding(edit) {
+      pendingSceneBindings.set(edit.className + "." + edit.fieldName, edit);
+      updateExitButtonPending();
+    }
+
+    function updateExitButtonPending() {
+      const n = pendingSceneBindings.size;
+      const btn = document.getElementById("er-exit-3d");
+      btn.textContent = n > 0 ? "\u2715 Exit & Save (" + n + ")" : "\u2715 Exit Editor";
+      btn.classList.toggle("has-pending", n > 0);
+      btn.title = n > 0 ? n + " assignment" + (n === 1 ? "" : "s") + " will be written to src/game/sceneBindings.json on exit" : "Exit 3D Viewer/Editor";
+    }
+
+    /** Writes every queued assignment in one request. Resolves either way — a dead dev API shouldn't trap you inside the editor. */
+    async function flushSceneBindings() {
+      if (pendingSceneBindings.size === 0) return;
+      const edits = [...pendingSceneBindings.values()];
+      try {
+        const res = await fetch("http://127.0.0.1:8001/save-scene-bindings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ edits }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "save-scene-bindings failed");
+        pendingSceneBindings.clear();
+        updateExitButtonPending();
+      } catch (err) {
+        console.error("3D Editor: couldn't persist scene assignments — they stay queued for the next exit.", err);
+      }
+    }
+
+    /* Pick-mode hint bar. Shown while Control Desk has armed an object
+       assignment, so it's unmistakable that the next click assigns rather
+       than selects. Declared at this scope (not inside the Control Desk
+       IIFE) because both that IIFE and the editor teardown above call it —
+       function declarations hoist, so the earlier IIFE can reach it. */
+    const editorPickBanner = document.getElementById("editor-pick-banner");
+
+    function showEditorPickBanner() {
+      editorPickBanner.classList.add("visible");
+    }
+
+    function hideEditorPickBanner() {
+      editorPickBanner.classList.remove("visible");
+    }
 
     function setFreecamUI(on) {
       freecamActive = on;
       engineRoom.style.display = on ? "none" : "";
-      exitViewerBtn.classList.toggle("visible", on);
-      hierarchyPanel.classList.toggle("visible", on);
-      inspectorPanel.classList.toggle("visible", on);
+      editorLeft.classList.toggle("visible", on);
+      editorRight.classList.toggle("visible", on);
       gizmoToolbar.classList.toggle("visible", on);
       deviceTopbar.classList.toggle("hidden-for-3d", on);
-      // The 3D Viewer/Editor always orbits the full window — a letterboxed
-      // Portrait/Landscape preview means nothing for a free camera — so
-      // force "Real" on entry, remembering whatever mode was actually
-      // active so exiting hands it back exactly as you left it.
+      moveEditorPanels(on);
+      if (!on) hideEditorPickBanner();
+      // The 3D Viewer/Editor always uses the full space between its docks —
+      // a letterboxed Portrait/Landscape preview means nothing for a free
+      // camera — so force "Real" on entry, remembering whatever mode was
+      // actually active so exiting hands it back exactly as you left it.
       if (on) {
         preFreecamSimMode = simMode;
         simMode = "real";
@@ -3324,12 +4077,32 @@
         document.querySelectorAll("#device-topbar button").forEach((b) => b.classList.toggle("active", b.dataset.sim === simMode));
         preFreecamSimMode = null;
       }
+      // Order matters on entry: lay the viewport box out *first* (the docks
+      // have already claimed their space above, and currentInsets() now
+      // reports it), then hand the editor a container that's already the
+      // right size. Doing it the other way round would build the editor
+      // camera against the pre-editor box and leave the first frames
+      // projected at the wrong aspect until a ResizeObserver callback
+      // corrected it.
+      applyDeviceFrameInstant();
       window.__setFreecamActive && window.__setFreecamActive(on);
-      applyDeviceFrameInstant(); // Engine Room/device-topbar just showed/hid, and simMode may have just changed — the game view's available width and shape changed with it. Instant, not animated — see its own doc comment for why this specific jump can't use the normal transition.
+      // Belt and braces: the editor measures its container on construction
+      // and observes it continuously, but the docks' own 0.2s show/hide
+      // transition means the box can still settle a frame or two later.
+      applyDeviceFrameInstant();
     }
 
     viewerBtn.addEventListener("click", () => setFreecamUI(true));
-    exitViewerBtn.addEventListener("click", () => setFreecamUI(false));
+    exitViewerBtn.addEventListener("click", async () => {
+      // Persist before leaving: the write is what triggers the single hot
+      // reload, and that reload is what re-applies the assignments through
+      // Game.ts's applySceneBindings — so it has to land after the editor
+      // has stopped being the thing rendering.
+      exitViewerBtn.disabled = true;
+      await flushSceneBindings();
+      exitViewerBtn.disabled = false;
+      setFreecamUI(false);
+    });
 
     // Engine Room: Audio Reactor — dev-only live spectrum of whatever
     // SoundHandler is actually playing, via IonEngine's __getAudioAnalyser/

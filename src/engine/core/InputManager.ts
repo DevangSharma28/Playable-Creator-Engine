@@ -86,6 +86,20 @@ export class InputManager {
 
   private firedFirstInput = false;
 
+  /**
+   * Set false while something else legitimately owns the keyboard — the
+   * dev 3D Viewer/Editor does this for its whole session (see
+   * Game.setFreecam). W/A/S/D here and the editor's W/E/R/Q gizmo
+   * shortcuts both listen on `window`, so they can't be separated by
+   * event propagation (stopPropagation does nothing between two listeners
+   * on the same target, and stopImmediatePropagation only reaches
+   * listeners registered later — this one is registered first, in Game's
+   * constructor). Suspending is the honest fix: without it, pressing W to
+   * switch the gizmo to Move also counted as the player's very first
+   * input and started the background music mid-edit.
+   */
+  private enabled = true;
+
   constructor(
     target: EventTarget = window,
     /** Fired once, on whichever comes first: a pointerdown or a movement keydown. Same purpose as DynamicJoystick's own constructor param of the same name (see Game.ts) — a keyboard-only desktop tester needs this too, or nothing ever unlocks audio for them. */
@@ -102,6 +116,18 @@ export class InputManager {
     // mid-press (alt-tab, a devtools breakpoint) — without this, keyboardAxis
     // could get stuck non-zero forever, moving the player with no key held.
     window.addEventListener("blur", this.onBlur);
+  }
+
+  /** Suspends/resumes keyboard *and* pointer gesture handling. Suspending clears any held keys immediately, so a key still down when the editor opens can't leave the axis stuck non-zero for the whole session. */
+  setEnabled(enabled: boolean): void {
+    if (this.enabled === enabled) return;
+    this.enabled = enabled;
+    if (!enabled) {
+      this.heldKeys.clear();
+      this.recomputeKeyboardAxis();
+      this.pointerId = null;
+      this.dragging = false;
+    }
   }
 
   onTap(fn: (info: TapInfo) => void): InputHandle {
@@ -148,6 +174,7 @@ export class InputManager {
   }
 
   private onPointerDown = (e: PointerEvent): void => {
+    if (!this.enabled) return;
     if (e.button !== 0 || this.pointerId !== null) return; // one gesture at a time — a second finger down mid-gesture is ignored, not layered on top
     this.pointerId = e.pointerId;
     this.downX = e.clientX;
@@ -191,6 +218,7 @@ export class InputManager {
   };
 
   private onKeyDown = (e: KeyboardEvent): void => {
+    if (!this.enabled) return; // the 3D Viewer/Editor owns the keyboard — see setEnabled
     if (this.isTypingTarget()) return; // never steal keystrokes from Control Desk / the UI editor's own text fields — same guard SceneInspector.onKeyDown already uses
     const key = e.key.toLowerCase();
     if (!(key in KEY_AXIS)) return;
