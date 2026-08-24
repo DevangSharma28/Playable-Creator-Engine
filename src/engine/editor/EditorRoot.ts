@@ -12,6 +12,12 @@ import type { ColliderVisuals } from "./ColliderVisuals";
 import { EditorDragSource, OBJECT_DRAG_MIME } from "./EditorDragSource";
 import { sceneObjectPath } from "../SceneBindings";
 import { EditorColliders } from "./EditorColliders";
+import { EditorParticles } from "./EditorParticles";
+import { EditorHistory } from "./EditorHistory";
+import type { ParticleVisuals } from "./ParticleVisuals";
+import type { ParticleManager } from "../particles/ParticleManager";
+import type { ParticleSystemConfig } from "../particles/ParticleTypes";
+import { serializeParticles } from "../particles/ParticleSerialization";
 import type { ColliderManager } from "../collision/ColliderManager";
 import type { ColliderData, ColliderShape } from "../collision/ColliderTypes";
 
@@ -32,6 +38,14 @@ export interface EditorRootOptions {
   colliderVisuals: ColliderVisuals;
   /** Fired the first time a collider edit happens in a session, so the dev page's Exit button can show there's something to save. */
   onColliderDirty?: () => void;
+  /** The live ION Particle registry — the editor edits the same emitters gameplay runs, never a copy. */
+  particleManager: ParticleManager;
+  /** The particle gizmo layer. Owned by Game for the same reason ColliderVisuals is, borrowed here for the session. */
+  particleVisuals: ParticleVisuals;
+  /** Fired the first time a particle edit happens, so the Exit button can count it alongside collider and binding changes. */
+  onParticleDirty?: () => void;
+  /** Resolves a particle texture path through the game's AssetLoader — the editor never loads assets itself. */
+  resolveTexture?: (path: string) => THREE.Texture | undefined;
 }
 
 /**
@@ -87,6 +101,16 @@ export interface FieldPickCallbacks {
  */
 export class EditorRoot {
   readonly selection = new EditorSelection();
+  /**
+   * One undo stack for every mode.
+   *
+   * Owned here rather than per-editor precisely so that switching between
+   * Configure Colliders and Particle System doesn't lose it — the two
+   * editors push into the same history and a single Undo walks back
+   * through whichever actions actually happened, in order, regardless of
+   * which mode each was performed in.
+   */
+  readonly history = new EditorHistory();
   private readonly dragSource = new EditorDragSource();
 
   private readonly editorCamera: THREE.PerspectiveCamera;
@@ -99,16 +123,27 @@ export class EditorRoot {
   private readonly inspector: EditorInspector;
   /** "Configure Colliders" mode: authoring, wireframe visualization, and the Inspector's collider panel. */
   private readonly editorColliders: EditorColliders;
+  /** "Particle System" mode: authoring, emission-volume gizmos, live preview transport, and the Inspector's sixteen module panels. */
+  private readonly editorParticles: EditorParticles;
   private onPickStateChange: ((pending: boolean) => void) | undefined;
   private readonly rendererRef: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
   private readonly colliderManager: ColliderManager;
   private readonly colliderVisuals: ColliderVisuals;
+  private readonly particleManager: ParticleManager;
+  private readonly particleVisuals: ParticleVisuals;
   private readonly viewportContainerRect: () => DOMRect;
+  /** Wall clock for the particle preview. Gameplay is paused for the whole session, so the editor has to carry its own clock or nothing would animate. */
+  private lastFrameMs = performance.now();
+  private readonly unsubscribeDrag: () => void;
+
+  /** Held so dispose() can hand the particle system's camera back — see its own note there. */
+  private readonly gameplayCameraRef: THREE.PerspectiveCamera;
 
   constructor(opts: EditorRootOptions) {
     this.rendererRef = opts.renderer;
     this.scene = opts.scene;
+    this.gameplayCameraRef = opts.gameplayCamera;
     this.viewportContainerRect = () => opts.viewportContainer.getBoundingClientRect();
 
     this.editorCamera = opts.gameplayCamera.clone();
@@ -142,9 +177,15 @@ export class EditorRoot {
       selection: this.selection,
       isGizmoBusy: () => this.sceneInspector.isGizmoBusy(),
       onPickStateChange: (pending) => this.onPickStateChange?.(pending),
-      // Clicking a collider's translucent volume selects the collider, not
-      // the drawing of it — see EditorColliders.resolveHit.
-      resolveHit: (object) => this.editorColliders.resolveHit(object),
+      // Clicking a collider's translucent volume selects the collider, and
+      // an emission-volume wireframe selects its emitter — never the
+      // drawing itself, which would attach the gizmo to the gizmo. See
+      // each mode's own resolveHit.
+      resolveHit: (object) => {
+        const asCollider = this.editorColliders.resolveHit(object);
+        if (asCollider !== object) return asCollider;
+        return this.editorParticles.resolveHit(object);
+      },
     });
 
     // Before the picker's consumers below, and before the Inspector, so its
@@ -163,7 +204,39 @@ export class EditorRoot {
       selection: this.selection,
       picker: this.picker,
       getFocusPoint: () => this.orbitControls.target.clone(),
+      history: this.history,
       onDirty: opts.onColliderDirty,
+    });
+
+    // Same shape and the same ordering reason as the collider block above:
+    // its gizmos must be in the shared `excluded` set before the Hierarchy
+    // and Inspector are built, or they'd be listed as scene content.
+    this.particleManager = opts.particleManager;
+    this.particleVisuals = opts.particleVisuals;
+    this.particleVisuals.setExclusionSink(this.sceneInspector.ownedHelpers);
+    // The editor renders through its own camera, so the particle system has
+    // to billboard and distance-sort against *that* one for the session —
+    // otherwise every particle faces wherever the gameplay camera happens
+    // to be pointing while you orbit around them.
+    this.particleManager.setCamera(this.editorCamera);
+    this.editorParticles = new EditorParticles({
+      manager: opts.particleManager,
+      visuals: opts.particleVisuals,
+      scene: opts.scene,
+      selection: this.selection,
+      picker: this.picker,
+      getFocusPoint: () => this.orbitControls.target.clone(),
+      resolveTexture: opts.resolveTexture,
+      history: this.history,
+      onDirty: opts.onParticleDirty,
+    });
+
+    // One gizmo drag = one undo entry. Both editors get the begin/end
+    // edge; each ignores it unless the drag is actually on something it
+    // owns, so there's no need to know which mode is active here.
+    this.unsubscribeDrag = this.sceneInspector.onGizmoDrag((dragging) => {
+      this.editorColliders.onGizmoDrag(dragging);
+      this.editorParticles.onGizmoDrag(dragging);
     });
 
     this.hierarchy = new EditorHierarchy({
@@ -180,14 +253,61 @@ export class EditorRoot {
       dragMime: OBJECT_DRAG_MIME,
     });
     // The Inspector renders whatever sections its providers hand back and
-    // knows nothing about colliders — see InspectorSections.ts.
+    // knows nothing about colliders or particles — see InspectorSections.ts.
     this.inspector.addSectionProvider(this.editorColliders);
+    this.inspector.addSectionProvider(this.editorParticles);
   }
 
   /** "Configure Colliders" mode and its authoring operations. */
   get colliders(): EditorColliders {
     return this.editorColliders;
   }
+
+  /** "Particle System" mode and its authoring operations. */
+  get particles(): EditorParticles {
+    return this.editorParticles;
+  }
+
+  // -----------------------------------------------------------------------
+  // Undo / redo — one stack across every mode.
+  // -----------------------------------------------------------------------
+
+  undo(): boolean {
+    return this.history.undo();
+  }
+  redo(): boolean {
+    return this.history.redo();
+  }
+  /** Everything the toolbars need to paint their Undo/Redo/Save buttons in one read. */
+  getHistoryState(): { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string; colliderDirty: boolean; particleDirty: boolean; depth: number } {
+    return {
+      canUndo: this.history.canUndo,
+      canRedo: this.history.canRedo,
+      undoLabel: this.history.undoLabel ?? "",
+      redoLabel: this.history.redoLabel ?? "",
+      colliderDirty: this.editorColliders.hasChanges,
+      particleDirty: this.editorParticles.hasChanges,
+      depth: this.history.depth,
+    };
+  }
+  /** Lets the dev page repaint its buttons the moment anything is pushed, undone, or redone, rather than polling. */
+  onHistoryChange(cb: () => void): () => void {
+    return this.history.subscribe(cb);
+  }
+
+  // There is deliberately no "mark everything saved" call.
+  //
+  // There used to be, and it silently destroyed work: colliders and
+  // particles are two independent files, but one shared call cleared both
+  // dirty flags. Saving one therefore disarmed the other — `flushParticles`
+  // would see `hasParticleChanges === false` and return without writing, so
+  // the particle edits lived only in memory and vanished on the next
+  // reload. Exit Editor hit it every time, since it flushes colliders
+  // first.
+  //
+  // Each file now marks only itself (markCollidersSaved /
+  // markParticlesSaved below), which makes the cross-clear unrepresentable
+  // rather than merely fixed.
 
   /** The camera the scene is rendered through while the editor is open. */
   get camera(): THREE.PerspectiveCamera {
@@ -204,6 +324,17 @@ export class EditorRoot {
     // frame's. Gameplay is paused while the editor is open, so nothing else
     // is syncing colliders.
     this.editorColliders.update();
+
+    // The editor's own clock. Gameplay's dt never arrives here (IonEngine
+    // stops calling update() the moment the editor opens), so a live
+    // particle preview has to be driven from wall time — capped for the
+    // same reason the engine's own loop caps it: a stalled frame must not
+    // advance the simulation by a whole second at once.
+    const now = performance.now();
+    const dt = Math.min((now - this.lastFrameMs) / 1000, 0.05);
+    this.lastFrameMs = now;
+    this.editorParticles.update(dt);
+
     this.hierarchy.refreshIfChanged();
     this.inspector.refresh();
   }
@@ -232,8 +363,90 @@ export class EditorRoot {
   get hasColliderChanges(): boolean {
     return this.editorColliders.hasChanges;
   }
+  /** Called after colliders.json is written. Also advances the shared history's clean point, so undoing back to here reports clean. */
   markCollidersSaved(): void {
     this.editorColliders.markSaved();
+    this.history.markSaved();
+  }
+
+  // -----------------------------------------------------------------------
+  // Particle authoring — thin passthroughs; the behavior is EditorParticles'.
+  // -----------------------------------------------------------------------
+
+  /** Toolbar "Particle System". Returns the new mode state. */
+  setParticleMode(active: boolean): boolean {
+    return this.editorParticles.setActive(active);
+  }
+  createParticleSystem(presetKey?: string): void {
+    this.editorParticles.createSystem(presetKey);
+  }
+  addParticleEmitter(): void {
+    this.editorParticles.addEmitter();
+  }
+  deleteSelectedEmitter(): boolean {
+    return this.editorParticles.removeSelected();
+  }
+  duplicateSelectedEmitter(): boolean {
+    const selected = this.editorParticles.selected;
+    if (!selected) return false;
+    return !!this.editorParticles.duplicateEmitter(selected);
+  }
+  particlePlay(): void {
+    this.editorParticles.play();
+  }
+  particlePause(): void {
+    this.editorParticles.pause();
+  }
+  particleStop(): void {
+    this.editorParticles.stop();
+  }
+  particleRestart(): void {
+    this.editorParticles.restart();
+  }
+  particleClear(): void {
+    this.editorParticles.clearParticles();
+  }
+  get isParticlePreviewPlaying(): boolean {
+    return this.editorParticles.isPreviewPlaying;
+  }
+  toggleParticleGizmos(kind: "shapes" | "direction" | "bounds"): boolean {
+    if (kind === "shapes") {
+      this.particleVisuals.setShowShapes(!this.particleVisuals.showingShapes);
+      return this.particleVisuals.showingShapes;
+    }
+    if (kind === "direction") {
+      this.particleVisuals.setShowDirection(!this.particleVisuals.showingDirection);
+      return this.particleVisuals.showingDirection;
+    }
+    this.particleVisuals.setShowBounds(!this.particleVisuals.showingBounds);
+    return this.particleVisuals.showingBounds;
+  }
+  /** Every system the editor owns, as one file's worth of records for src/game/particles.json. */
+  serializeParticles(): ParticleSystemConfig[] {
+    return serializeParticles(this.particleManager, this.scene);
+  }
+  get hasParticleChanges(): boolean {
+    return this.editorParticles.hasChanges;
+  }
+  /** Called after particles.json is written. Marks only the particle side — see the note above markCollidersSaved. */
+  markParticlesSaved(): void {
+    this.editorParticles.markSaved();
+    this.history.markSaved();
+  }
+  getParticleStats(): ReturnType<ParticleManager["getStats"]> {
+    return this.particleManager.getStats();
+  }
+  /**
+   * The preset list the toolbar's dropdown is built from.
+   *
+   * Reached through here rather than imported directly by Game, so the
+   * preset table stays inside the editor module tree and tree-shakes out
+   * of a production build. Importing it game-side shipped all thirteen
+   * preset configs into dist/index.html for a dropdown that only ever
+   * exists in the editor — verified by grepping the built file.
+   */
+  getParticlePresets(): { key: string; label: string; description: string }[] {
+    return EditorParticles.presets;
   }
 
   /**
@@ -365,6 +578,11 @@ export class EditorRoot {
 
   dispose(): void {
     this.onPickStateChange = undefined;
+    this.unsubscribeDrag();
+    // Releases anything a delete command was holding alive. Deliberately
+    // the last word on those objects: a detached collider or emitter that
+    // no command can ever restore has nothing else keeping it reachable.
+    this.history.clear();
     this.resizeManager.dispose();
     // Before sceneInspector: the collider wireframes live in that class's
     // `ownedHelpers` set, and removing them after it has cleared the set
@@ -374,6 +592,14 @@ export class EditorRoot {
     // in-game DEV debug toggle draws the same ones), so they're released
     // from the editor's exclusion set rather than destroyed.
     this.colliderVisuals.setExclusionSink(undefined);
+    // Same ordering and the same hand-back for the particle gizmos.
+    this.editorParticles.dispose();
+    this.particleVisuals.setExclusionSink(undefined);
+    // Point the particle system back at gameplay's own camera. The editor
+    // camera stops existing with this instance, and a billboard shader
+    // reading a dead camera's matrix would freeze every particle facing
+    // wherever the editor was last looking.
+    this.particleManager.setCamera(this.gameplayCameraRef);
     this.picker.dispose();
     this.hierarchy.dispose();
     this.inspector.dispose();

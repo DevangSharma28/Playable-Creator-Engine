@@ -15,9 +15,9 @@
       "attachName": "",
       "offset": {
         "position": [
-          3.3517,
+          3.1331,
           1,
-          -0.163
+          -0.8502
         ],
         "rotation": [
           0,
@@ -48,9 +48,42 @@
       "attachName": "",
       "offset": {
         "position": [
-          -5.35,
+          -7.6086,
           1,
-          -0.1314
+          -6.3028
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1.9042
+        ]
+      },
+      "size": [
+        0.3,
+        2,
+        8
+      ]
+    },
+    {
+      "id": "col_rwnc5oawgr",
+      "name": "Box Collider",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh011",
+      "attachName": "chairmesh011",
+      "offset": {
+        "position": [
+          2.8448,
+          0.5605,
+          -1.9431
         ],
         "rotation": [
           0,
@@ -64,26 +97,26 @@
         ]
       },
       "size": [
-        0.6,
-        2,
-        8
+        0.8138866424560547,
+        1.1210961937904358,
+        0.8304753303527832
       ]
     },
     {
-      "id": "col_t2c48z5bgn",
+      "id": "col_bq0ahzbgqo",
       "name": "Box Collider 1",
       "shape": "box",
       "isTrigger": false,
       "enabled": true,
       "tag": "Untagged",
       "mask": [],
-      "attachPath": "",
-      "attachName": "",
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh013",
+      "attachName": "chairmesh013",
       "offset": {
         "position": [
-          3.3763,
-          0.2156,
-          -1.6129
+          0.0063,
+          0.5605,
+          0.0977
         ],
         "rotation": [
           0,
@@ -97,26 +130,26 @@
         ]
       },
       "size": [
-        3.4,
-        1,
-        1
+        0.8138868808746338,
+        1.1210961937904358,
+        0.8304753303527832
       ]
     },
     {
-      "id": "col_mqsc9dboyd",
-      "name": "Cylinder Collider",
-      "shape": "cylinder",
+      "id": "col_6hzeofc3zo",
+      "name": "Box Collider 2",
+      "shape": "box",
       "isTrigger": false,
       "enabled": true,
       "tag": "Untagged",
       "mask": [],
-      "attachPath": "Scene/Armature",
-      "attachName": "Armature",
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh015",
+      "attachName": "chairmesh015",
       "offset": {
         "position": [
-          0,
-          0,
-          0
+          0.0063,
+          0.5605,
+          0.0977
         ],
         "rotation": [
           0,
@@ -129,8 +162,305 @@
           1
         ]
       },
-      "radius": 0.5,
-      "height": 2
+      "size": [
+        0.8138866424560547,
+        1.1210961937904358,
+        0.8304753303527832
+      ]
+    },
+    {
+      "id": "col_bhccsjc9gq",
+      "name": "Box Collider 3",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh014",
+      "attachName": "chairmesh014",
+      "offset": {
+        "position": [
+          0.0063,
+          0.5605,
+          0.0977
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        0.8138868808746338,
+        1.1210961937904358,
+        0.8304753303527832
+      ]
+    },
+    {
+      "id": "col_tipd3tcdxq",
+      "name": "Box Collider 4",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh012",
+      "attachName": "chairmesh012",
+      "offset": {
+        "position": [
+          0.0063,
+          0.5605,
+          0.0977
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        0.8138868808746338,
+        1.1210961937904358,
+        0.8304753303527832
+      ]
+    },
+    {
+      "id": "col_mcsuaeea0o",
+      "name": "Arena Wall 1",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Solid",
+      "mask": [],
+      "attachPath": "",
+      "attachName": "",
+      "offset": {
+        "position": [
+          5.8022,
+          1,
+          -5.9825
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1.9042
+        ]
+      },
+      "size": [
+        0.3,
+        2,
+        7.8
+      ]
+    },
+    {
+      "id": "col_3yt2zmedev",
+      "name": "Arena Wall 1 2",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Solid",
+      "mask": [],
+      "attachPath": "",
+      "attachName": "",
+      "offset": {
+        "position": [
+          -1.05,
+          1,
+          -14.0751
+        ],
+        "rotation": [
+          0,
+          -90,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1.65
+        ]
+      },
+      "size": [
+        0.3,
+        2,
+        8
+      ]
+    },
+    {
+      "id": "col_2mujpelgwe",
+      "name": "Box Collider 5",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Colliders/collider_box_popcornmachine",
+      "attachName": "collider_box_popcornmachine",
+      "offset": {
+        "position": [
+          -0.0001,
+          0.9937,
+          0.0319
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        2,
+        2.0000000596046448,
+        2
+      ]
+    },
+    {
+      "id": "col_mxgh0pljq3",
+      "name": "Box Collider 6",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/fence/F1/fence002",
+      "attachName": "fence002",
+      "offset": {
+        "position": [
+          -0.7429,
+          0.1184,
+          0.0032
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        4.6,
+        1,
+        0.24360071122646332
+      ]
+    },
+    {
+      "id": "col_0xxh34v760",
+      "name": "Player Collider",
+      "shape": "cylinder",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "player",
+      "mask": [],
+      "attachPath": "Scene/Armature",
+      "attachName": "Armature",
+      "offset": {
+        "position": [
+          0,
+          0.95,
+          0
+        ],
+        "rotation": [
+          -180,
+          -8.5174,
+          -180
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "radius": 0.301,
+      "height": 1.9
+    },
+    {
+      "id": "col_xhqyqrcfgk",
+      "name": "Box Collider 7",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh006",
+      "attachName": "chairmesh006",
+      "offset": {
+        "position": [
+          0.0094,
+          0.5605,
+          0.0795
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        0.8304758071899414,
+        1.1210961937904358,
+        0.8138871192932129
+      ]
+    },
+    {
+      "id": "col_8ycqt4cgwm",
+      "name": "Box Collider 8",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh007",
+      "attachName": "chairmesh007",
+      "offset": {
+        "position": [
+          0.0045,
+          0.5605,
+          0.0822
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        0.8304755687713623,
+        1.1210961937904358,
+        0.8138871192932129
+      ]
     }
   ]
 }

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Colliders &amp; Areas — Ion Engine Guide</title>
+  <link rel="stylesheet" href="/guide.css">
+</head>
+
+<body>
+
+  <div class="chrome">
+    <span class="dot"></span>
+    <span>Ion Engine</span>
+    <span class="tag">Colliders</span>
+  </div>
+
+  <nav class="gnav">
+    <a href="/guide.html">Overview</a>
+    <span class="sep"></span>
+    <a href="/guide-ui-editor.html">UI Editor</a>
+    <a href="/guide-colliders.html" aria-current="page">Colliders</a>
+    <a href="/guide-particles.html">Particles</a>
+  </nav>
+
+  <main>
+    <p class="kicker">System guide</p>
+    <h1>Colliders &amp; Areas</h1>
+    <p class="lede">
+      Trigger zones, pickup radii, and walls that actually stop you. It answers one question continuously —
+      <em>which volumes overlap right now</em> — and turns the frame-to-frame change into
+      enter/stay/exit events.
+    </p>
+
+    <div class="callout warn">
+      <strong>This is not physics.</strong> No rigidbodies, no mass, no velocity, no gravity, no solver.
+      Nothing here moves a scene object unless you call <code>moveAndSlide</code>. That's a deliberate
+      trade: a real physics engine is hundreds of kilobytes of WASM for a system whose job is "tell me when
+      the player reaches the zone". This costs a few kilobytes and some dot products.
+    </div>
+
+    <section class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h2>Place one in the editor</h2>
+        <p>
+          Open the 3D editor (<strong>3D View</strong> in the Engine Room), then click <strong>🧊</strong>
+          in the toolbar or press <kbd>K</kbd>. A second toolbar row appears.
+        </p>
+        <div class="ref-table">
+          <div class="k">＋ Box / Sphere / Cylinder</div>
+          <div class="v">Creates a collider. <strong>With a scene object selected</strong>, it's attached to it and
+            fitted to its real geometry bounds — which is what you want almost every time.</div>
+          <div class="k">👁 Volumes</div>
+          <div class="v">Hide the wireframes without stopping detection — useful when a volume covers what you're
+            aiming at.</div>
+          <div class="k">💾 Save</div>
+          <div class="v">Writes <code>src/game/colliders.json</code>. The dot on the button means unsaved.</div>
+          <div class="k">↶ / ↷</div>
+          <div class="v">Undo / redo, or <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>.</div>
+        </div>
+        <p>
+          Colours tell you the state at a glance: <strong>green</strong> solid, <strong>cyan</strong>
+          trigger, <strong>grey</strong> disabled, <strong>red</strong> overlapping something right now.
+        </p>
+        <div class="callout">
+          <strong>Colliders live in their own <code>COLLIDERS</code> group</strong> in the Hierarchy, never
+          inside your model's tree. They <em>attach</em> to a scene object rather than parent under it, so
+          the attachment survives re-exporting the GLB.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h2>Trigger or solid — the only distinction that matters</h2>
+        <div class="grid">
+          <div class="card">
+            <h4>isTrigger: true</h4>
+            <p>A volume you walk <em>through</em>. Reports overlaps via <code>onTrigger*</code> and never pushes
+              anything. Zones, pickups, checkpoints.</p>
+          </div>
+          <div class="card">
+            <h4>isTrigger: false</h4>
+            <p>Solid. Contributes a push in <code>moveAndSlide</code>, and reports to other solids via
+              <code>onCollision*</code>. Walls, props.</p>
+          </div>
+        </div>
+        <p>
+          If <em>either</em> side of a pair is a trigger, only trigger events fire — a zone never also
+          reports as a collision, and the solid that walked into it is told nothing.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h2>React to a zone</h2>
+        <p>
+          Find the collider by the name you gave it in the editor, then subscribe. The first argument is an
+          optional tag filter, which saves every handler from opening with an <code>if</code>.
+        </p>
+        <pre><code>import { Ion } from "../engine/Ion";
+import type { Collider, ColliderEventHandle } from "../engine/collision";
+
+export class ShopZone {
+  private readonly handles: ColliderEventHandle[] = [];
+  private inside = false;
+
+  wire(): void {
+    const zone = Ion.colliders.getByName("ShopZone");
+    if (!zone) return;                          <span class="c">// editor data — never assume it exists</span>
+
+    <span class="c">// Fires once, on the frame the overlap begins.</span>
+    this.handles.push(
+      zone.onTriggerEnter("Player", (other) =&gt; {
+        this.inside = true;
+        hud.showPrompt("Press to buy");
+      })
+    );
+
+    <span class="c">// Every frame after that, while it holds.</span>
+    this.handles.push(
+      zone.onTriggerStay("Player", () =&gt; score.tickBonus())
+    );
+
+    <span class="c">// Once when it ends — including if the other collider is</span>
+    <span class="c">// disabled or destroyed while still inside.</span>
+    this.handles.push(
+      zone.onTriggerExit("Player", () =&gt; {
+        this.inside = false;
+        hud.hidePrompt();
+      })
+    );
+  }
+
+  <span class="c">// Call from Game.dispose() so a hot reload can't leave old</span>
+  <span class="c">// handlers listening. Every on* returns its unsubscribe.</span>
+  dispose(): void {
+    for (const off of this.handles) off();
+    this.handles.length = 0;
+  }
+}</code></pre>
+        <div class="callout">
+          <strong>Exit always fires.</strong> Disabling, destroying, or removing the other collider from the
+          scene all produce a real exit event. That's what stops the classic bug where a flag gets set on
+          enter and never cleared.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h2>Create one in code</h2>
+        <p>
+          Anything an entity owns should be created where it builds its model. <code>Ion</code> is bound
+          before <code>Game.create()</code> precisely so a constructor can do this.
+        </p>
+        <pre><code><span class="c">// src/game/entities/Player.ts</span>
+this.collider = Ion.colliders.cylinder({
+  name: "Player Collider",
+  tag: "Player",
+  radius: 0.4,
+  height: 1.8,
+  attachTo: this.group,     <span class="c">// follows the group's world matrix every frame</span>
+  position: [0, 0.9, 0],    <span class="c">// half the height, so it stands on the ground</span>
+});</code></pre>
+        <div class="callout warn">
+          <strong>A code-created collider must not end up in <code>colliders.json</code>.</strong> It carries
+          <code>persisted = false</code> and the editor's save skips it — otherwise the next boot would
+          build a second one next to the one your script creates.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h2>Make walls stop the player</h2>
+        <p>
+          Detection alone never moves anything. <code>moveAndSlide</code> is the bridge: it applies your
+          movement, then pushes back out of every solid collider you ended up inside.
+        </p>
+        <pre><code>const UP = new THREE.Vector3(0, 1, 0);
+const moveDelta = new THREE.Vector3();   <span class="c">// reused — update() is a hot path</span>
+
+update(dt: number, axis: { x: number; y: number }): void {
+  moveDelta.set(axis.x * this.speed * dt, 0, axis.y * this.speed * dt);
+
+  Ion.colliders.moveAndSlide(
+    this.collider,          <span class="c">// must be attached to the object owning `position`</span>
+    this.player.position,   <span class="c">// mutated in place</span>
+    moveDelta,
+    { up: UP }              <span class="c">// see below — always pass this for anything that walks</span>
+  );
+}</code></pre>
+        <p>
+          <strong>Sliding falls out for free.</strong> The push is perpendicular to the surface, so the
+          component of your movement <em>along</em> the wall survives untouched.
+        </p>
+        <div class="callout warn">
+          <strong>Always pass <code>up</code> for a character.</strong> Without it, every escape axis is fair
+          game — and the cheapest way out of a knee-high kerb is genuinely <em>over the top</em>, so your
+          player climbs the scenery instead of being stopped by it. Measured: a 1.8-tall cylinder in a
+          0.5-tall kerb resolves to <code>(0, 0.5, 0)</code> without <code>up</code> and
+          <code>(0.7, 0, 0)</code> with it.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h2>Tags vs masks</h2>
+        <p>Two different filters, and worth keeping straight.</p>
+        <div class="grid">
+          <div class="card">
+            <h4>mask — broad phase</h4>
+            <p>Which pairs are <em>evaluated at all</em>. Masks are ANDed, so each side must accept the other; empty
+              means "accept anything". A rejected pair never reaches an intersection test, so this is a real
+              optimisation.</p>
+          </div>
+          <div class="card">
+            <h4>tag argument — handler filter</h4>
+            <p>Which handlers <em>hear about</em> an overlap that already happened. Saves writing
+              <code>if (other.tag !== "Player") return;</code> in every handler.</p>
+          </div>
+        </div>
+        <p class="dim">
+          Usually they agree. They're separate because a zone that wants to <em>see</em> several tags but
+          <em>react</em> differently to each needs a wide mask and narrow handlers.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h2>Full API</h2>
+        <div class="api">
+          <div class="api-head">Finding colliders — Ion.colliders</div>
+          <div class="api-row">
+            <span class="sig">getByName(name: string): Collider | undefined</span>
+            <span class="desc">By the name typed in the editor. Keep names unique.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">getByTag(tag: string): Collider[]</span>
+            <span class="desc">Every collider carrying that tag.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">overlapSphere(center, radius, tag?): Collider[]</span>
+            <span class="desc">Ad-hoc "what's near me right now" — for the question you ask once, not every frame.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">queryPoint(point, tag?): Collider[]</span>
+            <span class="desc">Colliders whose volume contains a world point.</span>
+          </div>
+
+          <div class="api-head">Creating</div>
+          <div class="api-row">
+            <span class="sig">box({ name, tag, isTrigger, mask, size, attachTo, position, rotation, scale })</span>
+            <span class="desc"><code>size</code> is full width/height/depth. Rotation is in degrees.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">sphere({ …, radius })</span>
+            <span class="desc">Same options, plus radius.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">cylinder({ …, radius, height })</span>
+            <span class="desc">The character shape — rotation-invariant about up, unlike a box, but with real height,
+              unlike a sphere.</span>
+          </div>
+
+          <div class="api-head">Movement and blocking</div>
+          <div class="api-row">
+            <span class="sig">moveAndSlide(collider, position, delta, { up?, tags?, iterations? })</span>
+            <span class="desc">Applies the delta then pushes out of solids. Mutates <code>position</code>, returns the
+              movement actually applied. Defaults to 2 push passes so inside corners settle.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">depenetrate(collider, options?, out?): Vector3</span>
+            <span class="desc">The push without applying it — for anything that isn't a straightforward character
+              move.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">getStats(): ColliderStats</span>
+            <span class="desc"><code>total</code>, <code>enabled</code>, <code>narrowTests</code>,
+              <code>activePairs</code> — measured, not estimated.</span>
+          </div>
+
+          <div class="api-head">On a collider</div>
+          <div class="api-row">
+            <span class="sig">onTriggerEnter(tag?, handler) → unsubscribe</span>
+            <span class="desc">Also <code>onTriggerStay</code>, <code>onTriggerExit</code>, and the
+              <code>onCollision*</code> trio for solid-vs-solid. Always keep the returned function.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setEnabled(enabled: boolean): this</span>
+            <span class="desc">Turning one off mid-overlap fires exit on every pair it was in.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">checkTag(tag: string): boolean</span>
+            <span class="desc">Preferred over <code>collider.tag === "…"</code> — keeps working if tags ever become a
+              list.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">attachToObject(object, preserveWorld = true): this</span>
+            <span class="desc">Follow a different object. <strong>Does not move the collider</strong> — the offset is
+              recomputed so the volume stays where it is in the world.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">overlaps(other) · containsPoint(point) · worldCenter</span>
+            <span class="desc">Direct queries against the last synced world shape.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">destroy(): void</span>
+            <span class="desc">Fires exit on anything it was overlapping, then unregisters. Idempotent.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">8</div>
+      <div class="step-body">
+        <h2>Watch it work</h2>
+        <p>
+          Press <kbd>Shift+K</kbd> (or <strong>🧊 Show Colliders</strong> in the Engine Room) to draw every
+          volume <em>over the running game</em> — no editor, gameplay proceeding normally. You can watch a
+          trigger turn red as you walk into it, which beats reading a console.
+        </p>
+        <div class="cheat">
+          <div class="cheat-row">
+            <div class="q">Trigger never fires</div>
+            <div class="a">Masks are ANDed — check both sides</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Player climbs low walls</div>
+            <div class="a">Pass <code>{ up }</code> to <code>moveAndSlide</code></div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Nothing blocks the player</div>
+            <div class="a">Triggers are never solid — uncheck it</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Collider "forgot" its attachment</div>
+            <div class="a">Target renamed — path no longer resolves</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Two of the same collider on boot</div>
+            <div class="a">A code-created one got saved to JSON</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Ion Engine — Colliders &amp; Areas</span>
+    <span>Architecture: ENGINE.md · Setup: README.md</span>
+  </footer>
+
+</body>
+
+</html>

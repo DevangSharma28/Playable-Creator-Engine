@@ -21,7 +21,7 @@ The dependency direction only ever goes one way. `engine/` has no idea `HUD`, `P
 main.ts
   → IonEngine.boot(canvas)
       → new IonEngine(canvas).start()
-          → bindIon(ctx)                     (Scheduler + EventBus + ColliderManager — before Game.create, so entity constructors can use Ion)
+          → bindIon(ctx)                     (Scheduler + EventBus + ColliderManager + ParticleManager — before Game.create, so entity constructors can use Ion)
           → Game.create(canvas)              (game/Game.ts — asset preload, scene/camera/renderer, entities, UI)
           → installDevHooks(activeGame)       (window.__* hooks the Engine Room dev panel talks to)
           → requestAnimationFrame loop begins
@@ -30,7 +30,7 @@ main.ts
 `IonEngine` ([src/engine/IonEngine.ts](src/engine/IonEngine.ts)) owns *running* a game, not the game itself:
 
 - The per-frame rAF loop (`update()`/`render()` each tick, capped `dt`, exponential-moving-average FPS)
-- The `Scheduler` (timers/tweens), the `EventBus`, the `ColliderManager` (see `collision/`), and the `Ion` facade binding — created here because the loop is what drives them and teardown is what must retire them. Collider detection runs inside the same not-paused guard as `update()`, so trigger enter/exit freezes with gameplay rather than firing behind an open editor
+- The `Scheduler` (timers/tweens), the `EventBus`, the `ColliderManager` (see `collision/`), the `ParticleManager` (see `particles/`), and the `Ion` facade binding — created here because the loop is what drives them and teardown is what must retire them. Collider detection and particle simulation both run inside the same not-paused guard as `update()`, so trigger enter/exit and VFX freeze with gameplay rather than running behind an open editor. Particles step *after* colliders, so an effect a trigger fired this frame is simulated from this frame rather than the next
 - **Crash guard**: `update()`/`render()` run inside a `try/catch`. If gameplay throws, the loop stops rescheduling itself for good (a dead RAF chain is the right outcome — continuing to call into a broken instance just throws again next frame, forever, for no benefit) and `core/CrashOverlay.ts` shows a minimal, dependency-free "Continue" overlay wired to `Cta.open()`, so a mid-game crash still gets its CTA click rather than being a 100% wasted ad. `IonEngineOptions.onCrash` is an optional add-on for logging, itself wrapped in a try/catch so it can't block the recovery UI.
 - **Timestep**: variable frame-length `dt` by default (unchanged from how every existing system here was tuned). `IonEngine.boot(canvas, { fixedTimestep: 1/60 })` opts into a fixed-step accumulator instead — `update()` may then run several times per animation frame, always with that exact `dt`, while `render()` still runs once. Turn it on when determinism matters: anything integrating forces or resolving collisions will visibly jitter (or tunnel through a collider) on a frame spike under variable `dt`, because one 50ms step is not three 16ms ones. Capped at 5 steps per frame — past that the backlog is dropped rather than spiralling.
 - Dev-only hooks for the Engine Room panel (`index.html`, the dev entry — see `vite.config.mts`) — pause-while-editing, device-frame resize, freecam toggle, gizmo mode, live stats
@@ -49,13 +49,13 @@ Small caching loader for textures/GLB models/audio, built on Three.js's own load
 Its `GLTFLoader` has `setMeshoptDecoder(MeshoptDecoder)` wired unconditionally in the constructor (`three/examples/jsm/libs/meshopt_decoder.module.js`) so it can decode `EXT_meshopt_compression` GLBs — see "Production build" below for where that compression actually gets applied. Harmless for a GLB that was never meshopt-compressed (the decoder only engages for primitives that carry the extension), and single-file-safe: that module's WASM is inlined as a base64 byte array in the JS itself, not fetched from a separate `.wasm` file, so it bundles like any other import instead of needing something hosted alongside `dist/index.html`.
 
 ### `Ion.ts` — the one-line facade
-`Ion.after()`, `Ion.every()`, `Ion.sequence()`, `Ion.tween()`, `Ion.on()`/`Ion.once()`/`Ion.emit()`, `Ion.cta()`, `Ion.time`, `Ion.colliders`. A **bound singleton**, not a self-initializing static: `IonEngine.boot()` constructs an `IonContext` and calls `bindIon(ctx)`; teardown calls `unbindIon(ctx)`. Deliberate, for two reasons this codebase already cares about — a static that lazily builds its own services ends up owning engine state nobody can see or reset (the `§28 no hidden global state` rule), and in-place hot reload has to be able to *fully* retire the previous bundle's services or its timers keep firing into the new game. `unbindIon` takes the context being retired so a late dispose from an old bundle can't unbind the live one. Using `Ion` before boot throws with a real explanation instead of a `TypeError` on undefined.
+`Ion.after()`, `Ion.every()`, `Ion.sequence()`, `Ion.tween()`, `Ion.on()`/`Ion.once()`/`Ion.emit()`, `Ion.cta()`, `Ion.time`, `Ion.colliders`, `Ion.particles`. A **bound singleton**, not a self-initializing static: `IonEngine.boot()` constructs an `IonContext` and calls `bindIon(ctx)`; teardown calls `unbindIon(ctx)`. Deliberate, for two reasons this codebase already cares about — a static that lazily builds its own services ends up owning engine state nobody can see or reset (the `§28 no hidden global state` rule), and in-place hot reload has to be able to *fully* retire the previous bundle's services or its timers keep firing into the new game. `unbindIon` takes the context being retired so a late dispose from an old bundle can't unbind the live one. Using `Ion` before boot throws with a real explanation instead of a `TypeError` on undefined.
 
 The same services are always reachable directly off the context — `Ion` is a shorthand, never the only way in, so tests can drive a `Scheduler` with no globals at all.
 
 Also re-exports `Easing` (from `core/Scheduler.ts`, itself re-exporting tween.js's), so `import { Ion, Easing } from "./Ion"` is genuinely one line, one path — a caller going through the facade was previously forced into a second import from `core/Scheduler.ts` just for the easing curves, contradicting the whole point of having a facade.
 
-**`Ion` is bound before `Game.create()`, so entity constructors can use it.** `IonEngine.start()` calls `bindIon(ctx)` *before* awaiting `Game.create()`, not after. Nothing in the context (`Scheduler`, `EventBus`, `ColliderManager`) depends on `Game`, so there was never a reason for the bind to wait — and waiting had a real cost: every entity constructor runs inside `Game.create()`, so `Ion.*` threw its not-yet-booted error for exactly the code most likely to reach for it. `Player.ts` registering its own collision volume where it builds its model (see `collision/` below) needs this ordering. It's safe against the stale-dispose case, because `__disposeGame()` has already run by then and `unbindIon` is context-guarded.
+**`Ion` is bound before `Game.create()`, so entity constructors can use it.** `IonEngine.start()` calls `bindIon(ctx)` *before* awaiting `Game.create()`, not after. Nothing in the context (`Scheduler`, `EventBus`, `ColliderManager`, `ParticleManager`) depends on `Game`, so there was never a reason for the bind to wait — and waiting had a real cost: every entity constructor runs inside `Game.create()`, so `Ion.*` threw its not-yet-booted error for exactly the code most likely to reach for it. `Player.ts` registering its own collision volume where it builds its model (see `collision/` below) needs this ordering. It's safe against the stale-dispose case, because `__disposeGame()` has already run by then and `unbindIon` is context-guarded.
 
 This used to be the other way round, and the historical workaround is still visible in `Player.ts`: its popcorn-machine reveal defers off the constructor rather than tweening directly from it. That deferral is no longer *required* for `Ion` to be available — it's about when the reveal should play.
 
@@ -276,6 +276,126 @@ All four presented identically — "the editor forgot my collider on reload" —
 - **`attachToScene()` on a *different* scene retires everything already registered.** Saving in the 3D editor can write two watched files at once (`colliders.json` *and* `sceneBindings.json`), firing two hot reloads back to back. Both new bundles bind their own context but share whichever registry was bound last — so the first reload's Game registered its colliders here, and the second reload's Game then pointed this registry at *its* scene. `syncAll` correctly noticed every collider was attached to objects no longer present and disabled them all. One registry serves one scene.
 - **Attaching a collider does not move it.** `attachToObject()` recomputes the offset against the new parent so the volume stays exactly where it is in the world. Keeping the old offset verbatim — the obvious implementation — teleports it: a collider at world (−8, 0, 8) re-homed onto a prop 12 units away lands at *that prop's transform times* (−8, 0, 8), somewhere off in the distance, which from the outside looks exactly like attaching having done nothing.
 
+### `particles/` — the ION Particle & VFX system
+
+A GPU-instanced particle system built for playable ads: one draw call per emitter, preallocated typed-array storage, zero per-frame allocation in steady state, and every expensive feature genuinely optional. **No `Object3D` is ever created per particle.**
+
+**The runtime ships; the editor for it does not.** `particles/` is ordinary engine runtime, imported by `Game.ts` and present in `dist/index.html`. The authoring half (`editor/EditorParticles.ts`, `editor/ParticleVisuals.ts`) lives under `editor/` and tree-shakes out with the rest of it — verified the same way as the collider editor, by grepping the production bundle.
+
+| File | What it is |
+| --- | --- |
+| `ParticleTypes.ts` | The module config shapes and the serialized form. Pure data, no behavior — both runtime and editor agree on it without importing each other. |
+| `ParticleBuffer.ts` | Structure-of-arrays particle storage. Densely packed, allocated once at `maxParticles`. |
+| `ParticleSimulation.ts` | The single per-frame update pipeline over every module. |
+| `ParticleShapes.ts` | Box/sphere/cone emission sampling, allocation-free. |
+| `ParticleRandom.ts` | Seeded mulberry32 PRNG, curve/gradient evaluation, value noise. |
+| `ParticleRenderer.ts` | `InstancedBufferGeometry` + instanced attributes → one draw call. |
+| `ParticleMaterial.ts` | The shader, its `#define` set, and the shared default texture. |
+| `ParticleTrails.ts` | Pooled camera-facing ribbon trails. Not constructed at all when disabled. |
+| `ParticleEmitter.ts` | Config + buffer + simulation + renderer, plus lifecycle and the local/world decision. |
+| `ParticleSystem.ts` | A named group of emitters, and sub-emitter routing between them. |
+| `ParticleManager.ts` | The registry, the `PARTICLES` group, the frame driver, quality tiers, and stats. Reached as `Ion.particles`. |
+| `ParticleDefaults.ts` | Complete defaults + the normalizer that fills a partial config out. |
+| `ParticlePresets.ts` | Thirteen starter effects, as data. Editor-only in practice — see below. |
+| `ParticleSerialization.ts` | `src/game/particles.json` ↔ live registry. `loadParticles` runs in production. |
+
+#### Why instanced quads, not Points or Sprites
+
+`THREE.Points` looks like the obvious fit and isn't: `gl_PointSize` is driver-capped (commonly 64–255px, and *silently* — a large soft smoke puff just stops growing), points can't rotate, can't stretch along velocity, and clip against the near plane as whole points rather than per fragment. `THREE.Sprite` fixes rotation but is one `Object3D` and one draw call *per particle*.
+
+An `InstancedBufferGeometry` of one quad plus per-instance attributes gives one draw call per emitter, arbitrary size, free GPU-side billboarding/rotation/stretching, and a flipbook for the cost of a UV offset. The CPU writes eleven floats per particle per frame; the GPU does the rest. Four render modes share the same geometry: camera-facing billboard, velocity-aligned, stretched-by-speed, and real mesh instancing.
+
+#### Structure of arrays, and why particles pack densely
+
+Every attribute is its own `Float32Array` indexed by slot. An array of `{position, velocity, age, …}` objects would cost one allocation and one GC-tracked reference per particle and scatter each particle's fields across the heap — at 2000 particles × 60fps that difference is the whole frame budget.
+
+Live particles always occupy `[0, count)`. Killing particle `i` copies the last live one into its slot and decrements `count`. That keeps the array contiguous, which matters twice: the simulation loop is a straight `for (i = 0; i < count; i++)` with no liveness check per slot, and the renderer uploads `[0, count)` directly as `instanceCount` with no compaction pass. A free list would avoid the copy but reintroduce holes — and then every consumer needs an `if (alive[i])` inside the hottest loop in the system, plus a GPU upload that has to compact anyway.
+
+The one thing swap-remove costs is stable ordering, which is why `birthId` exists: trails and sub-emitters need to know that slot 7 holds a *different* particle than it did last frame, and the slot index alone can't answer that.
+
+#### One pass, and disabled modules that are genuinely free
+
+Every module is a branch inside **one** loop rather than its own iteration or a per-particle callback. A per-module pass would read and write the same particle's position and velocity once per module, blowing cache each time; a per-particle callback would add an indirect call per particle per module. Here a particle's fields load into locals once, every enabled module operates on those locals, and they write back once.
+
+Each module's `enabled` flag is hoisted into a `const` *before* the loop, so a disabled module costs one already-predicted branch per particle and touches nothing. That's what backs "a simple emitter stays extremely cheap no matter how many features exist" — the feature set is opt-in at runtime, not just at author time. Trails go further: with the module off, `ParticleTrails` is never constructed, so there's no geometry, no material, no pool, and no per-frame call.
+
+#### Modules
+
+`Main` (always on) · `Emission` (rate + bursts) · `Shape` (box/sphere/cone) · `Velocity` (linear/orbital/radial) · `Force` (+ drag) · `Limit Velocity` · `Noise` · `Color over Lifetime` · `Size over Lifetime` · `Rotation` · `Texture Sheet` (flipbook) · `Renderer` · `Trails` · `Collision` · `Sub Emitters` · `Quality/LOD`.
+
+Values are constants or min/max ranges (`min === max` *is* the constant case, so a constant is branch-free), with real curves for size and real gradients for color.
+
+#### Simulation space
+
+`local` — particles are integrated in the emitter's frame and the render mesh carries its transform, so moving the emitter drags its particles along. `world` — the emitter transform is baked into position and direction once, at birth, and the mesh sits under the identity-held `PARTICLES` group, so particles stay where they were released.
+
+Gravity is resolved *into whichever frame is active*: world-down is rotated into the emitter's local frame when simulating locally. Without that, a tilted emitter's smoke rises along the emitter's up instead of the world's — which looks fine at zero rotation and obviously broken the moment anyone tilts it.
+
+#### Sub-emitters
+
+`ParticleSimulation` emits birth/death/collision events and knows nothing about other emitters — that's what keeps it a pure per-particle loop. `ParticleSystem` routes those into siblings by name, converting the trigger point between simulation spaces first. Without that conversion, a world-space parent spawning a local-space child places every child particle at the world coordinate read as a local offset — visibly flung away by exactly the emitter's own position. Chains are depth-limited to 3, which is cheaper and more predictable than cycle detection in the graph.
+
+A sub-emitter spawn is *placed* by its trigger point, so a world-space child must strip its own world translation back off after applying its world matrix — otherwise the child's position is added on top of the trigger point and an explosion's smoke appears at (emitter + debris) rather than at the debris.
+
+#### Determinism
+
+Each emitter owns its own `ParticleRandom`, so reproducibility is a per-emitter property rather than a global one. `Math.random()` couldn't do this even if JS let you seed it: it's a single stream, and two emitters drawing from it interleave differently depending on frame timing. `setSeed(n)` + the same `dt` sequence reproduces an effect exactly — there's a regression test for both directions of that.
+
+**Nothing in the simulation path may reach for `Math.random()`.** Sub-emitter probability did, and one call on the unseeded global stream is enough to make any effect using a sub-emitter irreproducible no matter what `setSeed()` was given — it now rolls off the parent's own generator (`ParticleEmitter.nextRandom`).
+
+#### Lifecycle
+
+**A constructor must not start simulating.** `ParticleEmitter` records `playOnStart` and does nothing with it; `autoStart()` is called afterwards, by `ParticleManager.add` for a whole system and by the editor after its own `setWorldRoot`. Folding that back into the constructor broke two things at once:
+
+- `play()` runs `prewarm()`, which spawns immediately, which fires `onBirth` into `ParticleSystem`'s sub-emitter routing — while that system's own `const emitter = new ParticleEmitter(...)` was still evaluating. The closure captured a binding in its temporal dead zone: *Cannot access 'emitter' before initialization*.
+- Prewarm at construction also runs *before* `setWorldRoot()` and the first `syncTransform()`, so `simulation.worldMatrix` is undefined and a world-space emitter bakes an identity transform into its entire backlog — dumping every prewarmed particle at the origin instead of at the emitter. Silently wrong rather than crashing, which is worse.
+
+`play()` and `restart()` therefore refresh the transform *before* prewarming, and prewarm requires `loop` — prewarming a one-shot would consume its whole duration at play time and leave it instantly finished.
+
+#### Runtime API
+
+```ts
+const burst = Ion.particles.getByName("Coin Burst");
+burst?.playAt(coin.position);          // move + restart, one call
+burst?.setSeed(1234);                  // reproducible from here on
+
+const emitter = burst?.get("Coins");
+emitter?.emit(20);                     // ignore rate/duration, fire now
+emitter?.isPlaying();
+emitter?.settings.main.startSpeed;     // live config, editable at runtime
+
+Ion.particles.setQuality("low");       // scales rate/bursts across every effect
+Ion.particles.getStats();              // measured, not estimated
+```
+
+`play() · pause() · stop() · restart() · clear() · emit(n) · setSeed(n) · isPlaying() · isFinished()` exist on both `ParticleSystem` and `ParticleEmitter`. `stop()` deliberately lets live particles finish their lifetimes — a smoke plume that vanished the instant you stopped the emitter would be wrong in every case anyone actually stops one; `clear()` is the immediate version.
+
+#### Authoring and persistence
+
+`src/game/particles.json` is a real static import, so **effects ship**: what you author in the Particle Editor is what runs in production, exactly as with `colliders.json` and `sceneBindings.json`. Attachments are recorded by *path*, never uuid, for the same reason `SceneBindings.ts` gives.
+
+**Only the configuration is serialized; the particles never are.** A saved effect is its emitter configs and nothing else — no positions, no ages, no buffer state. That's what makes `particles.json` a small diffable file describing an effect rather than a snapshot of one mid-play, and why a loaded effect starts from its own beginning rather than resuming from wherever it was when someone hit save.
+
+The worked examples shipped in `src/game/particles.json` cover all three emission shapes — a box-based **Ambient Dust**, a sphere-based **Explosion** (debris → smoke via a sub-emitter), a cone-based **Campfire** (fire + smoke), and a **Coin Burst** with pooled trails. It's editor-authored data, so treat that list as the starting point rather than the current contents.
+
+**Presets are editor-only in practice.** `PARTICLE_PRESETS` is engine data a game *could* use at runtime, but `Game.ts` reaches it through `EditorRoot.getParticlePresets()` rather than importing it directly — an ungated import shipped all thirteen preset configs into the production bundle for a dropdown that only ever exists in the editor. Caught by grepping the built file; worth not undoing.
+
+**`normalizeEmitterConfig` deep-copies on the way out**, and that is load-bearing rather than tidiness. Its module spreads carry the arrays inside each module (`gradient`, `curve`, `bursts`, `entries`) and the tuples (`startColor`, `boxSize`, `pivot`) through *by reference* — straight from either a shared literal in `PARTICLE_PRESETS` or the cached `particles.json` module object. Without the copy, two effects built from one preset shared a gradient array, so editing one recoloured the other and permanently mutated the preset for the rest of the session.
+
+#### Things that already went wrong here
+
+Every one of these was live in the code and is now covered by a test that was checked to fail against the original.
+
+- **A `#ifdef` block ending in `return` is not exclusive.** The mesh render path did that and left the billboard path unguarded after it, so with `USE_MESH` defined both declared `mvPosition` in one scope and the shader failed to compile — mesh mode was dead on arrival. The preprocessor only strips a *false* branch; `#else` is what makes branches exclusive. `tests/particle-shader.test.mjs` now preprocesses all nine define combinations and checks each one.
+- **A burst at time 0 fires once and never again on a loop**, if the cycle wrap leaves `time` at a remainder rather than 0. The burst then falls *before* the next window, is skipped, and is still consumed. Fixed by slicing the frame at cycle boundaries so every cycle genuinely begins at 0 — the alternative (special-casing `from === 0`) only works for the first cycle.
+- **Ageing and expiry-counting are two passes, not one.** The trail sweep aged points in the same loop that counted expired ones, and that loop breaks at the first survivor (they're stored oldest-first) — so a point only aged once it *became* the oldest. Trails lasted roughly `lifetime × maxPoints` and the alpha ramp was flat for all but one point.
+- **A subsystem holding its own copy of a config has to be told when it changes.** `ParticleTrails` copies the trail module at construction (it reads it in two hot loops), and nothing called `setConfig` — so every trail control in the Inspector silently did nothing. `ParticleEmitter.applyConfig` now forwards it.
+- **An attached emitter's node holds a *world* transform.** `syncTransform` decomposes `attached.matrixWorld × local` into the node, so `adoptNodeTransform` copying `node.position` straight into `config.position` stores a world position in a field read back as a local offset — compounding by the attachment's transform every frame, which sent attached emitters off toward infinity within a second of the editor opening. It now inverts through the attachment, making adopt∘compose the identity.
+
+#### Undo-friendly removal
+
+`ParticleManager.remove`, `ParticleSystem.removeEmitter`, and `ColliderManager.remove` all take a `keepAlive` flag that detaches without releasing GPU resources, so the editor's undo can put *the same instance* back — see the Editor workflow section below for why identity matters more than it looks. Anything holding a detached object owns it and must re-add or dispose it. `detach()`/`reattach()` are symmetric on purpose: a **world-space** emitter's render mesh is parented under the manager's `PARTICLES` group rather than its own system's group, so removing the system group alone would leave its particles hanging in the scene.
+
 ### `editor/` — the 3D Viewer/Editor
 Dev-only, and structurally dev-only: every entry point into this directory is behind `import.meta.env.DEV` (see `Game.setFreecam` and the `ViewHelperWidget` construction), so Rollup drops the whole tree from a production build rather than shipping it guarded by a DOM lookup that never matches. Verified by grepping `dist/index.html` — no `TransformControls`, `OrbitControls`, `BoxHelper`, `GridHelper`, `CameraHelper`, or any editor string survives the build.
 
@@ -294,9 +414,12 @@ One composition root and a set of single-purpose classes, rather than one large 
 | `EditorHierarchy.ts` | The Object3D tree panel — collapsible, reveals the selection on demand. |
 | `EditorInspector.ts` | Live transform/visible fields for the selection, plus name/parent/mesh-stats readouts. |
 | `objectAssignment.ts` | Declared-TS-type → live-object compatibility for Pick. |
-| `InspectorSections.ts` | Field-descriptor vocabulary letting other subsystems contribute a panel to the Inspector. |
+| `InspectorSections.ts` | Field-descriptor vocabulary letting other subsystems contribute panels to the Inspector — `text`/`number`/`toggle`/`vec3`/`info`/`buttons`/`objectRef`/`select`/`range`/`color`/`slider`, collapsible sections, and per-module enable switches. A provider may return one section or many. |
+| `EditorHistory.ts` | The one undo/redo stack, shared by every mode. Commands with `undo`/`redo`/`discard`, merge-key coalescing, and a saved-depth dirty marker. |
 | `ColliderVisuals.ts` | The wireframe/fill drawing. Owned by `Game` (it also serves the in-game overlay), borrowed by the editor. |
 | `EditorColliders.ts` | "Configure Colliders" mode: creating, fitting, attaching, and the Inspector's collider panel. |
+| `ParticleVisuals.ts` | Emission-volume/direction/bounds gizmos. Owned by `Game`, borrowed by the editor, same as `ColliderVisuals`. |
+| `EditorParticles.ts` | "Particle System" mode: presets, emitters, playback transport, and the Inspector's sixteen module panels. Also drives the particle simulation for the whole editor session, in every mode. |
 | `core/SceneInspector.ts` | What genuinely belongs to the 3D scene: the transform gizmo, selection outline, debug helpers, and the toggles/shortcuts below. |
 
 **Everything is driven by one selection store.** `EditorSelection` is the reason the Hierarchy, the viewport, the Inspector, the gizmo, and Pick can't disagree: none of them owns a private `selected` field, they all subscribe. Previously `SceneInspector` held selection privately and each panel found out only if whichever code path made the change remembered to tell it, which is exactly how they drifted. Selection changes carry a `source` so a panel can tell *its own* click apart from someone else's — the Hierarchy scroll-into-views a viewport pick but not its own row click.
@@ -355,6 +478,38 @@ Because the editor's W/E/R/Q shortcuts collide with `InputManager`'s WASD fallba
 
 **Teardown.** `Game.dispose()` closes the editor first and disposes `ViewHelperWidget`. Neither used to happen: an in-place hot reload with the 3D view open left the entire editor alive — window/canvas listeners still registered, helpers still in the discarded scene, its DOM still in the panels — so clicks drove a scene nothing was rendering, and every reload stacked another one, leaking a WebGL context each time. Relatedly, the editor is re-entered from `IonEngine.installDevHooks` rather than `main.ts`'s hot-accept callback: that callback runs while `start()` is still awaiting `Game.create()`, when `__setFreecamActive` is still the *previous* instance's closure pointing at a just-disposed Game, so the new Game never entered the editor at all and gameplay quietly resumed under the editor chrome.
 
+**Particle System (✨ in the toolbar, or `P`).** The authoring mode for the ION Particle & VFX system described under `particles/` above. Turning it on reveals every emission volume and hands the particle registry the *editor* camera for the session — otherwise every billboard would face wherever the gameplay camera happens to be pointing while you orbit around them.
+
+- **The docks re-lay out.** The left dock becomes an **Inspector-only, full-height panel**, Control Desk is hidden entirely (it edits script fields, which has nothing to do with authoring a VFX), and the Hierarchy moves to the right dock so selecting an emitter out of the `PARTICLES` group still works. Panels are *moved*, never duplicated — the editor writes into `#si-inspector`/`#si-hierarchy` by id, and a second copy would leave it updating an invisible one.
+- **Sixteen collapsible modules**, each with its own enable switch in its header, so "which modules are actually doing work" is answerable while scrolling past. Collapse state is remembered per section id across rebuilds — a rebuild happens on every selection change and every structural edit, and re-expanding sixteen modules each time would make the panel unusable.
+- **Live preview.** Gameplay is paused for the whole editor session, so `EditorParticles` drives the preview off the editor's own wall clock (capped the same way the engine loop caps `dt`). ▶ ⏸ ↻ ⏹ ✕ control that preview, not gameplay.
+- **Edits are live.** Almost every field mutates the config object the running simulation already holds, so the preview updates on the very next frame with no rebuild or restart. Only genuinely structural changes go through a rebuild path — `maxParticles` (the buffer is allocated once, by design), the trail pool, and simulation space (existing particles are expressed in the space being left and would teleport).
+- **Presets** populate the toolbar dropdown from the engine's own table via `__getParticlePresets`, so the list can't drift from what `createSystemFromPreset` actually accepts. Creating with a scene object selected attaches the new effect to it — the same convention the collider toolbar uses.
+- **Gizmos** for emission volumes (amber, deliberately a different hue family from the collider layer's green/cyan), the direction axis, and live particle bounds, each toggleable without touching the effect itself.
+- **Diagnostics** are measured, not estimated: active/max off the buffers, draw calls off the renderers, bytes off the real typed-array allocations, and update cost off a `performance.now()` pair around the actual simulation pass. A guessed cost readout is worse than none, because it gets trusted.
+
+Saved to `src/game/particles.json` — see Editor workflow below for how, and why it no longer waits for Exit Editor.
+
+### Editor workflow — live scene, Save, Undo/Redo
+
+Three properties the collider and particle editors share, all owned by `EditorRoot`.
+
+**The scene never stops.** Opening or leaving the 3D editor does not stop, reset, destroy, or pause a running particle system. `EditorParticles.setActive` changes what's *drawn* (gizmos) and nothing else; playback is only ever changed by an explicit press of Pause or Stop. Because gameplay itself is paused for the session, `EditorParticles.update` drives the simulation off the editor's own wall clock — in **every** mode, not just Particle mode, so effects keep running while you're moving a collider. This used to default to paused and force-pause again on exit, which froze every effect the moment the editor opened and left them stopped afterwards.
+
+**Save is immediate, not deferred to exit.** Both toolbars have a 💾 Save with an unsaved dot and a brief green confirm. That's only safe because `vite.config.mts` stops watching `src/game/colliders.json` and `src/game/particles.json` — both are real imports in `main.ts`'s module graph, so writing one otherwise trips HMR and tears the scene (and the undo history) down mid-session, which is exactly why saving used to be batched all the way to Exit Editor. Ignoring them is correct because the editor already holds the live objects: the file is persistence, not the running session's source of truth. `sceneBindings.json` is pointedly still watched and still deferred to exit, because re-applying assignments only happens through `applySceneBindings` at boot.
+
+**The two files mark themselves saved, independently, and there is deliberately no call that marks both.** There was one, and it silently destroyed work: clearing both dirty flags meant saving colliders disarmed the particle save, so `flushParticles` saw no pending changes and returned without writing. The edits lived only in memory and vanished on the next reload — and Exit Editor hit it every time, since it flushes colliders first. The symptom is worth recognising, because it reads as the *loader* being broken rather than the writer: everything looks correct in-session, then a restart comes back to whatever the last successful save wrote. `markCollidersSaved` and `markParticlesSaved` now each touch only their own flag (plus the shared history's clean point), which makes the cross-clear unrepresentable rather than merely fixed; `tests/particles.test.mjs` asserts no save path can reach the other's flag.
+
+**One undo stack across both modes** (`EditorHistory`), so switching between Configure Colliders and Particle System never discards it and a single Undo walks back through whatever actually happened, in order. `Ctrl+Z` undoes, `Ctrl+Y` or `Ctrl+Shift+Z` redoes; both are guarded against text fields, where the browser's own undo should win.
+
+- **Commands, not snapshots.** Each entry carries its own `undo`/`redo` closures. A whole-scene snapshot is easier to write and wrong where it matters: restoring one destroys and rebuilds every object, so a script field holding a `Collider`, a sub-emitter resolving a sibling by name, and the current selection all end up pointing at things that no longer exist.
+- **Deleted objects are kept alive, not recreated.** `ColliderManager.remove`, `ParticleManager.remove`, and `ParticleSystem.removeEmitter` all take a `keepAlive` flag; a delete command holds the real object in its closure, so undo puts *the same instance* back and every reference keeps working. `HistoryCommand.discard(state)` is the other half: when a command falls off the stack for good it's told which side it was on (`"applied"` vs `"unapplied"`) and releases whatever it was holding — without that distinction, discarding would free objects still in the scene.
+- **Property edits mutate in place.** `applyColliderData` writes a record onto an existing collider rather than rebuilding it, and the particle path hands a cloned config back through `applyConfig` on the same emitter. Identity survives an undo in both.
+- **Continuous gestures are one step.** A gizmo drag has a real begin/end (`SceneInspector.onGizmoDrag`, off TransformControls' `dragging-changed`), so it captures on the leading edge and pushes exactly one command on release. Sliders and text fields have no such edge, so consecutive pushes sharing a `mergeKey` within 700ms collapse — undoing to the state before the whole gesture, not the previous tick. The particle Inspector has ~90 property rows, so its merge key is derived from the mutation closure's own source text rather than threaded through every call site by hand.
+- **Dirty is a depth, not a boolean.** `isDirty` compares the stack depth against the depth at the last save, so undoing back past your edits correctly reports clean again.
+
+Undo history is per-session: `EditorRoot.dispose()` clears it, which is also what releases anything a delete command was still holding. It deliberately does *not* survive a hot reload — a command closing over objects from a torn-down scene is exactly the kind of thing that corrupts state rather than restoring it.
+
 ### Control Desk — live public-field editing, no bespoke UI needed
 Not a single file — a mechanism spanning `scripts/dev-build-api.js` (`GET /script-info`, a brace-depth text scan of a `*/ui/*.ts` or gameplay class file for its classes' public/private fields) and `IonEngine.ts`'s `window.__getInspectable(className)` hook (hands back the *real* running instance — Player, World, CoinField, whatever `Game.ts` chose to register in its `inspectables` map — no serialization, dev panel and game share one `window`). The Engine Room's Control Desk panel (`index.html`) combines the two: pick a script, it lists that class's fields; public `number`/`boolean` fields render as real inputs that write straight onto the live instance on edit, everything else renders read-only (`🐞 Debug` widens visibility to private/protected fields too, always read-only).
 
@@ -400,7 +555,27 @@ It talks to `scripts/dev-build-api.js` (localhost:8001, dev-only, started by `np
 | `GET /script-info`                                                 | A script's classes + public/private fields (brace-depth text scan, not a real TS parse — see the file's own doc comment for why)                                                                                                                                                                          |
 | `GET /list-bindings`, `POST /save-binding`, `POST /remove-binding` | The drag-and-drop field↔element assignments — `src/game/ui/bindings.json`                                                                                                                                                                                                                                 |
 | `GET /list-scene-bindings`, `POST /save-scene-bindings`                | The 3D editor's `⊙ Pick` field↔scene-object assignments — `src/game/sceneBindings.json`. The save is deliberately *batched* (a whole session's edits in one request, flushed on Exit Editor) rather than one-per-assignment: this file is in `main.ts`'s module graph, so each write hot-reloads the game, and reloading mid-session tears down the scene being picked from |
-| `GET /list-colliders`, `POST /save-colliders`                      | The 3D editor's "Configure Colliders" mode — `src/game/colliders.json`. Batched on Exit Editor for the same module-graph reason as the row above, and a *wholesale replace* rather than a merge: the file is entirely the editor's to own, and merging would have to reconcile deletions and reorders for no benefit — a delete that silently didn't stick is a far worse failure than a full overwrite |
+| `GET /list-colliders`, `POST /save-colliders`                      | The 3D editor's "Configure Colliders" mode — `src/game/colliders.json`. Written by that editor's own 💾 Save (and again on Exit Editor as a catch-all). A *wholesale replace* rather than a merge: the file is entirely the editor's to own, and merging would have to reconcile deletions and reorders for no benefit — a delete that silently didn't stick is a far worse failure than a full overwrite |
+| `GET /list-particles`, `POST /save-particles`                      | The 3D editor's "Particle System" mode — `src/game/particles.json`. Same wholesale-replace contract as colliders. Only emitter *configuration* is written, never live particle state |
+
+## Verification
+
+```bash
+npm test              # typecheck + particle simulation + shaders + UI geometry parity
+npm run test:particles
+npm run test:geometry
+npm run typecheck
+```
+
+Three suites, each covering something that can't be caught by reading the code:
+
+- **`tests/particles.test.mjs`** drives the simulation directly over typed arrays — emission rates and bursts, lifetimes, buffer capacity and swap-remove, gravity, seeded determinism in both directions, shape sampling, collision, module gating, curves and gradients, lifecycle, `EditorHistory` semantics, and the detach/re-add identity contract. Its `regression:` cases each reproduce a bug that was genuinely in the code; every one was checked to *fail* against the original before being kept, because a regression test that passes either way is worse than none.
+- **`tests/particle-shader.test.mjs`** preprocesses the real `#ifdef` structure for all nine define combinations the renderer emits and asserts each compiles to something valid. A GLSL error only surfaces when a GL context links the program, which in practice means "the render mode nobody opened in a browser is silently broken" — exactly how mesh mode shipped dead.
+- **`tests/geometry-parity.test.mjs`** is the locked UI-scaling system's mechanical enforcement (see the `ui/UILayout.ts` section).
+
+The particle suite needs a ~10-line DOM stub for the canvas the default texture paints into, and deliberately bundles only the DOM-free modules by name rather than the `particles/index.ts` barrel — that barrel reaches `MraidAdapter`, which reads `window` at module scope, and stubbing a browser to test arithmetic would hide a real dependency rather than expose it.
+
+**What these do not cover:** anything visual. They verify simulation maths, lifecycle ordering, and shader *structure* — not that pixels look right, and not the editor's own click-through. Confirm those in a browser.
 
 ## Building a new playable ad on this engine
 

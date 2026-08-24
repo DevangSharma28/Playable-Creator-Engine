@@ -53,6 +53,8 @@ export class EditorInspector {
   private readonly providerVersions = new Map<InspectorSectionProvider, number>();
   /** Per-frame value writers for every provider-contributed row currently on screen. */
   private sectionRefreshers: (() => void)[] = [];
+  /** Collapse state per collapsible section id. Deliberately outlives a rebuild (and every selection change) — see buildSection. */
+  private readonly sectionOpen = new Map<string, boolean>();
 
   constructor(
     private readonly container: HTMLElement,
@@ -204,8 +206,15 @@ export class EditorInspector {
   private buildProviderSections(obj: THREE.Object3D): void {
     for (const provider of this.providers) {
       this.providerVersions.set(provider, provider.version);
-      const section = provider.describe(obj);
-      if (section) this.buildSection(section);
+      const described = provider.describe(obj);
+      if (!described) continue;
+      // A provider may contribute one section or many — the particle
+      // editor's sixteen modules are one registration, not sixteen.
+      if (Array.isArray(described)) {
+        for (const section of described) this.buildSection(section);
+      } else {
+        this.buildSection(described);
+      }
     }
   }
 
@@ -216,18 +225,79 @@ export class EditorInspector {
 
     const header = document.createElement("div");
     header.className = "si-insp-section-title";
+
+    const body = document.createElement("div");
+    body.className = "si-insp-section-body";
+
+    let caret: HTMLElement | undefined;
+    if (section.collapsible) {
+      wrap.classList.add("collapsible");
+      caret = document.createElement("i");
+      caret.className = "si-insp-section-caret";
+      header.appendChild(caret);
+    }
+
     const title = document.createElement("span");
     title.textContent = section.title;
     header.appendChild(title);
+
     if (section.badge) {
       const badge = document.createElement("em");
       badge.className = `si-insp-badge tone-${section.badgeTone ?? "solid"}`;
       badge.textContent = section.badge;
       header.appendChild(badge);
     }
+
+    // The module enable switch, in the header. Clicking it must not also
+    // toggle the collapse — hence the stopPropagation.
+    if (section.moduleToggle) {
+      const toggle = section.moduleToggle;
+      const sw = document.createElement("button");
+      sw.type = "button";
+      sw.className = "si-insp-module-switch";
+      const paintSwitch = (on: boolean): void => {
+        sw.classList.toggle("on", on);
+        sw.setAttribute("aria-pressed", String(on));
+        sw.title = on ? "Module enabled — click to disable" : "Module disabled — click to enable";
+        wrap.classList.toggle("module-off", !on);
+      };
+      paintSwitch(toggle.value);
+      sw.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const next = !sw.classList.contains("on");
+        toggle.onChange(next);
+        paintSwitch(next);
+      });
+      header.appendChild(sw);
+      if (toggle.read) this.sectionRefreshers.push(() => paintSwitch((toggle.read as () => boolean)()));
+    }
+
     wrap.appendChild(header);
 
-    for (const field of section.fields) wrap.appendChild(this.buildSectionField(field));
+    if (section.collapsible) {
+      // Collapse state is remembered per section id across rebuilds — a
+      // rebuild happens on every selection change and every structural
+      // edit, and re-expanding sixteen modules each time would make the
+      // panel unusable.
+      const remembered = this.sectionOpen.get(section.id);
+      const open = remembered ?? section.defaultOpen ?? false;
+      this.sectionOpen.set(section.id, open);
+      const paintOpen = (isOpen: boolean): void => {
+        wrap.classList.toggle("open", isOpen);
+        body.style.display = isOpen ? "" : "none";
+        if (caret) caret.textContent = isOpen ? "▾" : "▸";
+      };
+      paintOpen(open);
+      header.addEventListener("click", () => {
+        const next = !wrap.classList.contains("open");
+        this.sectionOpen.set(section.id, next);
+        paintOpen(next);
+      });
+      header.style.cursor = "pointer";
+    }
+
+    for (const field of section.fields) body.appendChild(this.buildSectionField(field));
+    wrap.appendChild(body);
     this.container.appendChild(wrap);
   }
 
@@ -323,6 +393,109 @@ export class EditorInspector {
             if (value.textContent !== text) value.textContent = text;
           }
           if (field.readAccent) value.className = `si-insp-info-value accent-${field.readAccent()}`;
+        });
+      }
+    } else if (field.kind === "select") {
+      const select = document.createElement("select");
+      select.className = "si-insp-select";
+      for (const option of field.options) {
+        const el = document.createElement("option");
+        el.value = option.value;
+        el.textContent = option.label;
+        select.appendChild(el);
+      }
+      select.value = field.value;
+      select.addEventListener("change", () => field.onChange(select.value));
+      row.appendChild(select);
+      if (field.read) {
+        this.sectionRefreshers.push(() => {
+          if (document.activeElement === select) return;
+          const v = (field.read as () => string)();
+          if (select.value !== v) select.value = v;
+        });
+      }
+    } else if (field.kind === "range") {
+      const wrap = document.createElement("div");
+      wrap.className = "si-insp-range";
+      const minInput = document.createElement("input");
+      const maxInput = document.createElement("input");
+      for (const input of [minInput, maxInput]) {
+        input.type = "number";
+        input.step = String(field.step ?? 0.05);
+        if (field.clampMin !== undefined) input.min = String(field.clampMin);
+      }
+      minInput.value = String(round2(field.min));
+      maxInput.value = String(round2(field.max));
+      const commit = (): void => {
+        let lo = parseFloat(minInput.value);
+        let hi = parseFloat(maxInput.value);
+        if (Number.isNaN(lo)) lo = field.min;
+        if (Number.isNaN(hi)) hi = field.max;
+        if (field.clampMin !== undefined) {
+          lo = Math.max(field.clampMin, lo);
+          hi = Math.max(field.clampMin, hi);
+        }
+        // Never let min exceed max: a range with an inverted pair samples
+        // to a negative span and silently produces nonsense (a negative
+        // lifetime kills the particle on its birth frame).
+        if (hi < lo) hi = lo;
+        field.onChange(lo, hi);
+      };
+      minInput.addEventListener("input", commit);
+      maxInput.addEventListener("input", commit);
+      const dash = document.createElement("i");
+      dash.textContent = "–";
+      dash.className = "si-insp-range-dash";
+      wrap.append(minInput, dash, maxInput);
+      row.appendChild(wrap);
+      if (field.read) {
+        this.sectionRefreshers.push(() => {
+          const [lo, hi] = (field.read as () => [number, number])();
+          setIfIdleNumber(minInput, lo);
+          setIfIdleNumber(maxInput, hi);
+        });
+      }
+    } else if (field.kind === "color") {
+      const input = document.createElement("input");
+      input.type = "color";
+      input.className = "si-insp-color";
+      input.value = rgbToHex(field.value);
+      input.addEventListener("input", () => field.onChange(hexToRgb(input.value)));
+      row.appendChild(input);
+      if (field.read) {
+        this.sectionRefreshers.push(() => {
+          if (document.activeElement === input) return;
+          const hex = rgbToHex((field.read as () => [number, number, number])());
+          if (input.value !== hex) input.value = hex;
+        });
+      }
+    } else if (field.kind === "slider") {
+      const wrap = document.createElement("div");
+      wrap.className = "si-insp-slider";
+      const input = document.createElement("input");
+      input.type = "range";
+      input.min = String(field.min);
+      input.max = String(field.max);
+      input.step = String(field.step ?? 0.01);
+      input.value = String(field.value);
+      const readout = document.createElement("b");
+      readout.textContent = String(round2(field.value));
+      input.addEventListener("input", () => {
+        const v = parseFloat(input.value);
+        readout.textContent = String(round2(v));
+        field.onChange(v);
+      });
+      wrap.append(input, readout);
+      row.appendChild(wrap);
+      if (field.read) {
+        this.sectionRefreshers.push(() => {
+          if (document.activeElement === input) return;
+          const v = (field.read as () => number)();
+          const s = String(v);
+          if (input.value !== s) {
+            input.value = s;
+            readout.textContent = String(round2(v));
+          }
         });
       }
     } else {
@@ -503,6 +676,26 @@ function setIfIdleText(input: HTMLInputElement, read: () => string): void {
 
 function round2(value: number): number {
   return Math.round(value * 100) / 100;
+}
+
+/**
+ * 0..1 linear RGB to a `#rrggbb` hex string for `<input type="color">`.
+ *
+ * No gamma conversion on purpose. The values here are what go straight
+ * into a THREE.Color the shader multiplies by, and round-tripping them
+ * through sRGB would mean the number shown in the swatch stops matching
+ * the number stored in the config — which makes a hand-edited
+ * particles.json and the editor disagree about the same effect.
+ */
+function rgbToHex(rgb: [number, number, number]): string {
+  const to255 = (v: number): number => Math.max(0, Math.min(255, Math.round(v * 255)));
+  return `#${((1 << 24) | (to255(rgb[0]) << 16) | (to255(rgb[1]) << 8) | to255(rgb[2])).toString(16).slice(1)}`;
+}
+
+function hexToRgb(hex: string): [number, number, number] {
+  const n = parseInt(hex.replace("#", ""), 16);
+  if (Number.isNaN(n)) return [1, 1, 1];
+  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
 }
 
 function escapeHtml(s: string): string {

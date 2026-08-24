@@ -34,6 +34,14 @@ const SCENE_BINDINGS_FILE = path.join(ROOT, "src", "game", "sceneBindings.json")
 // reads this same file). Ships: it's a real import in Game.ts, so what's
 // placed in the editor is what runs in the production build.
 const COLLIDERS_FILE = path.join(ROOT, "src", "game", "colliders.json");
+// Particle systems authored in the 3D editor's "Particle System" mode —
+// see /list-particles and /save-particles below, and
+// src/engine/particles/ParticleSerialization.ts (the runtime side that
+// reads this same file). Ships for the same reason colliders.json does:
+// it's a real import in Game.ts, so what's authored in the editor is what
+// runs in the production build. Only the *configuration* is stored — never
+// a snapshot of live particles.
+const PARTICLES_FILE = path.join(ROOT, "src", "game", "particles.json");
 const SRC_DIR = path.join(ROOT, "src");
 const SCRIPT_CATEGORIES = { engine: path.join(SRC_DIR, "engine"), game: path.join(SRC_DIR, "game") };
 
@@ -743,6 +751,19 @@ function writeColliders(data) {
   fs.writeFileSync(COLLIDERS_FILE, JSON.stringify(data, null, 2));
 }
 
+function readParticles() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(PARTICLES_FILE, "utf8"));
+    if (!Array.isArray(parsed.systems)) throw new Error("malformed");
+    return parsed;
+  } catch {
+    return { version: 1, systems: [] };
+  }
+}
+function writeParticles(data) {
+  fs.writeFileSync(PARTICLES_FILE, JSON.stringify(data, null, 2));
+}
+
 // Vite's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
@@ -1235,10 +1256,51 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/list-particles") {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify(readParticles()));
+    return;
+  }
+
+  // A wholesale replace and a single batched write on Exit Editor, for
+  // exactly the reasons /save-colliders above gives: the file is entirely
+  // the editor's to own, and it sits in main.ts's module graph so writing
+  // it mid-session hot-reloads the scene being edited.
+  //
+  // The body limit is larger than the collider one because a particle
+  // config is genuinely bigger — sixteen modules per emitter, several
+  // emitters per system — while still being small enough that a runaway
+  // request can't exhaust memory.
+  if (req.method === "POST" && req.url === "/save-particles") {
+    readRequestBody(req, 8 * 1024 * 1024)
+      .then((raw) => {
+        const body = JSON.parse(raw);
+        if (!Array.isArray(body.systems)) throw new Error("Missing systems array");
+        for (const system of body.systems) {
+          if (!system.id || !Array.isArray(system.emitters)) throw new Error("Every system needs an id and an emitters array");
+          for (const emitter of system.emitters) {
+            if (!emitter.id || !emitter.main) throw new Error(`Emitter in "${system.name || system.id}" is missing an id or its main module`);
+          }
+        }
+        writeParticles({ version: 1, systems: body.systems });
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        const emitters = body.systems.reduce((n, s) => n + s.emitters.length, 0);
+        res.end(JSON.stringify({ ok: true, saved: body.systems.length, emitters }));
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings, GET /list-colliders, POST /save-colliders)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings, GET /list-colliders, POST /save-colliders, GET /list-particles, POST /save-particles)`);
 });

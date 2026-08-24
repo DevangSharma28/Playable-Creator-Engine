@@ -2158,6 +2158,211 @@
       transition: opacity 0.18s ease, transform 0.18s ease;
     }
 
+    /* ------------------------------------------------------------------
+       Particle System — the ION Particle & VFX authoring toolbar.
+
+       Same "second row above the gizmo toolbar" shape and the same
+       reasoning as the collider toolbar directly above: creating an
+       effect, driving its transport, and toggling gizmos are a *mode*,
+       not more transform tools. Amber-bordered rather than cyan so the
+       two modes are distinguishable at a glance, matching the amber the
+       emission-volume gizmos themselves draw in.
+
+       It sits slightly higher than the collider row so both can be open
+       at once without overlapping — they're independent modes and nothing
+       stops you using them together.
+       ------------------------------------------------------------------ */
+    #si-particle-toolbar {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
+      max-width: min(880px, calc(100vw - var(--dock-left, 0px) - var(--dock-right, 0px) - 40px));
+      position: fixed;
+      bottom: 56px;
+      left: 50%;
+      z-index: 71;
+      gap: 3px;
+      padding: 4px 6px;
+      background: linear-gradient(180deg, var(--eng-panel-2), var(--eng-panel));
+      border: 1px solid rgba(255, 176, 32, 0.5);
+      border-radius: var(--eng-radius);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+      pointer-events: none;
+      visibility: hidden;
+      opacity: 0;
+      transform: translate(-50%, 10px);
+      transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s;
+    }
+
+    /* Lifted clear of the collider row whenever that one is also open. */
+    #si-collider-toolbar.visible ~ #si-particle-toolbar.visible {
+      bottom: 100px;
+    }
+
+    #si-particle-toolbar.visible {
+      pointer-events: auto;
+      visibility: visible;
+      opacity: 1;
+      transform: translate(-50%, 0);
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+
+    #si-particle-toolbar button {
+      font-family: inherit;
+      font-size: 11px;
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 7px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+
+    #si-particle-toolbar button:hover {
+      background: rgba(255, 176, 32, 0.16);
+      border-color: rgba(255, 176, 32, 0.5);
+    }
+
+    #si-particle-toolbar button.active {
+      color: #2a1a00;
+      background: linear-gradient(180deg, #ffd27a, #ffb020);
+      border-color: #ffd27a;
+    }
+
+    #si-particle-toolbar button.danger:hover {
+      color: var(--eng-danger);
+      border-color: var(--eng-danger);
+      background: rgba(255, 92, 122, 0.14);
+    }
+
+    #si-particle-toolbar select {
+      font-family: inherit;
+      font-size: 11px;
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 5px;
+      cursor: pointer;
+      max-width: 150px;
+    }
+
+    #si-particle-toolbar select option {
+      background: #12161d;
+      color: #e6edf6;
+    }
+
+    /* ------------------------------------------------------------------
+       Undo / Redo / Save, shared by both editor toolbars.
+
+       A disabled Undo has to *look* disabled rather than just ignore the
+       click — "is there anything to undo" is the single most useful thing
+       the button can tell you at a glance.
+       ------------------------------------------------------------------ */
+    #si-collider-toolbar button:disabled,
+    #si-particle-toolbar button:disabled {
+      opacity: 0.32;
+      cursor: default;
+      pointer-events: none;
+    }
+
+    /* The unsaved indicator: a dot on the Save button. Deliberately a
+       shape rather than a colour change alone — the toolbars are already
+       colour-coded per mode (cyan / amber), so another tint would read as
+       mode rather than state. */
+    #si-col-save.dirty,
+    #si-part-save.dirty {
+      position: relative;
+      border-color: rgba(255, 200, 60, 0.75);
+      color: #ffe066;
+    }
+
+    #si-col-save.dirty::after,
+    #si-part-save.dirty::after {
+      content: "";
+      position: absolute;
+      top: -3px;
+      right: -3px;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #ffb020;
+      box-shadow: 0 0 0 2px var(--eng-panel);
+    }
+
+    /* Brief confirmation after a successful write — the write itself is
+       silent (no reload any more, by design), so without this there's no
+       signal that Save did anything. */
+    #si-col-save.saved,
+    #si-part-save.saved {
+      color: #86efac;
+      border-color: rgba(74, 222, 128, 0.7);
+    }
+
+    .si-particle-label {
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #ffb020;
+      padding: 0 4px 0 2px;
+      white-space: nowrap;
+    }
+
+    #si-particle-stats {
+      font-size: 10px;
+      color: var(--eng-text-dim);
+      padding-left: 6px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* ------------------------------------------------------------------
+       Particle-mode dock layout.
+
+       In this mode the LEFT dock becomes an Inspector-only, full-height
+       panel: sixteen collapsible modules genuinely need the vertical
+       space, and splitting the dock with anything else makes both halves
+       too short to work in. Control Desk is hidden entirely — it edits
+       script fields, which has nothing to do with authoring a VFX — and
+       the Hierarchy moves to the right dock so selecting an emitter out of
+       the PARTICLES group still works.
+
+       Panels are *moved* (see applyParticleLayout in the script below)
+       rather than duplicated, so there's exactly one #si-inspector and one
+       #si-hierarchy in the document at all times — the editor writes into
+       them by id, and a second copy would leave the editor updating an
+       invisible one.
+       ------------------------------------------------------------------ */
+    body.particle-mode #editor-pane-scripts,
+    body.particle-mode #editor-pane-controldesk,
+    body.particle-mode #editor-pane-viewhelper {
+      display: none !important;
+    }
+
+    /* Overrides the even 50/50 split #editor-left normally imposes on its
+       panes — with only the Inspector left in there, it takes the lot. */
+    body.particle-mode #editor-left .editor-pane {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    /* Widened for the module list. Set on :root, not on the dock, because
+       the dock's own width reads this variable — and editorDockWidth()
+       measures the element afterwards either way, so currentInsets() picks
+       the new reservation up without any extra bookkeeping. */
+    body.particle-mode {
+      --editor-left-w: clamp(230px, 27vw, 360px);
+    }
+
+    body.particle-mode #editor-right .editor-pane {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
     #si-collider-toolbar button {
       font-family: inherit;
       font-size: 11px;
@@ -2231,6 +2436,75 @@
       text-transform: uppercase;
       color: var(--eng-text-dim);
       margin-bottom: 6px;
+    }
+
+    /* ------------------------------------------------------------------
+       Collapsible module sections — the particle Inspector's sixteen
+       modules. Without collapsing, selecting an emitter produces a wall of
+       a hundred-odd rows and finding one is scrolling rather than looking.
+       Collider panels don't set `collapsible` and are unaffected.
+       ------------------------------------------------------------------ */
+    .si-insp-section.collapsible > .si-insp-section-title {
+      user-select: none;
+      padding: 3px 4px;
+      margin: -3px -4px 4px;
+      border-radius: 5px;
+      transition: background 0.12s ease;
+    }
+
+    .si-insp-section.collapsible > .si-insp-section-title:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .si-insp-section-caret {
+      font-style: normal;
+      font-size: 8px;
+      width: 8px;
+      color: var(--eng-text-dim);
+      flex: none;
+    }
+
+    /* A disabled module dims its whole header so "which modules are
+       actually doing work" is answerable at a glance, scrolling past. */
+    .si-insp-section.module-off > .si-insp-section-title {
+      opacity: 0.45;
+    }
+
+    /* The module enable switch, pushed to the right edge of the header. */
+    .si-insp-module-switch {
+      margin-left: auto;
+      flex: none;
+      width: 26px;
+      height: 14px;
+      padding: 0;
+      border-radius: 999px;
+      border: 1px solid var(--eng-border);
+      background: rgba(255, 255, 255, 0.07);
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .si-insp-module-switch::after {
+      content: "";
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--eng-text-dim);
+      transition: transform 0.15s ease, background 0.15s ease;
+    }
+
+    .si-insp-module-switch.on {
+      background: rgba(56, 189, 248, 0.25);
+      border-color: rgba(56, 189, 248, 0.6);
+    }
+
+    .si-insp-module-switch.on::after {
+      transform: translateX(12px);
+      background: #7dd3fc;
     }
 
     .si-insp-badge {
@@ -2325,6 +2599,106 @@
     .si-insp-info-value {
       font-size: 10px;
       font-weight: 700;
+    }
+
+    /* ------------------------------------------------------------------
+       Select / range / color / slider — the field kinds the particle
+       Inspector adds (see src/engine/editor/InspectorSections.ts). Named
+       generically, like every other row here: nothing in this block is
+       particle-specific, and a future system contributing a panel gets
+       them for free.
+       ------------------------------------------------------------------ */
+    .si-insp-field select.si-insp-select {
+      flex: 1;
+      min-width: 0;
+      font-family: inherit;
+      font-size: 10px;
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 4px;
+      cursor: pointer;
+    }
+
+    .si-insp-field select.si-insp-select:focus {
+      outline: none;
+      border-color: rgba(56, 189, 248, 0.7);
+    }
+
+    /* Native <select> popups render with the OS palette, so the options
+       themselves need explicit colors or they're black-on-black in this
+       dark panel on some platforms. */
+    .si-insp-field select.si-insp-select option {
+      background: #12161d;
+      color: #e6edf6;
+    }
+
+    .si-insp-range {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .si-insp-range input {
+      width: 100%;
+      min-width: 0;
+      font-family: inherit;
+      font-size: 10px;
+      color: var(--eng-text);
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      padding: 3px 4px;
+    }
+
+    .si-insp-range input:focus {
+      outline: none;
+      border-color: rgba(56, 189, 248, 0.7);
+    }
+
+    .si-insp-range-dash {
+      font-style: normal;
+      color: var(--eng-text-dim);
+      flex: none;
+      font-size: 10px;
+    }
+
+    .si-insp-field input.si-insp-color {
+      flex: none;
+      width: 34px;
+      height: 20px;
+      padding: 0;
+      border: 1px solid var(--eng-border);
+      border-radius: var(--eng-radius-sm);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .si-insp-slider {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    .si-insp-slider input[type="range"] {
+      flex: 1;
+      min-width: 0;
+      accent-color: #38bdf8;
+      height: 14px;
+      cursor: pointer;
+    }
+
+    .si-insp-slider b {
+      flex: none;
+      width: 26px;
+      text-align: right;
+      font-size: 9px;
+      color: var(--eng-text-dim);
     }
 
     .si-insp-info-value.accent-good {
@@ -2962,7 +3336,7 @@
     </div>
     <div id="engine-room-body">
       <div id="engine-room-actions">
-        <button id="er-btn-editor" title="Open the UI layout editor">✏️ Editor</button>
+        <button id="er-btn-editor" title="Open the UI layout editor">✏️ UI Editor</button>
         <button id="er-btn-build" class="primary" title="Open the Builder panel">🛠 Builder</button>
       </div>
       <button id="er-btn-viewer" title="Orbit, select, and edit objects in the live gameplay scene">🧭 3D
@@ -3157,6 +3531,7 @@
     <button id="si-tool-frame" title="Frame selected (F)">🎯</button>
     <span class="si-toolbar-sep"></span>
     <button id="si-tool-colliders" title="Configure Colliders — create and edit the ION collision volumes (K)">🧊</button>
+    <button id="si-tool-particles" title="Particle System — author ION particle effects (P)">✨</button>
   </div>
   <!-- Configure Colliders. Hidden until the mode is on; see its CSS for
        why it's a separate row rather than more buttons in the toolbar
@@ -3170,7 +3545,44 @@
     <span class="si-toolbar-sep"></span>
     <button id="si-col-visible" class="active" title="Show/hide the collider wireframes. Detection keeps running either way.">👁 Volumes</button>
     <button id="si-col-delete" class="danger" title="Delete the selected collider">🗑</button>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-col-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+    <button id="si-col-redo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷</button>
+    <button id="si-col-save" title="Save colliders to src/game/colliders.json">💾 Save</button>
     <span id="si-collider-stats">—</span>
+  </div>
+  <!-- Particle System. Hidden until the mode is on; see its CSS for why
+       it's a separate row. Creating with a scene object selected attaches
+       the new effect to it, same convention the collider row uses. -->
+  <div id="si-particle-toolbar">
+    <span class="si-particle-label">Particles</span>
+    <select id="si-particle-preset" title="Starter preset for the next '＋ System' — reusable configurations, not gameplay effects">
+      <option value="">Empty system</option>
+    </select>
+    <button id="si-part-add-system" title="New particle system from the chosen preset. With a scene object selected, it's attached to it.">＋ System</button>
+    <button id="si-part-add-emitter" title="Add another emitter to the selected system — how a one-emitter effect becomes a layered one">＋ Emitter</button>
+    <button id="si-part-duplicate" title="Duplicate the selected emitter">⧉</button>
+    <button id="si-part-delete" class="danger" title="Delete the selected emitter">🗑</button>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-part-play" title="Play">▶</button>
+    <button id="si-part-pause" title="Pause">⏸</button>
+    <button id="si-part-restart" title="Restart from the beginning">↻</button>
+    <button id="si-part-stop" title="Stop emitting — live particles finish their lifetimes">⏹</button>
+    <button id="si-part-clear" title="Kill every live particle right now">✕</button>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-part-gizmo-shapes" class="active" title="Show/hide emission volume wireframes. The effect itself is unaffected.">◇ Shapes</button>
+    <button id="si-part-gizmo-dir" class="active" title="Show/hide the emission direction indicator">↑ Dir</button>
+    <button id="si-part-gizmo-bounds" title="Show/hide the live particle bounds box">⬚ Bounds</button>
+    <select id="si-particle-quality" title="Global quality tier — scales emission rate and burst counts across every effect at once">
+      <option value="high">Quality: High</option>
+      <option value="medium">Quality: Medium</option>
+      <option value="low">Quality: Low</option>
+    </select>
+    <span class="si-toolbar-sep"></span>
+    <button id="si-part-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+    <button id="si-part-redo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷</button>
+    <button id="si-part-save" title="Save particle systems to src/game/particles.json">💾 Save</button>
+    <span id="si-particle-stats">—</span>
   </div>
   <div id="device-topbar">
     <span class="label">Device Preview</span>
@@ -4393,6 +4805,22 @@
      */
     let colliderDirty = false;
 
+    /**
+     * Whether any particle system or emitter was created, deleted, moved,
+     * or reconfigured this session.
+     *
+     * Declared here beside colliderDirty rather than down in the particle
+     * block, because updateExitButtonPending (defined just below) reads
+     * it — a `let` in the later block would still be in its temporal dead
+     * zone if anything called that function during setup, which is a
+     * ReferenceError rather than a silently-wrong count.
+     *
+     * A single flag for the same reason colliderDirty is one:
+     * /save-particles replaces src/game/particles.json wholesale, so
+     * there's nothing to accumulate, only "is there anything to write".
+     */
+    let particleDirty = false;
+
     function queueSceneBinding(edit) {
       pendingSceneBindings.set(edit.className + "." + edit.fieldName, edit);
       updateExitButtonPending();
@@ -4400,13 +4828,14 @@
 
     function updateExitButtonPending() {
       const bindings = pendingSceneBindings.size;
-      const n = bindings + (colliderDirty ? 1 : 0);
+      const n = bindings + (colliderDirty ? 1 : 0) + (particleDirty ? 1 : 0);
       const btn = document.getElementById("er-exit-3d");
       btn.textContent = n > 0 ? "\u2715 Exit & Save (" + n + ")" : "\u2715 Exit Editor";
       btn.classList.toggle("has-pending", n > 0);
       const parts = [];
       if (bindings > 0) parts.push(bindings + " assignment" + (bindings === 1 ? "" : "s") + " \u2192 src/game/sceneBindings.json");
       if (colliderDirty) parts.push("collider changes \u2192 src/game/colliders.json");
+      if (particleDirty) parts.push("particle changes \u2192 src/game/particles.json");
       btn.title = parts.length ? "Written on exit: " + parts.join("; ") : "Exit 3D Viewer/Editor";
     }
 
@@ -4439,9 +4868,9 @@
      * on the engine side — see Collider.persisted.
      */
     async function flushColliders() {
-      if (!window.__hasColliderChanges || !window.__hasColliderChanges()) return;
+      if (!window.__hasColliderChanges || !window.__hasColliderChanges()) return true;
       const colliders = window.__serializeColliders && window.__serializeColliders();
-      if (!colliders) return;
+      if (!colliders) return false;
       try {
         const res = await fetch("http://127.0.0.1:8001/save-colliders", {
           method: "POST",
@@ -4450,13 +4879,165 @@
         });
         const data = await res.json();
         if (!data.ok) throw new Error(data.error || "save-colliders failed");
+        // Marks ONLY the collider side clean, and advances the shared
+        // history's clean point. Deliberately not a "mark everything
+        // saved" call — one of those cleared the particle dirty flag too,
+        // which made the very next particle save no-op and silently lose
+        // the edits.
         window.__markCollidersSaved && window.__markCollidersSaved();
         colliderDirty = false;
         updateExitButtonPending();
+        return true;
       } catch (err) {
         console.error("3D Editor: couldn't persist colliders — the edits stay in this session only.", err);
+        return false;
       }
     }
+
+    /**
+     * Writes every particle system the editor owns to
+     * src/game/particles.json in one request.
+     *
+     * Must run while the editor is still open, for exactly the reason
+     * flushColliders must: __serializeParticles reads the live EditorRoot,
+     * which stops existing the moment freecam turns off.
+     *
+     * Only the *configuration* travels — never live particle state. See
+     * ParticleSerialization.ts's own note on why that distinction is what
+     * keeps this file small and diffable.
+     */
+    async function flushParticles() {
+      if (!window.__hasParticleChanges || !window.__hasParticleChanges()) return true;
+      const systems = window.__serializeParticles && window.__serializeParticles();
+      if (!systems) return false;
+      try {
+        const res = await fetch("http://127.0.0.1:8001/save-particles", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ systems }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "save-particles failed");
+        // Marks only the particle side clean — see flushColliders above.
+        window.__markParticlesSaved && window.__markParticlesSaved();
+        particleDirty = false;
+        updateExitButtonPending();
+        return true;
+      } catch (err) {
+        console.error("3D Editor: couldn't persist particle systems — the edits stay in this session only.", err);
+        return false;
+      }
+    }
+
+    /* ============================================================
+       Undo / Redo / Save — shared by the collider and particle toolbars.
+
+       One history serves both modes (see EditorRoot.history), so these are
+       deliberately not per-mode: a single Undo walks back through whatever
+       actually happened, in order, regardless of which mode each action
+       was performed in — and switching modes never discards it.
+
+       Save writes immediately rather than deferring to Exit Editor.
+       That's only safe because vite.config.mts stops watching the two
+       files these write; without that the write trips HMR and tears down
+       the scene (and the whole undo history) the moment you press Save.
+       src/game/sceneBindings.json is still deferred to exit, because that
+       one genuinely needs the reload to re-apply its assignments.
+       ============================================================ */
+    const colUndoBtn = document.getElementById("si-col-undo");
+    const colRedoBtn = document.getElementById("si-col-redo");
+    const colSaveBtn = document.getElementById("si-col-save");
+    const partUndoBtn = document.getElementById("si-part-undo");
+    const partRedoBtn = document.getElementById("si-part-redo");
+    const partSaveBtn = document.getElementById("si-part-save");
+
+    function paintHistoryButtons() {
+      const h = window.__getEditorHistory && window.__getEditorHistory();
+      const canUndo = !!(h && h.canUndo);
+      const canRedo = !!(h && h.canRedo);
+      const undoTitle = canUndo ? "Undo " + h.undoLabel + " (Ctrl+Z)" : "Nothing to undo (Ctrl+Z)";
+      const redoTitle = canRedo ? "Redo " + h.redoLabel + " (Ctrl+Y / Ctrl+Shift+Z)" : "Nothing to redo (Ctrl+Y / Ctrl+Shift+Z)";
+      for (const btn of [colUndoBtn, partUndoBtn]) {
+        btn.disabled = !canUndo;
+        btn.title = undoTitle;
+      }
+      for (const btn of [colRedoBtn, partRedoBtn]) {
+        btn.disabled = !canRedo;
+        btn.title = redoTitle;
+      }
+      // Each Save button reflects only its own file's dirty state — they
+      // write different files and either can be clean while the other
+      // isn't.
+      colSaveBtn.classList.toggle("dirty", !!(h && h.colliderDirty));
+      colSaveBtn.title = h && h.colliderDirty ? "Unsaved collider changes — write src/game/colliders.json" : "Colliders are saved";
+      partSaveBtn.classList.toggle("dirty", !!(h && h.particleDirty));
+      partSaveBtn.title = h && h.particleDirty ? "Unsaved particle changes — write src/game/particles.json" : "Particle systems are saved";
+    }
+
+    /** The engine's own push/undo/redo signal — repaints without polling. */
+    window.__onEditorHistoryChanged = () => {
+      paintHistoryButtons();
+      updateExitButtonPending();
+    };
+
+    function doUndo() {
+      if (!window.__editorUndo || !window.__editorUndo()) return;
+      paintHistoryButtons();
+      updateExitButtonPending();
+    }
+
+    function doRedo() {
+      if (!window.__editorRedo || !window.__editorRedo()) return;
+      paintHistoryButtons();
+      updateExitButtonPending();
+    }
+
+    colUndoBtn.addEventListener("click", doUndo);
+    partUndoBtn.addEventListener("click", doUndo);
+    colRedoBtn.addEventListener("click", doRedo);
+    partRedoBtn.addEventListener("click", doRedo);
+
+    /** Flashes the button green so a silent, reload-free write still has a visible outcome. */
+    function flashSaved(button) {
+      button.classList.add("saved");
+      window.setTimeout(() => button.classList.remove("saved"), 900);
+    }
+
+    colSaveBtn.addEventListener("click", async () => {
+      colSaveBtn.disabled = true;
+      const ok = await flushColliders();
+      colSaveBtn.disabled = false;
+      if (ok) flashSaved(colSaveBtn);
+      paintHistoryButtons();
+    });
+
+    partSaveBtn.addEventListener("click", async () => {
+      partSaveBtn.disabled = true;
+      const ok = await flushParticles();
+      partSaveBtn.disabled = false;
+      if (ok) flashSaved(partSaveBtn);
+      paintHistoryButtons();
+    });
+
+    /* Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, only while the 3D editor is open.
+       Guarded against text fields for the same reason EditorHierarchy
+       guards its own "." shortcut: the Inspector's inputs have their own
+       native undo, and stealing Ctrl+Z there would be worse than not
+       having the shortcut at all. */
+    window.addEventListener("keydown", (e) => {
+      if (!freecamActive) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const active = document.activeElement;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.isContentEditable)) return;
+      const key = e.key.toLowerCase();
+      if (key === "z" && !e.shiftKey) {
+        e.preventDefault();
+        doUndo();
+      } else if (key === "y" || (key === "z" && e.shiftKey)) {
+        e.preventDefault();
+        doRedo();
+      }
+    });
 
     /* Pick-mode hint bar. Shown while Control Desk has armed an object
        assignment, so it's unmistakable that the next click assigns rather
@@ -4489,6 +5070,13 @@
         // isn't on.
         setColliderMode(false);
         colliderDirty = false;
+        // Same reasoning as collider mode above: a fresh EditorRoot is
+        // built on the next entry with its gizmos hidden and its dock
+        // layout back to normal, so leaving the button lit (or the
+        // Inspector parked in the left dock) would claim a mode that isn't
+        // on.
+        setParticleMode(false);
+        particleDirty = false;
         updateExitButtonPending();
       }
       // The 3D Viewer/Editor always uses the full space between its docks —
@@ -4517,6 +5105,11 @@
       // and observes it continuously, but the docks' own 0.2s show/hide
       // transition means the box can still settle a frame or two later.
       applyDeviceFrameInstant();
+      // After __setFreecamActive, since a fresh EditorRoot (and therefore a
+      // fresh, empty history) only exists once the editor has actually
+      // opened.
+      paintHistoryButtons();
+      paintParticleTransport();
     }
 
     viewerBtn.addEventListener("click", () => setFreecamUI(true));
@@ -4526,10 +5119,11 @@
       // Game.ts's applySceneBindings — so it has to land after the editor
       // has stopped being the thing rendering.
       exitViewerBtn.disabled = true;
-      // Colliders first, and both before setFreecamUI(false): each reads
-      // the live EditorRoot, which is torn down the instant freecam turns
-      // off.
+      // Colliders and particles first, and all three before
+      // setFreecamUI(false): each reads the live EditorRoot, which is torn
+      // down the instant freecam turns off.
       await flushColliders();
+      await flushParticles();
       await flushSceneBindings();
       exitViewerBtn.disabled = false;
       setFreecamUI(false);
@@ -4769,6 +5363,198 @@
       updateExitButtonPending();
     };
 
+    /* ============================================================
+       Particle System — the ION Particle & VFX authoring mode.
+
+       Same passthrough shape as the collider block above (IonEngine's
+       __setParticleMode/__createParticleSystem/... hooks). Two things are
+       specific to this mode:
+
+       - It **relays out the docks**: the left dock becomes an
+         Inspector-only full-height panel, Control Desk is hidden entirely,
+         and the Hierarchy moves right so PARTICLES selection still works.
+         Panels are moved, never duplicated — the editor writes into
+         #si-inspector/#si-hierarchy by id, and a second copy would leave
+         it updating an invisible one.
+       - Its **transport is live**: gameplay is paused for the whole editor
+         session, so EditorParticles drives the preview off the editor's own
+         clock. Play/Pause here control that preview, not gameplay.
+
+       Declared with function declarations (not const arrows) because
+       setFreecamUI, defined earlier in this file, calls setParticleMode on
+       exit — hoisting is what lets that work.
+       ============================================================ */
+    const particleModeBtn = document.getElementById("si-tool-particles");
+    const particleToolbar = document.getElementById("si-particle-toolbar");
+    const particleStatsEl = document.getElementById("si-particle-stats");
+    const particlePresetSel = document.getElementById("si-particle-preset");
+    const particleQualitySel = document.getElementById("si-particle-quality");
+    const particlePlayBtn = document.getElementById("si-part-play");
+    let particleModeOn = false;
+    /** Filled once from the engine's own preset table, so the dropdown can't drift from what createSystemFromPreset actually accepts. */
+    let particlePresetsLoaded = false;
+
+    function loadParticlePresets() {
+      if (particlePresetsLoaded || !window.__getParticlePresets) return;
+      const presets = window.__getParticlePresets();
+      if (!presets || presets.length === 0) return;
+      for (const preset of presets) {
+        const option = document.createElement("option");
+        option.value = preset.key;
+        option.textContent = preset.label;
+        option.title = preset.description;
+        particlePresetSel.appendChild(option);
+      }
+      particlePresetsLoaded = true;
+    }
+
+    /**
+     * Moves the Inspector left and the Hierarchy right (or back).
+     *
+     * Restoring puts each pane back at its exact original index rather
+     * than appending: the right dock's order is Exit, view helper,
+     * Inspector, Control Desk, and appending would drop the Inspector
+     * below Control Desk on every exit from this mode.
+     */
+    function applyParticleLayout(on) {
+      const inspectorPane = document.getElementById("editor-pane-inspector");
+      const hierarchyPane = document.getElementById("editor-pane-hierarchy");
+      const controlDeskPane = document.getElementById("editor-pane-controldesk");
+      const scriptsPane = document.getElementById("editor-pane-scripts");
+      document.body.classList.toggle("particle-mode", on);
+      if (on) {
+        editorLeft.appendChild(inspectorPane);
+        editorRight.appendChild(hierarchyPane);
+      } else {
+        editorLeft.insertBefore(hierarchyPane, scriptsPane);
+        editorRight.insertBefore(inspectorPane, controlDeskPane);
+      }
+      // The dock widths change with the mode (see the particle-mode CSS),
+      // and #device-frame IS the editor viewport — so the reservation has
+      // to be recomputed or the canvas ends up partly under a dock.
+      applyDeviceFrameInstant();
+    }
+
+    function setParticleMode(on) {
+      // Trust the engine's answer rather than the requested value: with no
+      // editor open the hook returns undefined, and the button must not
+      // light up for a mode that didn't actually start.
+      const applied = window.__setParticleMode && window.__setParticleMode(on);
+      particleModeOn = !!applied;
+      particleModeBtn.classList.toggle("active", particleModeOn);
+      particleToolbar.classList.toggle("visible", particleModeOn);
+      applyParticleLayout(particleModeOn);
+      if (particleModeOn) {
+        loadParticlePresets();
+        refreshParticleStats();
+      }
+      paintParticleTransport();
+    }
+
+    function paintParticleTransport() {
+      const playing = window.__isParticlePreviewPlaying && window.__isParticlePreviewPlaying();
+      particlePlayBtn.classList.toggle("active", !!playing);
+    }
+
+    function refreshParticleStats() {
+      if (!particleModeOn || !window.__getParticleStats) return;
+      const s = window.__getParticleStats();
+      if (!s) return;
+      const kb = s.bufferBytes < 1024 * 1024 ? (s.bufferBytes / 1024).toFixed(0) + " KB" : (s.bufferBytes / 1048576).toFixed(2) + " MB";
+      particleStatsEl.textContent =
+        s.activeParticles + " / " + s.maxParticles + " particles · " +
+        s.emitters + " emitters (" + s.simulating + " live) · " +
+        s.drawCalls + " draws · " + kb + " · " + s.lastUpdateMs.toFixed(2) + " ms";
+      paintParticleTransport();
+    }
+
+    particleModeBtn.addEventListener("click", () => setParticleMode(!particleModeOn));
+
+    document.getElementById("si-part-add-system").addEventListener("click", () => {
+      window.__createParticleSystem && window.__createParticleSystem(particlePresetSel.value || undefined);
+      particleDirty = true;
+      updateExitButtonPending();
+      paintParticleTransport();
+    });
+    document.getElementById("si-part-add-emitter").addEventListener("click", () => {
+      window.__addParticleEmitter && window.__addParticleEmitter();
+      particleDirty = true;
+      updateExitButtonPending();
+    });
+    document.getElementById("si-part-duplicate").addEventListener("click", () => {
+      const ok = window.__duplicateSelectedEmitter && window.__duplicateSelectedEmitter();
+      if (!ok) {
+        console.warn("Particle Editor: select an emitter first (click its volume in the viewport, or its row under PARTICLES in the Hierarchy).");
+        return;
+      }
+      particleDirty = true;
+      updateExitButtonPending();
+    });
+    document.getElementById("si-part-delete").addEventListener("click", () => {
+      const removed = window.__deleteSelectedEmitter && window.__deleteSelectedEmitter();
+      if (!removed) {
+        console.warn("Particle Editor: select an emitter first.");
+        return;
+      }
+      particleDirty = true;
+      updateExitButtonPending();
+    });
+
+    particlePlayBtn.addEventListener("click", () => {
+      window.__particlePlay && window.__particlePlay();
+      paintParticleTransport();
+    });
+    document.getElementById("si-part-pause").addEventListener("click", () => {
+      window.__particlePause && window.__particlePause();
+      paintParticleTransport();
+    });
+    document.getElementById("si-part-restart").addEventListener("click", () => {
+      window.__particleRestart && window.__particleRestart();
+      paintParticleTransport();
+    });
+    document.getElementById("si-part-stop").addEventListener("click", () => {
+      window.__particleStop && window.__particleStop();
+      paintParticleTransport();
+    });
+    document.getElementById("si-part-clear").addEventListener("click", () => {
+      window.__particleClear && window.__particleClear();
+    });
+
+    // Gizmo toggles. These change nothing about the running effect — they
+    // only hide the editor's own drawing, which is exactly what you want
+    // when a wireframe is covering the thing you're aiming at.
+    for (const [id, kind] of [["si-part-gizmo-shapes", "shapes"], ["si-part-gizmo-dir", "direction"], ["si-part-gizmo-bounds", "bounds"]]) {
+      const button = document.getElementById(id);
+      button.addEventListener("click", () => {
+        const on = window.__toggleParticleGizmo && window.__toggleParticleGizmo(kind);
+        button.classList.toggle("active", !!on);
+      });
+    }
+
+    particleQualitySel.addEventListener("change", () => {
+      window.__setParticleQuality && window.__setParticleQuality(particleQualitySel.value);
+    });
+
+    // The engine's own signal — a gizmo drag folded back into an emitter's
+    // transform, or any Inspector field edited. The toolbar can't see any
+    // of that.
+    window.__onParticleDirty = () => {
+      particleDirty = true;
+      updateExitButtonPending();
+    };
+
+    // P, matching the single-letter shortcuts SceneInspector already owns
+    // (W/E/R/Q/F/G/H/X/C) and the collider mode's own K. Only meaningful
+    // while the editor is open.
+    window.addEventListener("keydown", (e) => {
+      if (!freecamActive || e.key.toLowerCase() !== "p") return;
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const active = document.activeElement;
+      if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA" || active.tagName === "SELECT" || active.isContentEditable)) return;
+      e.preventDefault();
+      setParticleMode(!particleModeOn);
+    });
+
     // K, matching the single-letter shortcuts SceneInspector already owns
     // (W/E/R/Q/F/G/H/X/C). Handled here rather than there because the mode
     // is an editor-chrome concern, and only meaningful while freecam is on.
@@ -4784,6 +5570,12 @@
     // Polled, not per-frame: a counters readout doesn't need 60Hz DOM
     // writes, and the interval no-ops entirely while the mode is off.
     setInterval(refreshColliderStats, 400);
+    // Same cadence and the same reasoning for the particle readout. 250ms
+    // rather than 400 because the numbers it shows (active particles,
+    // update cost) genuinely move every frame while an effect is playing,
+    // and a slower poll makes the live preview feel like it's lagging the
+    // panel.
+    setInterval(refreshParticleStats, 250);
 
     window.__onInspectorStateChanged = (state) => {
       toolGridBtn.classList.toggle("active", state.grid);

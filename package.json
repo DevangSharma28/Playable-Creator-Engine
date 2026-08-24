@@ -8,8 +8,9 @@
     "dev": "node scripts/dev.js",
     "build": "bash build.sh",
     "typecheck": "tsc --noEmit",
-    "test:geometry": "node --test tests/*.test.mjs",
-    "test": "npm run typecheck && npm run test:geometry"
+    "test:geometry": "node --test tests/geometry-parity.test.mjs",
+    "test:particles": "node --test tests/particles.test.mjs tests/particle-shader.test.mjs",
+    "test": "npm run typecheck && npm run test:particles && npm run test:geometry"
   },
   "keywords": [],
   "author": "",
@@ -19,6 +20,7 @@
     "@gltf-transform/extensions": "^4.4.2",
     "@gltf-transform/functions": "^4.4.2",
     "@types/three": "^0.185.1",
+    "esbuild": "^0.28.2",
     "jsdom": "^30.0.0",
     "meshoptimizer": "^1.2.0",
     "sharp": "^0.35.3",
@@ -28,5 +30,8 @@
   },
   "dependencies": {
     "three": "^0.185.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true
   }
 }

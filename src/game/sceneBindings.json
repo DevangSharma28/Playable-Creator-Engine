@@ -6,6 +6,20 @@
       "fieldName": "popcornMachine",
       "objectPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/sodamachine",
       "objectName": "sodamachine"
+    },
+    {
+      "className": "Environment",
+      "fieldName": "collider",
+      "objectPath": "COLLIDERS/Box Collider",
+      "objectName": "Box Collider",
+      "colliderId": "col_rwnc5oawgr"
+    },
+    {
+      "className": "Player",
+      "fieldName": "collider",
+      "objectPath": "COLLIDERS/Player Collider",
+      "objectName": "Player Collider",
+      "colliderId": "col_0xxh34v760"
     }
   ]
 }

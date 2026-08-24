@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UI Editor — Ion Engine Guide</title>
+  <link rel="stylesheet" href="/guide.css">
+</head>
+
+<body>
+
+  <div class="chrome">
+    <span class="dot"></span>
+    <span>Ion Engine</span>
+    <span class="tag">UI Editor</span>
+  </div>
+
+  <nav class="gnav">
+    <a href="/guide.html">Overview</a>
+    <span class="sep"></span>
+    <a href="/guide-ui-editor.html" aria-current="page">UI Editor</a>
+    <a href="/guide-colliders.html">Colliders</a>
+    <a href="/guide-particles.html">Particles</a>
+  </nav>
+
+  <main>
+    <p class="kicker">System guide</p>
+    <h1>UI Editor</h1>
+    <p class="lede">
+      Every pixel of on-screen UI — score, buttons, the joystick, the end card — is a named element in a
+      layout you draw by hand. There is <strong>no hardcoded UI anywhere</strong>: code only ever
+      looks things up by the name you typed in the editor.
+    </p>
+
+    <section class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h2>Open it</h2>
+        <p>
+          With <code>npm run dev</code> running, click <strong>✏️ Editor</strong> in the Engine Room panel
+          (top right). It opens as a transparent overlay <em>on top of the running game</em>, so you're
+          positioning against the real 3D scene, not a mockup. Gameplay pauses while it's open so drag
+          gestures don't fight the joystick.
+        </p>
+        <div class="callout">
+          <strong>Two layouts ship.</strong> <code>mainLayout.json</code> is what's visible during play;
+          <code>endcardLayout.json</code> is hidden until the game ends, then shown as one group. The
+          toolbar's <strong>⭐ Set as Main</strong> and <strong>🏁 Set as Endcard</strong> decide which
+          file you're writing.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h2>Place and name an element</h2>
+        <p>
+          Add with <strong>+ Image</strong>, <strong>+ Text</strong>, <strong>+ Rect</strong>,
+          <strong>+ Joystick</strong>, or <strong>+ Group</strong>. Drag to position, drag the red handle
+          to resize.
+        </p>
+        <p>
+          <strong>The name is the contract.</strong> It's the only thing code uses to find an element, so
+          set it in the Properties panel before you write any. Rename it later and the lookup silently
+          stops matching.
+        </p>
+        <div class="ref-table">
+          <div class="k">Image</div>
+          <div class="v">Embedded as base64, so a saved layout is self-contained — no missing-asset step.</div>
+          <div class="k">Text</div>
+          <div class="v">Font size is a % of the container's height, so it scales with the screen.</div>
+          <div class="k">Rect</div>
+          <div class="v">A coloured box with optional radius/border. What most buttons actually are.</div>
+          <div class="k">Joystick</div>
+          <div class="v">Must be named exactly <code>joystick</code> in <code>mainLayout.json</code> —
+            <code>Game.ts</code> looks it up by that name and throws loudly if it's missing.</div>
+          <div class="k">Group</div>
+          <div class="v">A container. Nested children position relative to <em>it</em>, and move/resize together.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h2>PX or %, and why it matters</h2>
+        <p>
+          Each of X / Y / Width / Height has its own <strong>%</strong> / <strong>PX</strong> toggle. This
+          is the single most common source of "it looked fine on my screen".
+        </p>
+        <div class="cheat">
+          <div class="cheat-row">
+            <div class="q">Should stay centred or proportionally placed</div>
+            <div class="a">%</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Must keep its shape (a circle stays circular)</div>
+            <div class="a">PX</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Full-bleed background reaching real screen edges</div>
+            <div class="a">% width + height</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Fixed inset from a corner, like a 32px margin</div>
+            <div class="a">PX + corner anchor</div>
+          </div>
+        </div>
+        <p>
+          A <strong>PX</strong> value is a physical size measured against the layout's design resolution,
+          scaled by one uniform factor so it never stretches differently per axis. A <strong>%</strong>
+          value is plain CSS percent against its real container. Position in PX is an offset from the
+          <em>anchor's own point</em> (Unity's <code>anchoredPosition</code>) — a middle-center anchor at
+          <code>0,0</code> sits dead centre on any screen shape.
+        </p>
+        <div class="callout warn">
+          <strong>Test at a different aspect ratio before you trust a layout.</strong> Use the
+          <strong>Portrait / Landscape / Real</strong> tabs top-centre. Most layout bugs only appear when
+          the live aspect is far from the design's.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h2>Drive it from code</h2>
+        <p>
+          <code>game.ui</code> is the main layout, <code>game.endcardUILayout</code> is the end card. Both
+          are the same <code>UILayout</code> API, and everything addresses elements by the name you typed.
+        </p>
+        <pre><code><span class="c">// src/game/ui/HUD.ts — the real one in this project</span>
+export class HUD {
+  constructor(
+    private readonly main: UILayout,
+    private readonly endcard: UILayout
+  ) {
+    this.endcard.setVisible(false);           <span class="c">// hidden until the game ends</span>
+  }
+
+  setScore(collected: number, total: number): void {
+    this.main.setText("score", `${collected} / ${total}`);
+  }
+
+  hideDragHint(): void {
+    this.main.hide("drag-hint");
+  }
+
+  showEndCard(won: boolean): void {
+    this.endcard.setText("endcard-title", won ? "All coins collected!" : "Nice rolling!");
+    this.endcard.setVisible(true);            <span class="c">// shows the whole layout as one group</span>
+  }
+
+  <span class="c">// Wire the install button. The handler routes through Cta.open() in</span>
+  <span class="c">// Game.ts — never window.open() directly.</span>
+  onCtaClick(handler: () =&gt; void): void {
+    this.endcard.setInteractive("cta-button-bg", handler);
+  }
+}</code></pre>
+        <div class="callout">
+          <strong>Everything is decorative until you say otherwise.</strong> Every element is
+          <code>pointer-events: none</code> so it can never steal a touch from the joystick underneath.
+          <code>setInteractive()</code> is what opts one element in.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h2>Bind an element to a field</h2>
+        <p>
+          Looking elements up by string works, but a typo fails silently. The <strong>Scripts</strong>
+          panel lets you drag an element onto a public field instead — declare the field, assign it in the
+          editor, and it's populated at boot.
+        </p>
+        <pre><code><span class="c">// 1. Declare a public field of an element type</span>
+export class HUD {
+  public moneyIcon: HTMLElement | undefined;
+
+  constructor(private readonly main: UILayout, private readonly endcard: UILayout) {
+    <span class="c">// 2. One explicit call resolves every binding for this class.</span>
+    <span class="c">//    No reflection behind it — compiled JS classes have none.</span>
+    applyBindings(this, "HUD", bindingsData, this.main, this.endcard);
+
+    <span class="c">// 3. moneyIcon is now the real DOM element (or undefined if</span>
+    <span class="c">//    nothing was assigned yet — always guard).</span>
+    if (this.moneyIcon) this.moneyIcon.style.opacity = "0.5";
+  }
+}</code></pre>
+        <p class="dim">
+          In the editor: open <strong>Scripts</strong>, pick <code>ui/HUD.ts</code>, then drag the element
+          from <strong>Layers</strong> onto the <code>moneyIcon</code> row (or click its ⊙ Pick button).
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h2>Full API</h2>
+        <div class="api">
+          <div class="api-head">Reading and writing content</div>
+          <div class="api-row">
+            <span class="sig">setText(name: string, text: string): void</span>
+            <span class="desc">Replace a text element's content.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setImage(name: string, src: string): void</span>
+            <span class="desc">Swap an image's source — a data URI or a path.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">get(name: string): HTMLElement | undefined</span>
+            <span class="desc">The raw element, for anything the API above doesn't cover. Undefined if the name
+              doesn't match.</span>
+          </div>
+
+          <div class="api-head">Visibility</div>
+          <div class="api-row">
+            <span class="sig">show(name: string): void</span>
+            <span class="desc">Show one element.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">hide(name: string): void</span>
+            <span class="desc">Hide one element.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setVisible(visible: boolean): void</span>
+            <span class="desc">Show/hide the <em>whole layout</em> as one group. Individual elements keep their own
+              state underneath.</span>
+          </div>
+
+          <div class="api-head">Interaction</div>
+          <div class="api-row">
+            <span class="sig">setInteractive(nameOrElement, onClick?): void</span>
+            <span class="desc">Opt an element into pointer events and attach a click handler. Accepts a name or the
+              element itself (what a bound field holds).</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">getJoystick(name): { base, knob } | undefined</span>
+            <span class="desc">The two nodes <code>DynamicJoystick</code> needs. You won't normally call this —
+              <code>Game.ts</code> does.</span>
+          </div>
+
+          <div class="api-head">Layout</div>
+          <div class="api-row">
+            <span class="sig">updateScale(width: number, height: number): void</span>
+            <span class="desc">Re-derive every element's geometry for a new container size. <code>Game.ts</code>
+              already calls this on resize — you only need it for a container you own.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h2>Save</h2>
+        <p>
+          With the dev server running, <strong>💾 Save</strong> writes straight into the project — no
+          download step. <strong>⭐ Set as Main</strong> and <strong>🏁 Set as Endcard</strong> write the
+          two files the game actually loads.
+        </p>
+        <div class="tree">
+          <span class="dir">src/game/ui/</span>
+          mainLayout.json <span class="comment">← gameplay HUD + joystick</span>
+          endcardLayout.json <span class="comment">← end card, hidden until the game ends</span>
+          bindings.json <span class="comment">← element ↔ script field assignments</span>
+          <span class="dir">layouts/</span> <span class="comment">← saved variants, load from the 📂 menu</span>
+        </div>
+        <p class="dim">
+          Saving triggers a hot reload, and the editor's own state (undo history, unsaved edits) survives
+          it — the page never navigates.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">8</div>
+      <div class="step-body">
+        <h2>When something doesn't work</h2>
+        <div class="cheat">
+          <div class="cheat-row">
+            <div class="q"><code>setText</code> does nothing</div>
+            <div class="a">Name mismatch — check Properties</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Button isn't clickable</div>
+            <div class="a">Needs <code>setInteractive()</code></div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Game throws "missing joystick"</div>
+            <div class="a">Element must be named <code>joystick</code></div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Circle goes oval in landscape</div>
+            <div class="a">Use PX size, or 🔒 Lock aspect</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Bound field is <code>undefined</code></div>
+            <div class="a">Not assigned yet, or class name differs</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Editor shows stale behaviour</div>
+            <div class="a">Re-run <code>node scripts/sync-assets.js</code></div>
+          </div>
+        </div>
+        <div class="callout">
+          That last one catches people out: Vite only watches <code>src/</code>, so edits to
+          <code>tools/ui-editor.html</code> itself aren't picked up automatically.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Ion Engine — UI Editor</span>
+    <span>Architecture: ENGINE.md · Setup: README.md</span>
+  </footer>
+
+</body>
+
+</html>

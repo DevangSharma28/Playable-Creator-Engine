@@ -68,6 +68,53 @@ export function colliderFromData(record: ColliderData, attachTo: THREE.Object3D 
   return collider;
 }
 
+/**
+ * Writes a record's fields onto an **existing** collider, in place.
+ *
+ * The undo path's counterpart to `colliderFromData`. Rebuilding a collider
+ * from data would be simpler, but it destroys and recreates the object —
+ * so a script field assigned through Control Desk, or anything else
+ * holding the instance, would be left pointing at a dead collider after a
+ * single undo. Mutating in place keeps identity, which is the whole reason
+ * the editor's history uses commands rather than scene snapshots.
+ *
+ * Shape *kind* is deliberately not applied: a BoxCollider can't become a
+ * SphereCollider, and the editor offers no way to change it, so a record
+ * whose kind disagrees with the live collider is a caller error rather
+ * than something to silently half-apply.
+ */
+export function applyColliderData(collider: Collider, record: ColliderData, scene: THREE.Scene): void {
+  collider.name = record.name;
+  collider.tag = record.tag;
+  collider.mask = [...record.mask];
+  collider.isTrigger = record.isTrigger;
+  collider.setEnabled(record.enabled);
+
+  collider.offsetPosition.set(record.offset.position[0], record.offset.position[1], record.offset.position[2]);
+  collider.offsetRotation.set(
+    THREE.MathUtils.degToRad(record.offset.rotation[0]),
+    THREE.MathUtils.degToRad(record.offset.rotation[1]),
+    THREE.MathUtils.degToRad(record.offset.rotation[2])
+  );
+  collider.offsetScale.set(record.offset.scale[0], record.offset.scale[1], record.offset.scale[2]);
+
+  if (collider instanceof BoxCollider && record.size) {
+    collider.setSize(record.size[0], record.size[1], record.size[2]);
+  } else if (collider instanceof SphereCollider && record.radius !== undefined) {
+    collider.setRadius(record.radius);
+  } else if (collider instanceof CylinderCollider) {
+    if (record.radius !== undefined) collider.setRadius(record.radius);
+    if (record.height !== undefined) collider.setHeight(record.height);
+  }
+
+  const target = record.attachPath || record.attachName ? resolveSceneObject(scene, { className: "", fieldName: "", objectPath: record.attachPath, objectName: record.attachName }) : undefined;
+  // preserveWorld: false — the offset above is already the intended local
+  // transform relative to this attachment, so re-deriving it from the
+  // collider's current world position (what attachToObject does by
+  // default) would move the volume instead of restoring it.
+  collider.attachToObject(target, false);
+}
+
 /** The save direction — a live collider back into its persisted record. */
 export function colliderToData(collider: Collider, scene: THREE.Scene): ColliderData {
   const attachPath = collider.attached ? sceneObjectPath(collider.attached, scene) : "";

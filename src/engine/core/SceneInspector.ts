@@ -62,6 +62,8 @@ export class SceneInspector {
   /** Every visual this class added to the scene. Exposed so the picker and hierarchy can exclude them — they're debug chrome, not scene content, and must be neither selectable nor listed. */
   private readonly helpers = new Set<THREE.Object3D>();
   private readonly transformControls: TransformControls;
+  /** Subscribers to gizmo drag begin/end — see onGizmoDrag. */
+  private readonly dragListeners = new Set<(dragging: boolean) => void>();
   /** TransformControls itself isn't an Object3D (it extends the newer three.js Controls base) — its rendered gizmo lives on this helper, returned by getHelper(), which is what actually needs adding to the scene and toggling visible. */
   private readonly gizmoHelper: THREE.Object3D;
 
@@ -110,7 +112,14 @@ export class SceneInspector {
     // same mouse gesture — the instant a handle-drag starts, hand control
     // of the pointer over to TransformControls exclusively.
     this.transformControls.addEventListener("dragging-changed", (event) => {
-      this.orbitControls.enabled = !(event as unknown as { value: boolean }).value;
+      const dragging = (event as unknown as { value: boolean }).value;
+      this.orbitControls.enabled = !dragging;
+      // Broadcast the gesture boundary. The editors' undo history needs a
+      // real begin/end here rather than the time-window coalescing sliders
+      // fall back on — a gizmo drag emits a continuous stream of transform
+      // writes, and this is what collapses the whole stream into exactly
+      // one undo step.
+      for (const listener of [...this.dragListeners]) listener(dragging);
     });
 
     this.unsubscribe = this.selection.subscribe((state) => this.applySelection(state.object));
@@ -127,6 +136,20 @@ export class SceneInspector {
   /** True while a gizmo handle owns the pointer — the picker checks this so a handle drag never doubles as a selection click. */
   isGizmoBusy(): boolean {
     return this.transformControls.dragging || this.transformControls.axis !== null;
+  }
+
+  /**
+   * Notified with `true` when a gizmo drag starts and `false` when it
+   * ends.
+   *
+   * Exposed so the collider and particle editors can record one undo entry
+   * per drag: capture the transform on the leading edge, push the command
+   * on the trailing edge. Returns an unsubscribe function, same contract
+   * as EditorSelection.subscribe.
+   */
+  onGizmoDrag(listener: (dragging: boolean) => void): () => void {
+    this.dragListeners.add(listener);
+    return () => this.dragListeners.delete(listener);
   }
 
   /** Call once per frame while active — refreshes helper gizmos. TransformControls' own gizmo re-syncs to the selected object automatically via the normal scene render (its helper overrides updateMatrixWorld), so it needs no explicit update() call here. */

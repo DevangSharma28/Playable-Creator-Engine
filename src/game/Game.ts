@@ -25,9 +25,14 @@ import { Ion } from "../engine/Ion";
 import { loadColliders } from "../engine/collision";
 import type { ColliderData, ColliderShape, CollidersFileData } from "../engine/collision";
 import collidersRaw from "./colliders.json";
+import { ParticleVisuals } from "../engine/editor/ParticleVisuals";
+import { loadParticles } from "../engine/particles";
+import type { ParticlesFileData, ParticleSystemConfig } from "../engine/particles";
+import particlesRaw from "./particles.json";
 import { AreaDemo } from "./AreaDemo";
 import { SoundHandler } from "./SoundHandler";
 import { manifest, libGlb, libAudio } from "./assets";
+import { Environment } from "./entities/Environment";
 
 const mainLayoutData = mainLayoutRaw as UILayoutData;
 const endcardLayoutData = endcardLayoutRaw as UILayoutData;
@@ -62,6 +67,7 @@ export class Game {
   private readonly mainUI: UILayout;
   private readonly endcardUI: UILayout;
   private readonly assetLoader: AssetLoader;
+  private readonly environment: Environment;
   /** Only exists when #er-viewhelper is in the page (the dev-only Engine Room panel) — undefined, and never rendered into, in production. */
   private readonly viewHelper: ViewHelperWidget | undefined;
   /**
@@ -81,6 +87,17 @@ export class Game {
    * runtime, and it ships.
    */
   private readonly colliderDebug: ColliderVisuals | undefined;
+  /**
+   * Particle emission-volume gizmos, DEV only.
+   *
+   * Owned here for the same reason `colliderDebug` is — the editor borrows
+   * it for a session rather than owning it, so there's one gizmo layer
+   * with a single lifetime instead of one built and torn down per editor
+   * session. Constructed behind `import.meta.env.DEV`, so the module and
+   * its geometry/materials drop out of a production build while the
+   * particle *runtime* ships untouched.
+   */
+  private readonly particleGizmos: ParticleVisuals | undefined;
   private readonly mainLayer: HTMLElement;
   /**
    * The whole dev 3D Viewer/Editor (camera, orbit controls, selection,
@@ -97,6 +114,12 @@ export class Game {
   private inspectorStateChangeCallback: ((state: InspectorToolState) => void) | undefined;
   /** Same again, for "a collider edit happened" — lets the dev page's Exit button count colliders alongside pending scene-object assignments. */
   private colliderDirtyCallback: (() => void) | undefined;
+  /** Same again, for particle edits. */
+  private particleDirtyCallback: (() => void) | undefined;
+  /** Same again, for undo/redo — lets the toolbars repaint their buttons without polling. */
+  private historyChangeCallback: (() => void) | undefined;
+  /** Held so re-attaching on a new editor session drops the previous session's subscription rather than stacking another. */
+  private historyChangeUnsubscribe: (() => void) | undefined;
 
   private collected = 0;
   private ended = false;
@@ -152,6 +175,7 @@ export class Game {
 
     this.player = new Player(this.scene, this.world.bound, model, clips);
     this.coinField = new CoinField(this.scene, COIN_COUNT, this.world.bound);
+    this.environment = new Environment(this.scene);
 
     // Editor-authored colliders (src/game/colliders.json — written by the
     // 3D editor's "Configure Colliders" mode). It's a real import, so these
@@ -167,6 +191,19 @@ export class Game {
     // entities build, which read as "the editor forgot my attachment".
     loadColliders(Ion.colliders, collidersRaw as CollidersFileData, this.scene);
 
+    // The ION Particle registry's own PARTICLES group joins the scene, then
+    // the editor-authored effects load into it.
+    //
+    // Same ordering rule as loadColliders directly above, and for the same
+    // reason: an emitter records its attachment as a scene path and can
+    // only resolve it against a graph that already contains the object —
+    // and the most useful thing to attach an effect to is a character,
+    // which doesn't exist until `new Player(...)` has added its model.
+    // src/game/particles.json is a real import, so these ship: what's
+    // authored in the Particle Editor is what runs in the production build.
+    Ion.particles.attachToScene(this.scene);
+    loadParticles(Ion.particles, particlesRaw as ParticlesFileData, this.scene);
+
     // Both halves of the collider example now exist — the zone from
     // colliders.json above, and the Player's own cylinder from its
     // constructor — so the handlers have something to subscribe to.
@@ -175,6 +212,7 @@ export class Game {
       ["Game", this],
       ["World", this.world],
       ["Player", this.player],
+      ["Environment", this.environment],
       ["CoinField", this.coinField],
       ["AreaDemo", this.areaDemo],
       ["SoundHandler", this.soundHandler],
@@ -259,6 +297,9 @@ export class Game {
     // field's own doc comment. Starts hidden and draws nothing until
     // something turns it on.
     this.colliderDebug = import.meta.env.DEV ? new ColliderVisuals(Ion.colliders) : undefined;
+    // Same gating and the same reasoning as colliderDebug above — see the
+    // field's own doc comment.
+    this.particleGizmos = import.meta.env.DEV ? new ParticleVisuals(Ion.particles) : undefined;
 
     window.addEventListener("resize", this.onWindowResize);
 
@@ -411,13 +452,42 @@ export class Game {
         // import.meta.env.DEV, the same gate colliderDebug is built under.
         colliderVisuals: this.colliderDebug as ColliderVisuals,
         onColliderDirty: () => this.colliderDirtyCallback?.(),
+        // The live registry, not a copy — effects arranged in the editor
+        // are the same ones gameplay resumes running on exit.
+        particleManager: Ion.particles,
+        // Guaranteed to exist: this whole branch is already behind
+        // import.meta.env.DEV, the same gate particleGizmos is built under.
+        particleVisuals: this.particleGizmos as ParticleVisuals,
+        onParticleDirty: () => this.particleDirtyCallback?.(),
+        // Particle textures go through the game's own AssetLoader, so they
+        // are preloaded with everything else and base64-inlined by the
+        // production build like any other asset — the editor never loads
+        // an asset itself.
+        resolveTexture: (path) => {
+          try {
+            return this.assetLoader.getTexture(path);
+          } catch {
+            // Not in the manifest. A warning rather than a throw: a typo in
+            // a texture path shouldn't take the editor down, and the
+            // emitter falls back to the built-in soft dot.
+            console.warn(`Particles: texture "${path}" isn't preloaded — add it to src/game/assets.ts's manifest. Using the default texture.`);
+            return undefined;
+          }
+        },
       });
       // A fresh EditorRoot is created each session, so re-wire any
       // previously-registered listener rather than relying on it surviving
       // from a prior one.
       if (this.gizmoModeChangeCallback) this.editor.addModeChangeListener(this.gizmoModeChangeCallback);
       if (this.inspectorStateChangeCallback) this.editor.addStateChangeListener(this.inspectorStateChangeCallback);
+      // Same per-session re-attach as the two above — the history belongs
+      // to the EditorRoot, which is rebuilt on every entry.
+      if (this.historyChangeCallback) {
+        this.historyChangeUnsubscribe = this.editor.onHistoryChange(this.historyChangeCallback);
+      }
     } else {
+      this.historyChangeUnsubscribe?.();
+      this.historyChangeUnsubscribe = undefined;
       this.editor?.dispose();
       this.editor = undefined;
       this.mainLayer.style.display = "";
@@ -550,6 +620,106 @@ export class Game {
     this.colliderDirtyCallback = cb;
   }
 
+  // -----------------------------------------------------------------------
+  // Dev-only: the 3D editor's "Particle System" mode. Thin passthroughs for
+  // the same reason the collider ones above are — the particle *editor*
+  // lives inside EditorRoot, which only exists while the editor is open and
+  // only in a dev build. The particle system itself (engine/particles/) is
+  // entirely separate and always running.
+  // -----------------------------------------------------------------------
+
+  setParticleMode(active: boolean): boolean | undefined {
+    return this.editor?.setParticleMode(active);
+  }
+  createParticleSystem(presetKey?: string): void {
+    this.editor?.createParticleSystem(presetKey);
+  }
+  addParticleEmitter(): void {
+    this.editor?.addParticleEmitter();
+  }
+  deleteSelectedEmitter(): boolean {
+    return this.editor?.deleteSelectedEmitter() ?? false;
+  }
+  duplicateSelectedEmitter(): boolean {
+    return this.editor?.duplicateSelectedEmitter() ?? false;
+  }
+  particlePlay(): void {
+    this.editor?.particlePlay();
+  }
+  particlePause(): void {
+    this.editor?.particlePause();
+  }
+  particleStop(): void {
+    this.editor?.particleStop();
+  }
+  particleRestart(): void {
+    this.editor?.particleRestart();
+  }
+  particleClear(): void {
+    this.editor?.particleClear();
+  }
+  isParticlePreviewPlaying(): boolean {
+    return this.editor?.isParticlePreviewPlaying ?? false;
+  }
+  toggleParticleGizmo(kind: "shapes" | "direction" | "bounds"): boolean | undefined {
+    return this.editor?.toggleParticleGizmos(kind);
+  }
+  /**
+   * The preset list the toolbar's dropdown is built from.
+   *
+   * Routed through the editor rather than importing the preset table
+   * directly: an ungated import here shipped all thirteen preset configs
+   * into the production bundle for a dropdown that only exists in the
+   * editor. Reaching it through `this.editor` keeps the table inside the
+   * DEV-gated module tree where it tree-shakes away.
+   */
+  getParticlePresets(): { key: string; label: string; description: string }[] {
+    return this.editor?.getParticlePresets() ?? [];
+  }
+  /** The records the dev page POSTs to /save-particles on Exit Editor. */
+  serializeParticles(): ParticleSystemConfig[] | undefined {
+    return this.editor?.serializeParticles();
+  }
+  hasParticleChanges(): boolean {
+    return this.editor?.hasParticleChanges ?? false;
+  }
+  markParticlesSaved(): void {
+    this.editor?.markParticlesSaved();
+  }
+  /** Live counters for the particle toolbar's readout — available with or without the editor, since the registry itself is always there. */
+  getParticleStats(): ReturnType<typeof Ion.particles.getStats> {
+    return Ion.particles.getStats();
+  }
+  /** Global quality tier. Ungated by the editor on purpose — a real playable would call this from a device-capability check at boot, not from an editor. */
+  setParticleQuality(quality: "high" | "medium" | "low"): void {
+    Ion.particles.setQuality(quality);
+  }
+  /** Same reasoning as onColliderDirty. */
+  onParticleDirty(cb: () => void): void {
+    this.particleDirtyCallback = cb;
+  }
+
+  // -----------------------------------------------------------------------
+  // Dev-only: editor undo/redo. One stack shared by every editor mode —
+  // see EditorRoot.history for why it lives there rather than per-mode.
+  // -----------------------------------------------------------------------
+
+  editorUndo(): boolean {
+    return this.editor?.undo() ?? false;
+  }
+  editorRedo(): boolean {
+    return this.editor?.redo() ?? false;
+  }
+  getEditorHistory(): ReturnType<EditorRoot["getHistoryState"]> | undefined {
+    return this.editor?.getHistoryState();
+  }
+  /** Same re-attach-per-session reasoning as onGizmoModeChange — a fresh EditorRoot is built each time the editor opens. */
+  onEditorHistoryChange(cb: () => void): void {
+    this.historyChangeCallback = cb;
+    this.historyChangeUnsubscribe?.();
+    this.historyChangeUnsubscribe = this.editor?.onHistoryChange(cb);
+  }
+
   /** Same reasoning as onGizmoModeChange, for the toolbar toggles above — keeps the toolbar's active-highlight in sync when a toggle happens via keyboard shortcut (F/G/H/X/C) instead of a button click. */
   onInspectorStateChange(cb: (state: InspectorToolState) => void): void {
     this.inspectorStateChangeCallback = cb;
@@ -584,7 +754,7 @@ export class Game {
 
       this.playTimeMs += dt * 1000;
       if (this.playTimeMs >= AUTO_END_MS) {
-        this.showEndCard(false);
+        // this.showEndCard(false);
       }
     }
 
@@ -592,7 +762,7 @@ export class Game {
       this.collected++;
       this.hud.setScore(this.collected, this.coinField.total);
       if (this.collected >= this.coinField.total) {
-        this.showEndCard(true);
+        // this.showEndCad(true);
       }
     });
 
@@ -609,6 +779,15 @@ export class Game {
     // debug overlay and the editor's Configure Colliders mode — one call
     // site, one layer. Cheap to a no-op while nothing is showing.
     this.colliderDebug?.update();
+    // Particles upload here, once per frame, for gameplay and the editor
+    // alike — one call site for the same reason the collider layer has
+    // one. The camera is handed over every frame rather than once at
+    // construction because billboarding and distance sorting both read its
+    // *current* position, and because `activeCamera` genuinely changes when
+    // the editor opens (see EditorRoot, which points the registry at its
+    // own camera for the session).
+    Ion.particles.setCamera(activeCamera);
+    Ion.particles.render();
     this.renderer.render(this.scene, activeCamera);
     this.viewHelper?.update(activeCamera);
   }

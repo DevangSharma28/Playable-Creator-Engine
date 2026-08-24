@@ -1,0 +1,628 @@
+/* Shared stylesheet for the Ion Engine guide pages.
+
+   Extracted from guide.html when the guide grew from one page to four
+   (hub + UI Editor + Colliders + Particles). Four copies of 470 lines of
+   CSS is four places for the design to drift; one file is one.
+
+   Served straight out of public/, so every page links it as /guide.css.
+*/
+:root {
+  --bg: #0a0b0d;
+  --surface: #16181c;
+  --surface-2: #1d2024;
+  --surface-3: #24272c;
+  --border: #2c2f35;
+  --border-soft: rgba(255, 255, 255, 0.07);
+  --accent: #e8961e;
+  --accent-hover: #ffab3d;
+  --accent-soft: rgba(232, 150, 30, 0.14);
+  --blue: #7dd3fc;
+  --blue-soft: rgba(125, 211, 252, 0.12);
+  --ok: #4ade80;
+  --danger: #ff5252;
+  --danger-soft: rgba(255, 82, 82, 0.12);
+  --audio: #b98cf7;
+  --audio-soft: rgba(185, 140, 247, 0.12);
+  --text: #e8e9eb;
+  --text-dim: #9aa0a8;
+  --text-faint: #676c74;
+  --mono: ui-monospace, "SF Mono", "Cascadia Code", Consolas, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15.5px;
+  line-height: 1.65;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+a:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.chrome {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 20px;
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.chrome .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 6px var(--ok);
+  flex-shrink: 0;
+}
+
+.chrome .tag {
+  margin-left: auto;
+  font-size: 9.5px;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid rgba(232, 150, 30, 0.3);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+/* Desktop-only tool page (Engine Room dev preview, opened from a
+ 1280px+ dev browser window) — no mobile breakpoint on purpose. Wide
+ fixed column, not fluid-to-viewport: running text still wants a
+ readable measure, it just sits in more page instead of stretching
+ edge to edge on a big monitor. */
+main {
+  max-width: 1920px;
+  margin: 0 auto;
+  padding: 64px 48px 120px;
+}
+
+.kicker {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--blue);
+  margin: 0 0 14px;
+}
+
+h1 {
+  font-family: var(--mono);
+  font-size: clamp(28px, 5vw, 38px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  margin: 0 0 12px;
+  text-wrap: balance;
+  color: var(--text);
+}
+
+.lede {
+  font-size: 17px;
+  color: var(--text-dim);
+  max-width: 62ch;
+  margin: 0 0 40px;
+}
+
+.lede code {
+  color: var(--text);
+}
+
+h2 {
+  font-family: var(--mono);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.005em;
+  color: var(--text);
+  margin: 0 0 6px;
+  text-wrap: balance;
+}
+
+h3 {
+  font-family: var(--mono);
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--blue);
+  text-transform: uppercase;
+  margin: 26px 0 10px;
+}
+
+p {
+  margin: 0 0 14px;
+  color: var(--text);
+}
+
+p.dim {
+  color: var(--text-dim);
+}
+
+ul,
+ol {
+  margin: 0 0 14px;
+  padding-left: 22px;
+}
+
+li {
+  margin-bottom: 8px;
+}
+
+li::marker {
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--surface-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1.5px 6px;
+  color: var(--accent-hover);
+}
+
+pre {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  overflow-x: auto;
+  margin: 0 0 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+}
+
+pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+pre .c {
+  color: var(--text-faint);
+  font-style: italic;
+}
+
+section.step {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 0 18px;
+  margin-top: 56px;
+  position: relative;
+}
+
+section.step::before {
+  content: "";
+  position: absolute;
+  left: 16px;
+  top: 40px;
+  bottom: -56px;
+  width: 1px;
+  background: var(--border);
+}
+
+section.step:last-of-type::before {
+  display: none;
+}
+
+.step-num {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--accent);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  z-index: 1;
+}
+
+.step-body {
+  min-width: 0;
+}
+
+.ref-table {
+  display: grid;
+  grid-template-columns: minmax(140px, auto) 1fr;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 0 0 16px;
+  font-size: 14px;
+}
+
+.ref-table>div {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ref-table>div:nth-last-child(-n+2) {
+  border-bottom: none;
+}
+
+.ref-table .k {
+  background: var(--surface);
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+}
+
+.ref-table .v {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.ref-table .v code {
+  background: var(--surface-3);
+}
+
+.cheat {
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 0 0 16px;
+}
+
+.cheat-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  background: var(--surface-2);
+}
+
+.cheat-row>div {
+  padding: 11px 14px;
+  font-size: 13.5px;
+}
+
+.cheat-row .q {
+  color: var(--text-dim);
+}
+
+.cheat-row .a {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12.5px;
+}
+
+.cheat-row .a code {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-hover);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(142, 242, 168, 0.12);
+  color: var(--ok);
+  text-transform: uppercase;
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+
+.callout {
+  border-left: 2px solid var(--blue);
+  background: var(--blue-soft);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 16px;
+  margin: 0 0 16px;
+  font-size: 14px;
+  color: var(--text-dim);
+}
+
+.callout strong {
+  color: var(--text);
+}
+
+.callout.audio {
+  border-left-color: var(--audio);
+  background: var(--audio-soft);
+}
+
+.callout.warn {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.tree {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  overflow-x: auto;
+}
+
+.tree .dir {
+  color: var(--blue);
+}
+
+.tree .comment {
+  color: var(--text-faint);
+}
+
+.modal-preview {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 0 0 16px;
+}
+
+.modal-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 13.5px;
+}
+
+.modal-row:last-child {
+  border-bottom: none;
+}
+
+.modal-row .chip {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.modal-row .chip.on {
+  background: rgba(142, 242, 168, 0.14);
+  color: var(--ok);
+}
+
+.modal-row .chip.go {
+  background: var(--accent-soft);
+  color: var(--accent-hover);
+}
+
+.modal-row .chip.report {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
+footer {
+  max-width: 1920px;
+  margin: 64px auto 0;
+  padding: 20px 48px 40px;
+  border-top: 1px solid var(--border);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-faint);
+  display: flex;
+  justify-content: space-between;
+}
+
+/* ---------------------------------------------------------------------
+   Page navigation. Added when the guide became four pages — the hub plus
+   one per system. Sticks under .chrome so it stays reachable from
+   anywhere in a long page without scrolling back to the top.
+   --------------------------------------------------------------------- */
+.gnav {
+  position: sticky;
+  top: 41px;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  padding: 9px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.gnav a {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  padding: 5px 11px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.gnav a:hover {
+  color: var(--text);
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+/* The page you're on. Deliberately not link-coloured — it's a location,
+   not a destination. */
+.gnav a[aria-current="page"] {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: rgba(232, 150, 30, 0.3);
+}
+
+.gnav .sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------
+   API reference list — a signature over a one-line description. Denser
+   than .ref-table, for the long method lists the system pages carry.
+   --------------------------------------------------------------------- */
+.api {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin: 0 0 16px;
+}
+
+.api-row {
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.api-row:last-child {
+  border-bottom: none;
+}
+
+.api-row .sig {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  color: var(--accent-hover);
+  display: block;
+  margin-bottom: 3px;
+  overflow-wrap: anywhere;
+}
+
+.api-row .desc {
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+
+.api-row .desc code {
+  font-size: 0.9em;
+}
+
+/* Group heading inside an .api list, for splitting a long surface. */
+.api-head {
+  padding: 8px 14px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-soft);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------
+   Card grid — emission shapes, presets, render modes.
+   --------------------------------------------------------------------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+  margin: 0 0 16px;
+}
+
+.card {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.card h4 {
+  font-family: var(--mono);
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--accent-hover);
+  margin: 0 0 5px;
+}
+
+.card p {
+  font-size: 13px;
+  color: var(--text-dim);
+  margin: 0;
+}
+
+.card code {
+  font-size: 0.88em;
+}
+
+/* Inline key hint, for shortcuts mentioned in running text. */
+kbd {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 1px 6px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+

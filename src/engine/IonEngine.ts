@@ -5,6 +5,7 @@ import { Scheduler } from "./core/Scheduler";
 import { EventBus } from "./core/EventBus";
 import { bindIon, unbindIon, type IonContext } from "./Ion";
 import { ColliderManager } from "./collision/ColliderManager";
+import { ParticleManager } from "./particles/ParticleManager";
 import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
 import { isAssignableObjectField } from "./editor/objectAssignment";
 import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
@@ -158,6 +159,29 @@ type EngineWindow = Window & {
   __onColliderDirty?: () => void;
   __setColliderDebug?: (visible: boolean) => boolean | undefined;
   __toggleColliderDebug?: () => boolean | undefined;
+  __setParticleMode?: (active: boolean) => boolean | undefined;
+  __createParticleSystem?: (presetKey?: string) => void;
+  __addParticleEmitter?: () => void;
+  __deleteSelectedEmitter?: () => boolean;
+  __duplicateSelectedEmitter?: () => boolean;
+  __particlePlay?: () => void;
+  __particlePause?: () => void;
+  __particleStop?: () => void;
+  __particleRestart?: () => void;
+  __particleClear?: () => void;
+  __isParticlePreviewPlaying?: () => boolean;
+  __toggleParticleGizmo?: (kind: string) => boolean | undefined;
+  __getParticlePresets?: () => { key: string; label: string; description: string }[];
+  __serializeParticles?: () => unknown[] | undefined;
+  __hasParticleChanges?: () => boolean;
+  __markParticlesSaved?: () => void;
+  __getParticleStats?: () => { systems: number; emitters: number; activeParticles: number; maxParticles: number; simulating: number; drawCalls: number; bufferBytes: number; lastUpdateMs: number };
+  __onParticleDirty?: () => void;
+  __setParticleQuality?: (quality: string) => void;
+  __editorUndo?: () => boolean;
+  __editorRedo?: () => boolean;
+  __getEditorHistory?: () => { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string; colliderDirty: boolean; particleDirty: boolean; depth: number } | undefined;
+  __onEditorHistoryChanged?: () => void;
   __editorAssignmentFor?: (declaredType: string | undefined, object: unknown) => { value: unknown; object: unknown; objectPath: string; objectName: string; colliderId?: string } | undefined;
   __getEditorViewportInfo?: () => { containerWidth: number; containerHeight: number; containerAspect: number; rendererWidth: number; rendererHeight: number; cameraAspect: number; pixelRatio: number } | undefined;
   __getAudioAnalyser?: () => { getFrequencyData: () => Uint8Array } | undefined;
@@ -247,7 +271,16 @@ export class IonEngine {
    * in the new scene overlapping the new player.
    */
   private readonly colliders = new ColliderManager();
-  private readonly ionContext: IonContext = { scheduler: this.scheduler, bus: this.bus, colliders: this.colliders };
+  /**
+   * The ION Particle & VFX registry. Owned here for exactly the reasons
+   * the collider registry is: the loop is what drives it (so effects
+   * freeze with gameplay rather than running behind an open editor), and
+   * teardown has to retire it wholesale on an in-place reload — a
+   * surviving emitter from the old bundle would otherwise keep simulating
+   * and drawing into the new scene.
+   */
+  private readonly particles = new ParticleManager();
+  private readonly ionContext: IonContext = { scheduler: this.scheduler, bus: this.bus, colliders: this.colliders, particles: this.particles };
 
   private constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -350,6 +383,10 @@ export class IonEngine {
               // behind — and inside the not-paused guard, so trigger
               // enter/exit doesn't fire behind an open editor.
               this.colliders.update();
+              // After the colliders, so an effect a trigger fired this
+              // step is simulated from this step rather than the next —
+              // and inside the same guard, so VFX freeze with gameplay.
+              this.particles.update(fixedStep);
               accumulator -= fixedStep;
               steps++;
             }
@@ -361,6 +398,7 @@ export class IonEngine {
             activeGame.update(dt, now / 1000);
             this.scheduler.update(dt);
             this.colliders.update(); // see the fixed-step branch above for the ordering
+            this.particles.update(dt);
           }
         }
         activeGame.render();
@@ -395,6 +433,12 @@ export class IonEngine {
       // left in the scene would keep overlapping (and firing enter/exit
       // into handlers closing over a disposed Game) alongside the new one.
       this.colliders.clear();
+      // And the same again for particles — an emitter from the retired
+      // bundle would keep simulating and drawing into the new scene, and
+      // its GPU buffers would leak on every reload. The shared default
+      // texture is deliberately NOT released here: the next bundle is
+      // about to build emitters that want it (see disposeSharedResources).
+      this.particles.clear();
       unbindIon(this.ionContext);
       activeGame.dispose();
     };
@@ -472,6 +516,38 @@ export class IonEngine {
     this.win.__markCollidersSaved = () => activeGame.markCollidersSaved();
     this.win.__getColliderStats = () => activeGame.getColliderStats();
     activeGame.onColliderDirty(() => this.win.__onColliderDirty?.());
+
+    // The 3D editor's "Particle System" mode — same passthrough shape as
+    // the collider toolbar above, and only meaningful while the editor is
+    // open, except __getParticleStats which reads the always-present
+    // runtime registry.
+    this.win.__setParticleMode = (active) => activeGame.setParticleMode(active);
+    this.win.__createParticleSystem = (presetKey) => activeGame.createParticleSystem(presetKey);
+    this.win.__addParticleEmitter = () => activeGame.addParticleEmitter();
+    this.win.__deleteSelectedEmitter = () => activeGame.deleteSelectedEmitter();
+    this.win.__duplicateSelectedEmitter = () => activeGame.duplicateSelectedEmitter();
+    this.win.__particlePlay = () => activeGame.particlePlay();
+    this.win.__particlePause = () => activeGame.particlePause();
+    this.win.__particleStop = () => activeGame.particleStop();
+    this.win.__particleRestart = () => activeGame.particleRestart();
+    this.win.__particleClear = () => activeGame.particleClear();
+    this.win.__isParticlePreviewPlaying = () => activeGame.isParticlePreviewPlaying();
+    this.win.__toggleParticleGizmo = (kind) => activeGame.toggleParticleGizmo(kind as "shapes" | "direction" | "bounds");
+    this.win.__getParticlePresets = () => activeGame.getParticlePresets();
+    this.win.__serializeParticles = () => activeGame.serializeParticles();
+    this.win.__hasParticleChanges = () => activeGame.hasParticleChanges();
+    this.win.__markParticlesSaved = () => activeGame.markParticlesSaved();
+    this.win.__getParticleStats = () => activeGame.getParticleStats();
+    this.win.__setParticleQuality = (quality) => activeGame.setParticleQuality(quality as "high" | "medium" | "low");
+    activeGame.onParticleDirty(() => this.win.__onParticleDirty?.());
+
+    // Undo/redo. One stack across both editor modes (see EditorRoot), so
+    // these are deliberately not namespaced per mode — a single Undo walks
+    // back through whatever actually happened, in order.
+    this.win.__editorUndo = () => activeGame.editorUndo();
+    this.win.__editorRedo = () => activeGame.editorRedo();
+    this.win.__getEditorHistory = () => activeGame.getEditorHistory();
+    activeGame.onEditorHistoryChange(() => this.win.__onEditorHistoryChanged?.());
 
     // Restore the 3D Viewer/Editor after an in-place reload, here rather
     // than in main.ts's hot-accept callback. That callback runs the moment

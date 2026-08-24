@@ -1,6 +1,7 @@
 import type { Scheduler, ScheduledHandle, SequenceStep, TweenOptions } from "./core/Scheduler";
 import type { EventBus, EventHandle, Listener } from "./core/EventBus";
 import type { ColliderManager } from "./collision/ColliderManager";
+import type { ParticleManager } from "./particles/ParticleManager";
 import { Cta, type CtaNetwork } from "./Cta";
 
 /** Re-exported so `import { Ion, Easing } from "./Ion"` is one line, one path — Scheduler.ts already re-exports it from tween.js for the same reason, this just closes the loop for callers going through the facade instead of Scheduler directly. `Easing.Quadratic.Out`, `Easing.Back.Out`, `Easing.Elastic.Out`, ... */
@@ -41,6 +42,7 @@ export interface IonContext {
   scheduler: Scheduler;
   bus: EventBus;
   colliders: ColliderManager;
+  particles: ParticleManager;
 }
 
 let context: IonContext | undefined;
@@ -92,6 +94,22 @@ export const Ion = {
    */
   get colliders(): ColliderManager {
     return required().colliders;
+  },
+
+  /**
+   * The ION Particle & VFX system — the registry every particle system in
+   * the scene lives in.
+   *
+   *   Ion.particles.getByName("Coin Burst")?.playAt(coin.position);
+   *   Ion.particles.setQuality("low");
+   *
+   * Usable from an entity constructor for the same reason `colliders` is:
+   * IonEngine binds the context before Game.create() runs, so an entity
+   * can look up (or create) its own effect where it builds its model
+   * rather than deferring to its first update() tick.
+   */
+  get particles(): ParticleManager {
+    return required().particles;
   },
 
   /** Run `fn` once, `seconds` from now (game time — pauses with gameplay). */

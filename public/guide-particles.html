@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Particles &amp; VFX — Ion Engine Guide</title>
+  <link rel="stylesheet" href="/guide.css">
+</head>
+
+<body>
+
+  <div class="chrome">
+    <span class="dot"></span>
+    <span>Ion Engine</span>
+    <span class="tag">Particles</span>
+  </div>
+
+  <nav class="gnav">
+    <a href="/guide.html">Overview</a>
+    <span class="sep"></span>
+    <a href="/guide-ui-editor.html">UI Editor</a>
+    <a href="/guide-colliders.html">Colliders</a>
+    <a href="/guide-particles.html" aria-current="page">Particles</a>
+  </nav>
+
+  <main>
+    <p class="kicker">System guide</p>
+    <h1>Particles &amp; VFX</h1>
+    <p class="lede">
+      Author an effect visually, then fire it from one line of gameplay code. One draw call per emitter,
+      preallocated buffers, and no <code>Object3D</code> per particle — built for a playable ad's frame
+      and size budget.
+    </p>
+
+    <div class="ref-table">
+      <div class="k">System</div>
+      <div class="v">A named group of emitters that play together. What gameplay holds and calls
+        <code>play()</code> on.</div>
+      <div class="k">Emitter</div>
+      <div class="v">One shape + sixteen modules. An explosion is a flash <em>and</em> debris <em>and</em> smoke —
+        three emitters, one system.</div>
+      <div class="k">Module</div>
+      <div class="v">Emission, Shape, Velocity, Noise, Color, Size… each toggled independently. A disabled module
+        genuinely costs nothing.</div>
+    </div>
+
+    <section class="step">
+      <div class="step-num">1</div>
+      <div class="step-body">
+        <h2>Create an effect</h2>
+        <p>
+          Open the 3D editor, then click <strong>✨</strong> or press <kbd>P</kbd>. The left dock becomes a
+          full-height Inspector, and the particle toolbar appears.
+        </p>
+        <p>
+          Pick a preset from the dropdown, then <strong>＋ System</strong>. With a scene object selected the
+          new effect is attached to it; otherwise it lands where you're looking.
+        </p>
+        <div class="grid">
+          <div class="card">
+            <h4>smoke · fire · sparks</h4>
+            <p>The three you'll reach for most. Fire and sparks are additive; smoke is alpha-blended and sorted.</p>
+          </div>
+          <div class="card">
+            <h4>explosion</h4>
+            <p>Three emitters — flash, debris, smoke — with debris spawning smoke on death via a sub-emitter.</p>
+          </div>
+          <div class="card">
+            <h4>coin-burst · confetti</h4>
+            <p>Reward feedback. Gravity-driven, one-shot, tuned to read instantly at small size.</p>
+          </div>
+          <div class="card">
+            <h4>dust · rain · snow</h4>
+            <p>Ambient, looping, world-space. Prewarmed so they start already populated instead of filling in.</p>
+          </div>
+          <div class="card">
+            <h4>magic · energy-burst</h4>
+            <p>Orbiting motes and expanding shells. Additive, bright colour ramps.</p>
+          </div>
+          <div class="card">
+            <h4>hit-impact · trail</h4>
+            <p>Short radial punch, and pooled ribbon trails for anything that moves.</p>
+          </div>
+        </div>
+        <div class="callout">
+          <strong>Presets are configurations, not gameplay.</strong> "Coin Burst" describes a look — small
+          bright specks thrown upward — not a coin. Using it for a gem or a star is the normal case.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">2</div>
+      <div class="step-body">
+        <h2>The transport</h2>
+        <p>
+          <strong>▶ ⏸ ↻ ⏹ ✕</strong> control the live preview. Everything you change in the Inspector shows
+          up on the very next frame — no rebuild, no restart.
+        </p>
+        <div class="ref-table">
+          <div class="k">▶ Play / ⏸ Pause</div>
+          <div class="v">Start or freeze the preview.</div>
+          <div class="k">↻ Restart</div>
+          <div class="v">Rewind to the beginning. What you press after tuning a one-shot.</div>
+          <div class="k">⏹ Stop</div>
+          <div class="v">Stop emitting, but let live particles finish their lifetimes.</div>
+          <div class="k">✕ Clear</div>
+          <div class="v">Kill every live particle immediately.</div>
+        </div>
+        <div class="callout">
+          <strong>Opening or closing the editor never disturbs a running effect.</strong> Playback only
+          changes when you press Pause or Stop — switching modes, or leaving the editor entirely, leaves
+          effects running exactly as they were.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">3</div>
+      <div class="step-body">
+        <h2>Pick an emission shape</h2>
+        <div class="grid">
+          <div class="card">
+            <h4>Box</h4>
+            <p>A volume. Ambient dust, rain and snow falling through a region. Set <code>Thickness</code> to 0 to emit
+              from the surface only.</p>
+          </div>
+          <div class="card">
+            <h4>Sphere</h4>
+            <p>Radial. Explosions and bursts. <code>Thickness: 0</code> emits from the <em>shell</em>, which is what
+              makes a burst read as one expanding ring rather than a filled cloud.</p>
+          </div>
+          <div class="card">
+            <h4>Cone</h4>
+            <p>Directional. Fire, smoke, jets. <code>Cone Height</code> above 0 spreads the spawn along the axis, so
+              a column starts already filled.</p>
+          </div>
+        </div>
+        <p class="dim">
+          Every shape emits about local <strong>+Y</strong>, so "fire rises" is the zero-rotation case.
+          <code>Arc</code> restricts the circumference — a half-sphere needs no separate shape.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">4</div>
+      <div class="step-body">
+        <h2>Fire it from gameplay</h2>
+        <p>The common case is one line — move the effect to a point and replay it.</p>
+        <pre><code>import { Ion } from "../engine/Ion";
+
+<span class="c">// Find it by the name you gave the system in the editor.</span>
+const burst = Ion.particles.getByName("Coin Burst");
+
+<span class="c">// playAt = move there + restart. What a pickup handler wants.</span>
+burst?.playAt(coin.object3D.position);</code></pre>
+
+        <p>Wired to a real event, using the collider system from the previous page:</p>
+        <pre><code>export class PickupFx {
+  private readonly burst = Ion.particles.getByName("Coin Burst");
+  private readonly impact = Ion.particles.getByName("Hit Impact");
+
+  wire(): void {
+    const zone = Ion.colliders.getByName("CoinZone");
+    zone?.onTriggerEnter("Player", (other) =&gt; {
+      this.burst?.playAt(other.worldCenter);
+      this.impact?.playAt(other.worldCenter);
+    });
+  }
+}</code></pre>
+
+        <p>For finer control, reach the individual emitter:</p>
+        <pre><code>const system = Ion.particles.getByName("Explosion");
+const debris = system?.get("Debris");        <span class="c">// by emitter name</span>
+
+debris?.emit(40);                            <span class="c">// ignore rate/duration, fire now</span>
+debris?.settings.main.startSpeed.max = 14;   <span class="c">// live config — takes effect next frame</span>
+
+if (system?.isFinished()) {                  <span class="c">// stopped AND fully drained</span>
+  <span class="c">// safe to reuse or release</span>
+}</code></pre>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h2>Local or world space</h2>
+        <p>The one setting that changes what an effect <em>means</em>. It's in the Main module.</p>
+        <div class="grid">
+          <div class="card">
+            <h4>local</h4>
+            <p>Particles move <em>with</em> the emitter. A torch flame attached to a moving hand. Rotating the emitter
+              drags its existing particles along.</p>
+          </div>
+          <div class="card">
+            <h4>world</h4>
+            <p>Particles are released and left behind. Exhaust, smoke trails, footstep dust. The emitter's later
+              movement doesn't touch them.</p>
+          </div>
+        </div>
+        <div class="callout">
+          Changing this at runtime clears the live particles — they're expressed in the space being left and
+          would visibly teleport otherwise.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
+        <h2>Sub-emitters</h2>
+        <p>
+          One effect spawning another, without gameplay code sequencing it. In the
+          <strong>Sub Emitters</strong> module, add an entry and pick a sibling emitter by name.
+        </p>
+        <div class="ref-table">
+          <div class="k">On Birth</div>
+          <div class="v">Fires as each particle spawns. Trails, sparks leaving a projectile.</div>
+          <div class="k">On Death</div>
+          <div class="v">Fires as each particle expires. Debris → smoke is the classic.</div>
+          <div class="k">On Collision</div>
+          <div class="v">Fires when a particle hits the collision plane. Splashes, impact puffs.</div>
+        </div>
+        <p class="dim">
+          <code>Chance</code> keeps it from firing on every single particle (0.25 on a 70-particle burst is
+          plenty of smoke), and <code>Inherit Vel</code> carries some of the parent's momentum into the
+          child. Chains are depth-limited to 3.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">7</div>
+      <div class="step-body">
+        <h2>Keep it cheap</h2>
+        <p>
+          The <strong>Diagnostics</strong> panel at the bottom of the Inspector is measured, not estimated —
+          active/max particles, draw calls, real buffer bytes, and the actual milliseconds spent in the last
+          update.
+        </p>
+        <div class="cheat">
+          <div class="cheat-row">
+            <div class="q">Biggest single cost</div>
+            <div class="a">Overdraw — large, overlapping particles</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Cheapest way to halve it</div>
+            <div class="a">Lower <code>Rate</code>, not <code>Max Particles</code></div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Sorting</div>
+            <div class="a">Only for alpha blending — leave off otherwise</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Noise octaves</div>
+            <div class="a">Each one is another sample per particle per axis</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Trails</div>
+            <div class="a">A 32-point trail is 16× the particle's own cost</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Off-screen ambient effects</div>
+            <div class="a">Set a <code>Cull Distance</code> in Quality/LOD</div>
+          </div>
+        </div>
+        <p>Scale everything at once from a device check at boot:</p>
+        <pre><code><span class="c">// Scales emission rate and burst counts across every effect —</span>
+<span class="c">// the same authored effect, running thinner.</span>
+Ion.particles.setQuality("low");     <span class="c">// "high" | "medium" | "low"</span>
+
+const stats = Ion.particles.getStats();
+console.log(stats.activeParticles, stats.drawCalls, stats.lastUpdateMs);</code></pre>
+        <div class="callout">
+          <strong>Additive blending doesn't need sorting</strong> — draw order is mathematically irrelevant
+          for it, so the sort would be pure cost. Turn <code>By Distance</code> on only for alpha-blended,
+          overlapping smoke.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">8</div>
+      <div class="step-body">
+        <h2>Full API</h2>
+        <div class="api">
+          <div class="api-head">Registry — Ion.particles</div>
+          <div class="api-row">
+            <span class="sig">getByName(name: string): ParticleSystem | undefined</span>
+            <span class="desc">By the system name from the editor.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setQuality("high" | "medium" | "low"): void</span>
+            <span class="desc">Scales rate and burst counts across every effect.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">getStats(): ParticleStats</span>
+            <span class="desc">Active/max particles, emitters, draw calls, buffer bytes, last update ms.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">playAll() · pauseAll() · clearAllParticles()</span>
+            <span class="desc">Blunt instruments for a cutscene or a pause menu.</span>
+          </div>
+
+          <div class="api-head">On a system</div>
+          <div class="api-row">
+            <span class="sig">playAt(position: THREE.Vector3): this</span>
+            <span class="desc">Move there and restart. The one-call form for a hit or pickup.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">play() · pause() · stop() · restart() · clear()</span>
+            <span class="desc"><code>stop()</code> lets live particles finish; <code>clear()</code> kills them
+              now.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">emit(count: number): this</span>
+            <span class="desc">Fire <code>count</code> from every enabled emitter, ignoring rate and duration.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">get(name: string): ParticleEmitter | undefined</span>
+            <span class="desc">One emitter, by its name in the editor.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">isPlaying() · isFinished()</span>
+            <span class="desc"><code>isFinished()</code> means stopped <em>and</em> fully drained — what a one-shot's
+              owner polls before releasing it.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setSeed(seed: number): this</span>
+            <span class="desc">Reproducible from here on. Each emitter gets <code>seed + index</code>, so they don't
+              correlate.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setPosition(x, y, z): this</span>
+            <span class="desc">Move without restarting.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">activeParticles · maxParticles · drawCalls</span>
+            <span class="desc">Live counters for this system.</span>
+          </div>
+
+          <div class="api-head">On an emitter</div>
+          <div class="api-row">
+            <span class="sig">settings: ParticleEmitterConfig</span>
+            <span class="desc">The live config. Mutating it takes effect on the next frame — this is how you drive an
+              effect from gameplay state.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">emit(count) · emitAt(count, x, y, z, vx?, vy?, vz?)</span>
+            <span class="desc">Fire now, optionally at an explicit point in the emitter's own space.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">setEnabled(enabled: boolean): this</span>
+            <span class="desc">Stops simulating and hides it, but keeps it registered and editable.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">attached: THREE.Object3D | undefined</span>
+            <span class="desc">The scene object it follows. Never modified by the emitter.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">activeParticles · maxParticles</span>
+            <span class="desc">Live count against the hard cap.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">9</div>
+      <div class="step-body">
+        <h2>Save</h2>
+        <p>
+          <strong>💾 Save</strong> in the particle toolbar writes <code>src/game/particles.json</code>. The
+          dot on the button means unsaved; <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> undo and redo, sharing one
+          stack with the collider editor.
+        </p>
+        <div class="callout">
+          <strong>Only the configuration is saved, never live particles.</strong> A saved effect is its
+          emitter configs and nothing else — no positions, no ages. That's what makes the file small and
+          diffable, and why a loaded effect starts from its own beginning.
+        </div>
+        <p class="dim">
+          It's a real import in the module graph, so what you author is what runs in the production build —
+          no export step.
+        </p>
+        <div class="cheat">
+          <div class="cheat-row">
+            <div class="q">Effect is invisible</div>
+            <div class="a">Check Start Alpha, opacity, and Max Particles</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Particles all at the origin</div>
+            <div class="a">World-space emitter with no transform yet</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">One-shot fires once, never again</div>
+            <div class="a">Use <code>restart()</code> or <code>playAt()</code>, not <code>play()</code></div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Sub-emitter never fires</div>
+            <div class="a">Target name must match a sibling exactly</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Effect looks different every play</div>
+            <div class="a">Turn off Auto Seed, set a fixed Seed</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Changes gone after restart</div>
+            <div class="a">Press 💾 Save — the dot means unsaved</div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Ion Engine — Particles &amp; VFX</span>
+    <span>Architecture: ENGINE.md · Setup: README.md</span>
+  </footer>
+
+</body>
+
+</html>

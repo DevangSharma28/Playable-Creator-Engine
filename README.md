@@ -280,6 +280,11 @@ src/
     ui/
       UILayout.ts                runtime renderer for layouts designed in tools/ui-editor.html
       UILayoutTypes.ts           shared schema for the layout JSON
+    particles/                 ION Particle & VFX — GPU-instanced, one draw call per emitter
+      ParticleManager.ts         registry + PARTICLES group + frame driver (Ion.particles)
+      ParticleSimulation.ts      the single per-frame update pipeline over every module
+      ParticleRenderer.ts        InstancedBufferGeometry + instanced attributes
+      ...                        see ENGINE.md for the full module list
     entities/
       Entity.ts                shared contract: object3D + update() + optional dispose()
   game/                    this specific playable ad
@@ -291,6 +296,7 @@ src/
       Player.ts                 the controllable character (animated GLB model)
       Coin.ts                   a single collectible
       CoinField.ts              owns all coins: spawning, animation, pickup detection
+    particles.json              particle effects authored in the 3D editor's Particle System mode
     ui/
       HUD.ts                    thin wrapper over the two UILayout instances: setScore, hideDragHint, showEndCard, onCtaClick
       mainLayout.json            gameplay HUD + joystick (edit via the visual editor, not by hand)
@@ -344,5 +350,47 @@ touches exactly one file, not `Game.ts`.
 - `dist/` — build output (`npm run build`)
 
 
-To point the CTA at your real store listing, edit the `alert(...)` call
-in `src/main.ts` and rebuild.
+## Particle & VFX system
+
+The 3D editor's **✨ Particle System** mode (toolbar, or `P` while the
+editor is open) authors ION particle effects: Box/Sphere/Cone emitters
+with sixteen collapsible modules, live preview transport, emission-volume
+gizmos, thirteen starter presets (Smoke, Fire, Sparks, Dust, Explosion,
+Magic, Hit Impact, Coin Burst, Confetti, Trail, Rain, Snow, Energy
+Burst), and a measured cost readout. Effects live under an engine-owned
+`PARTICLES` group in the Hierarchy and save to `src/game/particles.json`,
+which is a real import — so what you author is what ships.
+
+From gameplay:
+
+```ts
+import { Ion } from "../engine/Ion";
+
+Ion.particles.getByName("Coin Burst")?.playAt(coin.position);
+Ion.particles.setQuality("low");   // scales every effect down at once
+```
+
+See [ENGINE.md](ENGINE.md)'s `particles/` section for the architecture —
+why it's instanced quads rather than `THREE.Points`, how the
+structure-of-arrays buffer works, and what makes a disabled module
+genuinely free.
+
+## Tests
+
+```bash
+npm test            # typecheck + particle simulation + UI geometry parity
+npm run test:particles
+npm run test:geometry
+```
+
+`tests/particles.test.mjs` covers the simulation math — emission rates and
+bursts, lifetimes, buffer capacity and swap-remove, gravity, seeded
+determinism in both directions, shape sampling, collision, module gating,
+curves and gradients, and the lifecycle transitions.
+
+---
+
+To point the CTA at your real store listing, edit `STORE_URL` in
+`src/game/Game.ts` and rebuild. Every CTA (HUD button, endcard, and the
+crash-recovery overlay) routes through that one constant via
+`Cta.open()`, which picks the right ad-network API automatically.

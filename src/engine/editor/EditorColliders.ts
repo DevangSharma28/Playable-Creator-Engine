@@ -5,11 +5,12 @@ import type { ColliderManager } from "../collision/ColliderManager";
 import { BoxCollider } from "../collision/BoxCollider";
 import { SphereCollider } from "../collision/SphereCollider";
 import { CylinderCollider } from "../collision/CylinderCollider";
-import { colliderToData } from "../collision/ColliderSerialization";
+import { applyColliderData, colliderToData } from "../collision/ColliderSerialization";
 import type { ColliderData } from "../collision/ColliderTypes";
 import type { ColliderVisuals } from "./ColliderVisuals";
 import type { EditorSelection } from "./EditorSelection";
 import type { EditorObjectPicker } from "./EditorObjectPicker";
+import type { EditorHistory } from "./EditorHistory";
 import type { InspectorField, InspectorSection, InspectorSectionProvider } from "./InspectorSections";
 
 export interface EditorCollidersOptions {
@@ -22,7 +23,9 @@ export interface EditorCollidersOptions {
   picker: EditorObjectPicker;
   /** Where a new unattached collider is dropped: the orbit target, i.e. the middle of what you're looking at. */
   getFocusPoint: () => THREE.Vector3;
-  /** Notified whenever something changed that Exit Editor would need to save. */
+  /** Shared with the particle editor, so undo survives a mode switch. */
+  history: EditorHistory;
+  /** Notified whenever something changed that a save would need to write. */
   onDirty?: () => void;
 }
 
@@ -67,6 +70,9 @@ export class EditorColliders implements InspectorSectionProvider {
   /** Bumped whenever the Inspector's collider section would need different *rows* — a shape swap, a different collider, a create/delete. See InspectorSectionProvider.version. */
   private structureVersion = 0;
   private newColliderCount = 0;
+
+  /** Transform captured on the leading edge of a gizmo drag, so the trailing edge can push one undo entry for the whole gesture. */
+  private dragSnapshot: { collider: Collider; data: ColliderData } | undefined;
 
   constructor(opts: EditorCollidersOptions) {
     this.opts = opts;
@@ -153,7 +159,7 @@ export class EditorColliders implements InspectorSectionProvider {
       collider.offsetPosition.copy(this.opts.getFocusPoint());
     }
 
-    this.markDirty();
+    this.recordCreate(collider, `Create ${collider.name}`);
     this.opts.selection.selectObject(collider.node, "api");
     return collider;
   }
@@ -161,8 +167,7 @@ export class EditorColliders implements InspectorSectionProvider {
   /** Re-fits an existing collider to whatever it's attached to. The button you press after moving a prop and wanting its volume to catch up. */
   refit(collider: Collider): boolean {
     if (!collider.attached) return false;
-    this.fitToObject(collider, collider.attached);
-    this.markDirty();
+    this.record(collider, `Fit ${collider.name}`, () => this.fitToObject(collider, collider.attached as THREE.Object3D));
     return true;
   }
 
@@ -180,18 +185,48 @@ export class EditorColliders implements InspectorSectionProvider {
     copyShape(collider, copy);
     copy.attachToObject(collider.attached);
     this.opts.manager.add(copy);
-    this.markDirty();
+    this.recordCreate(copy, `Duplicate ${collider.name}`);
     this.opts.selection.selectObject(copy.node, "api");
     return copy;
   }
 
-  /** Removes a collider for good. Refuses code-created ones — deleting a collider a script builds every boot would look like it worked and then come straight back. */
+  /**
+   * Removes a collider. Refuses code-created ones — deleting a collider a
+   * script builds every boot would look like it worked and then come
+   * straight back.
+   *
+   * Detached with `keepAlive` rather than destroyed, so undo restores the
+   * very same instance and anything holding a reference to it (a Control
+   * Desk assignment, a gameplay handler) keeps working. The command owns
+   * it from here: `discard("applied")` destroys it once the delete can no
+   * longer be undone.
+   */
   remove(collider: Collider): boolean {
     if (!collider.persisted) return false;
-    if (this.opts.selection.object === collider.node) this.opts.selection.selectObject(undefined, "api");
-    this.opts.manager.remove(collider);
+    const wasSelected = this.opts.selection.object === collider.node;
+    if (wasSelected) this.opts.selection.selectObject(undefined, "api");
+    this.opts.manager.remove(collider, true);
     this.markDirty();
     this.structureVersion++;
+
+    this.opts.history.push({
+      label: `Delete ${collider.name}`,
+      undo: () => {
+        this.opts.manager.add(collider);
+        this.structureVersion++;
+        this.markDirty();
+        if (wasSelected) this.opts.selection.selectObject(collider.node, "api");
+      },
+      redo: () => {
+        if (this.opts.selection.object === collider.node) this.opts.selection.selectObject(undefined, "api");
+        this.opts.manager.remove(collider, true);
+        this.structureVersion++;
+        this.markDirty();
+      },
+      discard: (state) => {
+        if (state === "applied") collider.destroy();
+      },
+    });
     return true;
   }
 
@@ -270,8 +305,9 @@ export class EditorColliders implements InspectorSectionProvider {
         hint: "Free-form. This is also how gameplay finds it: Ion.colliders.getByName(\"…\").",
         read: () => collider.name,
         onChange: (v) => {
-          collider.name = v || "Collider";
-          this.markDirty();
+          // Merged by field, so typing a name is one undo step rather than
+          // one per keystroke.
+          this.record(collider, `Rename to "${v || "Collider"}"`, () => (collider.name = v || "Collider"), `col:${collider.id}:name`);
         },
       },
       {
@@ -290,9 +326,10 @@ export class EditorColliders implements InspectorSectionProvider {
         hint: "A trigger reports overlaps (onTriggerEnter/Stay/Exit) instead of acting as a solid volume. If either side of a pair is a trigger, only trigger events fire.",
         read: () => collider.isTrigger,
         onChange: (v) => {
-          collider.isTrigger = v;
-          this.markDirty();
-          this.structureVersion++;
+          this.record(collider, v ? `Make ${collider.name} a trigger` : `Make ${collider.name} solid`, () => {
+            collider.isTrigger = v;
+            this.structureVersion++;
+          });
         },
       },
       {
@@ -304,8 +341,7 @@ export class EditorColliders implements InspectorSectionProvider {
         hint: "Turning a collider off mid-overlap fires exit on every pair it was in, so nothing gets stuck thinking the player is still inside.",
         read: () => collider.enabled,
         onChange: (v) => {
-          collider.setEnabled(v);
-          this.markDirty();
+          this.record(collider, v ? `Enable ${collider.name}` : `Disable ${collider.name}`, () => collider.setEnabled(v));
         },
       },
       {
@@ -316,8 +352,7 @@ export class EditorColliders implements InspectorSectionProvider {
         hint: 'What this collider *is* — "Player", "PlayerZone", "Pickup". Handlers filter on it: zone.onTriggerEnter("Player", …).',
         read: () => collider.tag,
         onChange: (v) => {
-          collider.tag = v || "Untagged";
-          this.markDirty();
+          this.record(collider, `Tag ${collider.name}`, () => (collider.tag = v || "Untagged"), `col:${collider.id}:tag`);
         },
       },
       {
@@ -328,11 +363,17 @@ export class EditorColliders implements InspectorSectionProvider {
         hint: "Comma-separated tags this collider will pair with at all. Empty means every tag. Filtered in the broad phase, before any intersection test runs.",
         read: () => collider.mask.join(", "),
         onChange: (v) => {
-          collider.mask = v
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean);
-          this.markDirty();
+          this.record(
+            collider,
+            `Mask ${collider.name}`,
+            () => {
+              collider.mask = v
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean);
+            },
+            `col:${collider.id}:mask`
+          );
         },
       },
       {
@@ -343,13 +384,11 @@ export class EditorColliders implements InspectorSectionProvider {
         read: () => (collider.attached ? collider.attached.name || collider.attached.type : "— world space —"),
         onPick: () => this.armAttachPick(collider),
         onClear: () => {
-          collider.attachToObject(undefined);
-          this.markDirty();
+          this.record(collider, `Detach ${collider.name}`, () => collider.attachToObject(undefined));
         },
         onDropObject: (dropped) => {
           if (this.opts.manager.fromNode(dropped)) return; // attaching a collider to another collider's node is a loop nobody wants
-          collider.attachToObject(dropped);
-          this.markDirty();
+          this.record(collider, `Attach ${collider.name} to ${dropped.name || dropped.type}`, () => collider.attachToObject(dropped));
         },
       },
       {
@@ -359,8 +398,9 @@ export class EditorColliders implements InspectorSectionProvider {
         step: 0.05,
         read: () => [collider.offsetPosition.x, collider.offsetPosition.y, collider.offsetPosition.z],
         onChange: (axis, v) => {
-          collider.offsetPosition.setComponent(axis, v);
-          this.markDirty();
+          // Keyed per axis: nudging X then Y are two intentional edits, and
+          // merging them would make one undo revert both.
+          this.record(collider, `Move ${collider.name}`, () => collider.offsetPosition.setComponent(axis, v), `col:${collider.id}:pos:${axis}`);
         },
       },
       {
@@ -370,12 +410,18 @@ export class EditorColliders implements InspectorSectionProvider {
         step: 1,
         read: () => eulerDegrees(collider),
         onChange: (axis, v) => {
-          const e = collider.offsetRotation;
-          const radians = THREE.MathUtils.degToRad(v);
-          if (axis === 0) e.x = radians;
-          else if (axis === 1) e.y = radians;
-          else e.z = radians;
-          this.markDirty();
+          this.record(
+            collider,
+            `Rotate ${collider.name}`,
+            () => {
+              const e = collider.offsetRotation;
+              const radians = THREE.MathUtils.degToRad(v);
+              if (axis === 0) e.x = radians;
+              else if (axis === 1) e.y = radians;
+              else e.z = radians;
+            },
+            `col:${collider.id}:rot:${axis}`
+          );
         },
       },
       {
@@ -385,8 +431,7 @@ export class EditorColliders implements InspectorSectionProvider {
         step: 0.05,
         read: () => [collider.offsetScale.x, collider.offsetScale.y, collider.offsetScale.z],
         onChange: (axis, v) => {
-          collider.offsetScale.setComponent(axis, v);
-          this.markDirty();
+          this.record(collider, `Scale ${collider.name}`, () => collider.offsetScale.setComponent(axis, v), `col:${collider.id}:scale:${axis}`);
         },
       },
       {
@@ -437,8 +482,7 @@ export class EditorColliders implements InspectorSectionProvider {
           step: 0.1,
           read: () => [collider.size.x, collider.size.y, collider.size.z],
           onChange: (axis, v) => {
-            collider.size.setComponent(axis, Math.max(0.001, v));
-            this.markDirty();
+            this.record(collider, `Resize ${collider.name}`, () => collider.size.setComponent(axis, Math.max(0.001, v)), `col:${collider.id}:size:${axis}`);
           },
         },
       ];
@@ -453,8 +497,7 @@ export class EditorColliders implements InspectorSectionProvider {
           min: 0.001,
           read: () => collider.radius,
           onChange: (v) => {
-            collider.radius = Math.max(0.001, v);
-            this.markDirty();
+            this.record(collider, `Resize ${collider.name}`, () => (collider.radius = Math.max(0.001, v)), `col:${collider.id}:radius`);
           },
         },
       ];
@@ -469,8 +512,7 @@ export class EditorColliders implements InspectorSectionProvider {
         min: 0.001,
         read: () => cyl.radius,
         onChange: (v) => {
-          cyl.radius = Math.max(0.001, v);
-          this.markDirty();
+          this.record(collider, `Resize ${collider.name}`, () => (cyl.radius = Math.max(0.001, v)), `col:${collider.id}:radius`);
         },
       },
       {
@@ -481,8 +523,7 @@ export class EditorColliders implements InspectorSectionProvider {
         min: 0.001,
         read: () => cyl.height,
         onChange: (v) => {
-          cyl.height = Math.max(0.001, v);
-          this.markDirty();
+          this.record(collider, `Resize ${collider.name}`, () => (cyl.height = Math.max(0.001, v)), `col:${collider.id}:height`);
         },
       },
     ];
@@ -492,8 +533,7 @@ export class EditorColliders implements InspectorSectionProvider {
     this.opts.picker.beginPickRequest({
       validate: (object) => (this.opts.manager.fromNode(object) ? { ok: false, reason: "That's a collider — pick a scene object for it to follow." } : { ok: true, reason: "" }),
       onResolve: (object) => {
-        collider.attachToObject(object);
-        this.markDirty();
+        this.record(collider, `Attach ${collider.name} to ${object.name || object.type}`, () => collider.attachToObject(object));
         // Back to the collider, not the object that was just picked: the
         // panel you were configuring is the one you want to still be
         // looking at.
@@ -590,6 +630,102 @@ export class EditorColliders implements InspectorSectionProvider {
   private markDirty(): void {
     this.dirty = true;
     this.opts.onDirty?.();
+  }
+
+  // ---------------------------------------------------------------------
+  // Undo / redo
+  // ---------------------------------------------------------------------
+
+  /**
+   * Runs `mutate` and records it as one undoable property change.
+   *
+   * Captures the collider's serialized form before and after, and restores
+   * by writing the fields back onto the *same live collider*
+   * (`applyColliderData`) rather than rebuilding it — identity survives, so
+   * a Control Desk assignment pointing at this collider still resolves
+   * after an undo.
+   *
+   * `mergeKey` collapses a continuous gesture (a slider drag, typing into a
+   * number field) into a single entry — see EditorHistory.push.
+   */
+  private record(collider: Collider, label: string, mutate: () => void, mergeKey?: string): void {
+    if (this.opts.history.isApplying) {
+      // Already inside an undo/redo — this mutation *is* the replay, and
+      // recording it would push the inverse of the thing being replayed.
+      mutate();
+      return;
+    }
+    const before = colliderToData(collider, this.opts.scene);
+    mutate();
+    const after = colliderToData(collider, this.opts.scene);
+    this.opts.history.push({
+      label,
+      mergeKey,
+      undo: () => this.restoreCollider(collider, before),
+      redo: () => this.restoreCollider(collider, after),
+    });
+    this.markDirty();
+  }
+
+  private restoreCollider(collider: Collider, data: ColliderData): void {
+    if (collider.isDestroyed) return;
+    applyColliderData(collider, data, this.opts.scene);
+    // Dimensions and attachment change which rows the Inspector shows.
+    this.structureVersion++;
+    this.markDirty();
+  }
+
+  /**
+   * Records a create/duplicate so undo removes it and redo brings the same
+   * object back.
+   *
+   * `keepAlive` on removal is what makes that possible: the collider is
+   * detached rather than destroyed, so redo re-registers the identical
+   * instance. `discard` releases it if the command is dropped while
+   * unapplied — at that point nothing can ever bring it back, and the
+   * object would otherwise sit detached forever.
+   */
+  private recordCreate(collider: Collider, label: string): void {
+    this.opts.history.push({
+      label,
+      undo: () => {
+        if (this.opts.selection.object === collider.node) this.opts.selection.selectObject(undefined, "api");
+        this.opts.manager.remove(collider, true);
+        this.structureVersion++;
+        this.markDirty();
+      },
+      redo: () => {
+        this.opts.manager.add(collider);
+        this.structureVersion++;
+        this.markDirty();
+      },
+      discard: (state) => {
+        if (state === "unapplied") collider.destroy();
+      },
+    });
+    this.markDirty();
+  }
+
+  /** Begin/end of a gizmo drag — see EditorRoot, which routes SceneInspector's drag events here. */
+  onGizmoDrag(dragging: boolean): void {
+    const collider = this.selected;
+    if (dragging) {
+      this.dragSnapshot = collider ? { collider, data: colliderToData(collider, this.opts.scene) } : undefined;
+      return;
+    }
+    const snapshot = this.dragSnapshot;
+    this.dragSnapshot = undefined;
+    if (!snapshot || snapshot.collider !== collider || !collider) return;
+    const after = colliderToData(collider, this.opts.scene);
+    // A click that selected without moving anything must not create an
+    // empty undo step.
+    if (JSON.stringify(snapshot.data.offset) === JSON.stringify(after.offset)) return;
+    this.opts.history.push({
+      label: `Transform ${collider.name}`,
+      undo: () => this.restoreCollider(collider, snapshot.data),
+      redo: () => this.restoreCollider(collider, after),
+    });
+    this.markDirty();
   }
 }
 

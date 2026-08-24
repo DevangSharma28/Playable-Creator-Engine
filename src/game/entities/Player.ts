@@ -197,16 +197,16 @@ export class Player {
     // register their own colliders where they build their model. Ion.after/
     // Ion.tween are fine here now too — the deferred reveal below is left
     // as-is because it's about timing, not availability.
-    this.collider = Ion.colliders.cylinder({
-      name: "Player Collider",
-      tag: "Player",
-      radius: 0.4,
-      height: 1.8,
-      attachTo: this.player,
-      // Half the height, so the cylinder stands on the ground plane instead
-      // of being centered on the player's feet and sinking half of it.
-      position: [0, 0.9, 0],
-    });
+    // this.collider = Ion.colliders.cylinder({
+    //   name: "Player Collider",
+    //   tag: "Player",
+    //   radius: 0.3,
+    //   height: 1.5,
+    //   attachTo: this.player,
+    //   // Half the height, so the cylinder stands on the ground plane instead
+    //   // of being centered on the player's feet and sinking half of it.
+    //   position: [0, 0.8, 0],
+    // });
 
     setTimeout(() => {
       this.revealPopcornMachine(this.popcornMachine);
@@ -284,41 +284,26 @@ export class Player {
       //
       // Triggers are deliberately not solid, so PlayerZone keeps being
       // something you walk into rather than something that blocks you.
-      const moveSpeed = this.speed * 0.01; // reduce to 30%
-
-      moveDelta.set(
-        axis.x * moveSpeed * dt,
-        0,
-        axis.y * moveSpeed * dt
-      );
-
-      if (this.collider) {
-        Ion.colliders.moveAndSlide(
-          this.collider,
-          this.player.position,
-          moveDelta,
-          { up: UP }
-        );
-      } else {
-        this.player.position.add(moveDelta);
-      }
+     moveDelta.set(axis.x * this.speed * dt, 0, axis.y * this.speed * dt); 
+     if (this.collider) { Ion.colliders.moveAndSlide(this.collider, this.player.position, moveDelta, { up: UP }); }
+      else { this.player.position.add(moveDelta); }
 
 
       // ----------------------------------------------------------------------
       // Keep Player Inside Bounds
       // ----------------------------------------------------------------------
 
-      this.player.position.x = THREE.MathUtils.clamp(
-        this.player.position.x,
-        -this.bound,
-        this.bound
-      );
+      // this.player.position.x = THREE.MathUtils.clamp(
+      //   this.player.position.x,
+      //   -this.bound,
+      //   this.bound
+      // );
 
-      this.player.position.z = THREE.MathUtils.clamp(
-        this.player.position.z,
-        -this.bound,
-        this.bound
-      );
+      // this.player.position.z = THREE.MathUtils.clamp(
+      //   this.player.position.z,
+      //   -this.bound,
+      //   this.bound
+      // );
 
 
       // ----------------------------------------------------------------------
