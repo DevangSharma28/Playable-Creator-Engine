@@ -269,6 +269,8 @@ export class Player {
     // Move Character
     // ------------------------------------------------------------------------
 
+
+
     if (moving) {
 
       // --------------------------------------------------------------------
@@ -284,8 +286,8 @@ export class Player {
       //
       // Triggers are deliberately not solid, so PlayerZone keeps being
       // something you walk into rather than something that blocks you.
-     moveDelta.set(axis.x * this.speed * dt, 0, axis.y * this.speed * dt); 
-     if (this.collider) { Ion.colliders.moveAndSlide(this.collider, this.player.position, moveDelta, { up: UP }); }
+      moveDelta.set(axis.x * this.speed * dt, 0, axis.y * this.speed * dt);
+      if (this.collider) { Ion.colliders.moveAndSlide(this.collider, this.player.position, moveDelta, { up: UP }); }
       else { this.player.position.add(moveDelta); }
 
 

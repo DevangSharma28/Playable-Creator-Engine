@@ -73,8 +73,12 @@ directly — no server needed.
 
 ## Visual UI editor (Unity-style)
 
-`tools/ui-editor.html` is a drag-and-drop editor for placing sprites/
-images, text, rects, and joysticks on top of the game. Two ways to use it:
+`tools/ui-editor.html` is a drag-and-drop editor for building the UI that
+sits on top of the game. Fourteen element types — image, text, rect,
+group, joystick, button, progress bar, slider, toggle, checkbox, sprite
+(spritesheet-animated), video, shape and icon — plus gradients, masks,
+shadows, hover/pressed/disabled states, and declarative click actions.
+Two ways to use it:
 
 - **Embedded, live** (recommended): click **✏️ Editor** in the
   **Engine Room** panel, top-right of the dev preview (`npm run dev`).
@@ -180,13 +184,27 @@ decorative by default (doesn't block touches); call
 `game.endcardUILayout.setInteractive(...)` (endcardLayout) from `Game.ts`
 if you want a specific placed sprite to act as a button, or `.setText(...)`
 / `.setImage(...)` to update something at runtime by the `name` you gave
-it in the editor.
+it in the editor. Controls have their own accessors —
+`.setValue(name, n)` / `.getValue(name)` for a progress bar or slider,
+`.isOn(name)` for a toggle or checkbox.
 
-**Test coverage**: `scripts/test-ui-editor.js` (run with `node
-scripts/test-ui-editor.js`) drives the editor headlessly — adding
-elements, dragging, resizing, changing anchors, uploading an image, and
-saving — and asserts the output JSON matches the schema `UILayout.ts`
-expects. Useful as a regression check if you modify the editor.
+Buttons can also do things without any code. `show`, `hide`,
+`toggleVisible` and `setText` actions run entirely in the runtime; `cta`
+fires the configured store link; and `emit` sends a named event to
+`ui.onAction((event, el) => …)`, which is how a designed button triggers
+something game-specific without the engine ever learning your game's
+vocabulary.
+
+**Keyboard**: press `?` in the editor for the full list.
+
+**Test coverage**: `npm test` runs everything. The UI-specific suites are
+`tests/ui-editor.test.mjs` (drives the editor page headlessly through its
+real controls), `tests/ui-layout.test.mjs` (the runtime renderer against a
+real DOM), `tests/geometry-parity.test.mjs` (asserts the editor and the
+runtime compute *identical* geometry, exactly — not approximately), and
+`tests/render-defaults-parity.test.mjs` (asserts they agree on every
+default too). Run them if you modify either side; they exist because
+editor/runtime drift here has shipped silently before.
 
 
 
@@ -303,6 +321,14 @@ src/
       endcardLayout.json         end-card title + CTA (edit via the visual editor, not by hand)
 tools/
   ui-editor.html               standalone visual UI editor — open directly, no build needed
+tests/
+  particles.test.mjs           particle simulation over typed arrays
+  particle-shader.test.mjs     every #ifdef combination the renderer emits compiles
+  geometry-parity.test.mjs     editor and runtime compute identical geometry, exactly
+  render-defaults-parity.test.mjs  ...and identical defaults, with no `||` fallbacks
+  ui-layout.test.mjs           runtime renderer against a real DOM
+  ui-editor.test.mjs           the editor page driven through its real controls
+  lib/                         shared source-extraction / TS-loading helpers
 ```
 
 **Adding a new gameplay object** (Enemy, Worker, a particle burst, a second

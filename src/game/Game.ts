@@ -832,6 +832,14 @@ export class Game {
     this.input.dispose();
     this.keyboardInput.dispose();
     this.soundHandler.dispose();
+    // Drops the DOM listeners the designed UI wired up (button actions,
+    // toggle/slider interaction, hover states). The nodes themselves are
+    // replaced when the next Game builds into the same container, but the
+    // handlers close over *this* Game — so on an in-place reload, leaving
+    // them attached keeps a disposed Game reachable and lets a stray click
+    // on stale UI drive it.
+    this.mainUI.dispose();
+    this.endcardUI.dispose();
     this.renderer.dispose();
   }
 

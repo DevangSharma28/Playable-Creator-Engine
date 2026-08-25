@@ -22,16 +22,21 @@ Open the URL it prints (usually `http://127.0.0.1:8000`). You'll see the game ru
 ## 3. Design a screen (UI Editor)
 
 1. Click **✏️ Editor**. The editor opens as an overlay on top of the running game — you're editing live, not in a separate preview.
-2. Along the top: **Image / Text / Rect / Joystick / Group** — click one to drop a new element onto the canvas.
-3. Click any element to select it. The **Properties** panel (right side) shows everything about it:
-   - **X / Y** — position. Toggle **PX / %** per-axis; PX is exact pixels, % is relative to screen size. New elements default to PX.
-   - **Anchor point** — the 3×3 grid; this decides which corner/edge the element is pinned to as the screen resizes.
-   - **⊙ Center (0, 0)** — snaps the element back to its anchor's exact center in one click.
-   - **Width / Height**, **Rotation**, **Opacity** (shown as 0–1), **Visible on game start**.
-   - For **Text**: content, font size, color (native color picker), and a 3-way **Align** control.
-   - **Z Order** (light blue label) — touch/click priority, independent from visual stacking (**R Order**).
-4. **Layers** panel (left side) lists everything on the canvas. Drag rows to reorder, drag one row onto another to group them, click the eye icon to toggle visibility.
-5. **Save** (top bar) writes straight to `src/game/ui/mainLayout.json` (or the endcard layout) via the local dev API — no file picker, no permissions dialog. The running game hot-reloads immediately.
+2. **＋ Insert** (or press <kbd>I</kbd>) opens the element palette: **Text, Rect, Button, Group, Progress, Slider, Toggle, Checkbox, Shape, Icon, Sprite, Video, Joystick**. Images come in through the 🖼️ button next to it, since there's nothing to place until you've picked a file.
+3. Click any element to select it. Eight handles resize it (drag pins the opposite edge; hold <kbd>Alt</kbd> to scale about the center, <kbd>Shift</kbd> to keep the ratio), and the grip above it rotates (<kbd>Shift</kbd> snaps to 15°). Dragging snaps to other elements' edges and centers, and to any guides you've pulled off a ruler.
+4. The **Properties** panel (right side) is split into collapsible sections:
+   - **Layout** — **X / Y** with a per-axis **PX / %** toggle (PX scales uniformly and never stretches; % tracks that axis), the 3×3 **Anchor point** grid deciding which edge the element pins to as the screen resizes, **⊙ Center (0, 0)**, Width/Height, Rotation.
+   - **Appearance** — opacity, visibility at game start, blend mode.
+   - **Fill & border** — solid colour *or* a linear/radial gradient, corner radius, border, drop shadow.
+   - **Typography** (text, buttons, icons) — size, colour, alignment, weight, letter spacing, uppercase, outline and text shadow.
+   - **Animation**, **States** (hover / pressed / disabled), **Actions** (see below).
+   - **R Order** is visual stacking; **Z Order** is touch priority, independent of it.
+5. **Actions** let a button do something without any code: `show`, `hide`, `toggleVisible` and `setText` run entirely in the runtime; `cta` opens the store link; `emit` sends a named event your game handles via `ui.onAction((event, el) => …)`.
+6. **Layers** (left side) lists everything, with a filter box, collapsible groups, and per-row lock 🔒 and visibility toggles. Drag rows to reorder, drag one onto a group to nest it. The **Assets** tab keeps images you can reuse across layouts; **Prefabs** stores a selection you can stamp back in later (as a copy — edits don't flow back).
+7. Watch the **✅ badge** in the toolbar. It flags things that only break much later otherwise: two elements sharing a name (which makes one unreachable from code), a missing image source, a zero-size element, an action pointing at something you deleted. Click a finding to jump to the element.
+8. **Save** writes straight to `src/game/ui/mainLayout.json` (or the endcard layout) via the local dev API — no file picker, no permissions dialog. The button turns green with a ✓ to confirm, and the running game hot-reloads immediately.
+
+Press <kbd>?</kbd> at any time for the full shortcut list.
 
 Everything you place here becomes a named element the game code can reach by name — which is exactly what step 4 is for.
 
@@ -230,6 +235,17 @@ bash build.sh
 |---|---|
 | Move something to an exact pixel position | Select it → Properties → switch X/Y to **PX** |
 | Reset an element back to its anchor's center | **⊙ Center (0, 0)** button |
+| Add any element type | **＋ Insert**, or press <kbd>I</kbd> |
+| See every keyboard shortcut | Press <kbd>?</kbd> |
+| Line several elements up / space them evenly | Select 2+ → **⌗** in the toolbar, or the align row in Properties |
+| Make a button do something without writing code | Properties → **Actions** → `show` / `hide` / `setText` / `cta` |
+| Send a custom event to your game from a button | Action type **emit** → handle it with `ui.onAction((event, el) => …)` |
+| Stop grabbing a finished background by accident | Select it → 🔒 in the toolbar or the Layers row (<kbd>Ctrl+L</kbd>) |
+| Check a layout for problems before shipping | The **✅ badge** in the toolbar — click a finding to select the element |
+| Preview animations without them fighting your edits | They're paused by default — press <kbd>P</kbd> or ▶ to play |
+| Reuse an image across several layouts | Sidebar → **Assets** tab |
+| Save a group of elements to stamp in later | Select → sidebar **Prefabs** → ＋ From selection |
+| Recover work after the tab died | Reopen the editor — it offers the autosave on boot |
 | Give a script field a UI element | UI Editor → Scripts panel → drag or **⊙ Pick** |
 | Change a gameplay number while the game's running | Engine Room → Scripts (bottom list) → Control Desk |
 | Make a tweak permanent | Control Desk → edit the value → **💾 Save** |

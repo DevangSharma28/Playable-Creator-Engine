@@ -11,11 +11,44 @@
 // and this repo's own convention for lightweight structural extraction).
 
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as esbuild from "esbuild";
+
+/**
+ * Node's ESM resolver takes specifiers literally — no extension guessing —
+ * so TypeScript's extensionless `from "./UILayoutTypes"` has to become
+ * `from "./UILayoutTypes.mjs"` to resolve against what we actually wrote
+ * to disk.
+ */
+function rewriteRelativeSpecifiers(code) {
+  return code.replace(/((?:from|import)\s*["'])(\.\/[^"']+?)(["'])/g, (_all, head, spec, tail) =>
+    /\.(mjs|js|json)$/.test(spec) ? `${head}${spec}${tail}` : `${head}${spec}.mjs${tail}`
+  );
+}
+
+/**
+ * Transforms every relative sibling module `code` imports into `outDir`,
+ * recursively, so the transformed entry file can actually be imported.
+ * Deliberately narrow: relative specifiers only (a bare "three" would be
+ * a real dependency and has no business anywhere near a geometry
+ * formula), one file per specifier, and `seen` guards against an import
+ * cycle.
+ */
+function writeSiblingModules(code, sourceDir, outDir, seen) {
+  for (const match of code.matchAll(/(?:from|import)\s*["']\.\/([^"']+?)(?:\.mjs)?["']/g)) {
+    const name = match[1];
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const tsFile = join(sourceDir, `${name}.ts`);
+    if (!existsSync(tsFile)) continue;
+    const { code: siblingCode } = esbuild.transformSync(readFileSync(tsFile, "utf8"), { loader: "ts", format: "esm", target: "es2020" });
+    writeFileSync(join(outDir, `${name}.mjs`), rewriteRelativeSpecifiers(siblingCode), "utf8");
+    writeSiblingModules(siblingCode, sourceDir, outDir, seen);
+  }
+}
 
 const BEGIN_MARKER = "// ─── GEOMETRY:BEGIN ───";
 const END_MARKER = "// ─── GEOMETRY:END ───";
@@ -133,9 +166,9 @@ export function loadEditorGeometry(htmlPath) {
 }
 
 /**
- * Transforms UILayout.ts's real source with esbuild (TS -> ESM JS only —
- * no bundling, no resolving its sibling imports), writes it to a temp
- * file, and dynamic-imports it for real. `make(...)` then builds each
+ * Transforms UILayout.ts's real source with esbuild (TS -> ESM JS, no
+ * bundling), writes it to a temp dir alongside any *sibling* modules it
+ * imports, and dynamic-imports it for real. `make(...)` then builds each
  * instance via `Object.create(UILayout.prototype)` rather than `new
  * UILayout(...)` — the real constructor touches `document`
  * (ensureKeyframes' createElement) and expects a live HTMLElement
@@ -144,6 +177,16 @@ export function loadEditorGeometry(htmlPath) {
  * fields the fenced formulas depend on (scaleX/scaleY/liveHeight/
  * canvasWidth/canvasHeight) are set by hand, to exactly what the real
  * constructor's own initial updateScale() call would have set them to.
+ *
+ * Siblings are followed (one directory, no node_modules, no deep
+ * transitive graph) because UILayout.ts imports real *values* from
+ * UILayoutTypes.ts, not only types. `import type` is erased outright by
+ * esbuild, so for a long time nothing survived transformation and a lone
+ * file imported cleanly — the moment one runtime constant was shared, the
+ * whole suite failed with a bare ERR_MODULE_NOT_FOUND that said nothing
+ * about geometry. Resolving siblings here keeps that failure mode from
+ * coming back the next time the renderer legitimately needs a shared
+ * constant.
  */
 export async function loadRuntimeGeometry(tsPath) {
   const block = extractGeometryBlock(tsPath); // also validates the fence exists before we even try to compile anything
@@ -152,7 +195,8 @@ export async function loadRuntimeGeometry(tsPath) {
 
   const dir = mkdtempSync(join(tmpdir(), "geometry-parity-"));
   const outFile = join(dir, "UILayout.mjs");
-  writeFileSync(outFile, code, "utf8");
+  writeFileSync(outFile, rewriteRelativeSpecifiers(code), "utf8");
+  writeSiblingModules(code, dirname(tsPath), dir, new Set(["UILayout"]));
   const mod = await import(pathToFileURL(outFile).href);
   const UILayoutClass = mod.UILayout;
   if (!UILayoutClass) throw new Error(`${tsPath}: transformed module has no "UILayout" export`);

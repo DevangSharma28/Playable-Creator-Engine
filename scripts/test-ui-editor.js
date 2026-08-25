@@ -65,8 +65,12 @@ async function run() {
 
   const doc = window.document;
 
-  // --- Test 1: Add Text button creates a layer ---
-  const addTextBtn = doc.getElementById("btn-add-text");
+  // --- Test 1: inserting a Text element creates a layer ---
+  // The per-type toolbar buttons (btn-add-text, btn-add-rect, ...) were
+  // replaced by one data-driven Insert palette built from ELEMENT_PRESETS,
+  // so every type is reachable through the same [data-insert] control.
+  const addTextBtn = doc.querySelector('[data-insert="text"]');
+  assert(addTextBtn !== null, "expected an Insert palette entry for the text type");
   addTextBtn.dispatchEvent(new window.Event("click", { bubbles: true }));
   await wait(10);
 
