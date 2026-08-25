@@ -37,8 +37,8 @@
     <h3>The three tools</h3>
     <div class="ref-table">
       <div class="k">UI Editor</div>
-      <div class="v">Design the HUD/endcard — buttons, text, images, the joystick. Opens as a live overlay on the
-        running game.</div>
+      <div class="v">Design the HUD/endcard — text, images, buttons, progress bars, sliders, sprites, the joystick
+        and more. Opens as a live overlay on the running game.</div>
       <div class="k">Engine Room</div>
       <div class="v">The dev panel itself — Build, 3D View, Audio Reactor, FPS/stats. Always visible, docked right.
       </div>
@@ -52,7 +52,8 @@
       <a class="card" href="/guide-ui-editor.html" style="text-decoration:none">
         <h4>UI Editor →</h4>
         <p>Design a layout, name elements, bind them to script fields, and drive them from code.
-          <code>setText</code>, <code>setInteractive</code>, anchors, PX vs %.</p>
+          Every element type, anchors, PX vs %, states and actions, <code>setText</code>,
+          <code>setValue</code>, <code>onAction</code>.</p>
       </a>
       <a class="card" href="/guide-colliders.html" style="text-decoration:none">
         <h4>Colliders &amp; Areas →</h4>
@@ -85,21 +86,25 @@ npm run dev</code></pre>
         <p>Click <strong>✏️ Editor</strong> at the top of Engine Room. It opens on top of the running game — you're
           editing live, not in a separate preview.</p>
         <ol>
-          <li>Along the top: <strong>Image / Text / Rect / Joystick / Group</strong> — click one to drop it onto the
-            canvas.</li>
-          <li>Click an element to select it. <strong>Properties</strong> (right) shows everything about it —
-            <code>X</code>/<code>Y</code> with a per-axis <strong>PX / %</strong> toggle, the 3×3 anchor grid,
-            a <strong>⊙ Center (0, 0)</strong> quick-reset, width/height, rotation, opacity, and — for text —
-            a color picker and 3-way align control.
-          </li>
-          <li><strong>Layers</strong> (left) lists everything on the canvas. Drag to reorder, drag one row onto another
-            to group, click the eye icon to hide.</li>
+          <li><strong>＋ Insert</strong> (or <kbd>I</kbd>) opens the palette — text, rects, buttons, groups,
+            progress bars, sliders, toggles, checkboxes, shapes, icons, sprites, video, the joystick. Images
+            come in through the 🖼️ button beside it.</li>
+          <li>Drag to position — it snaps to other elements and to guides. Eight handles resize, the grip above
+            rotates. <strong>Properties</strong> (right) is sectioned: layout and anchoring, fill (solid or
+            gradient), typography, animation, hover/pressed states, and click actions.</li>
+          <li><strong>Layers</strong> (left) lists everything, with a filter, collapsible groups, and per-row
+            lock and visibility. The <strong>Assets</strong> and <strong>Prefabs</strong> tabs beside it hold
+            reusable images and saved selections.</li>
+          <li>Watch the <strong>✅ badge</strong> in the toolbar — it flags duplicate names, missing image
+            sources, zero-size elements and dead action targets before they become a broken ad.</li>
           <li><strong>Save</strong> writes straight to <code>mainLayout.json</code> (or the endcard layout) — no file
-            picker. The running game hot-reloads immediately.</li>
+            picker. The button turns green with a ✓, and the running game hot-reloads immediately.</li>
         </ol>
         <div class="callout">Everything placed here becomes a <strong>named element</strong> game code can reach
           directly —
-          which is exactly what the next step is for.</div>
+          which is exactly what the next step is for. Buttons can also act on their own: <code>show</code>,
+          <code>hide</code> and <code>setText</code> actions need no code at all. Press <kbd>?</kbd> in the
+          editor for every shortcut.</div>
       </div>
     </section>
 

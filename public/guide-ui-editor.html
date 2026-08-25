@@ -57,27 +57,55 @@
       <div class="step-body">
         <h2>Place and name an element</h2>
         <p>
-          Add with <strong>+ Image</strong>, <strong>+ Text</strong>, <strong>+ Rect</strong>,
-          <strong>+ Joystick</strong>, or <strong>+ Group</strong>. Drag to position, drag the red handle
-          to resize.
+          <strong>＋ Insert</strong> (or press <kbd>I</kbd>) opens the palette. Images come in through the
+          🖼️ button beside it, since there's nothing to place until you've chosen a file.
+        </p>
+        <p>
+          Drag to position — it snaps to other elements' edges and centres, and to guides you pull off a
+          ruler. Eight handles resize (dragging pins the <em>opposite</em> edge; <kbd>Alt</kbd> scales about
+          the centre, <kbd>Shift</kbd> keeps the ratio), and the grip above the box rotates
+          (<kbd>Shift</kbd> snaps to 15°).
         </p>
         <p>
           <strong>The name is the contract.</strong> It's the only thing code uses to find an element, so
           set it in the Properties panel before you write any. Rename it later and the lookup silently
-          stops matching.
+          stops matching — the ✅ badge flags two elements sharing a name, because that makes one of them
+          permanently unreachable.
         </p>
         <div class="ref-table">
+          <div class="k">Text</div>
+          <div class="v">Font size is a % of the container's height, so it scales with the screen. Outline and
+            shadow are available for titles over busy backgrounds.</div>
           <div class="k">Image</div>
           <div class="v">Embedded as base64, so a saved layout is self-contained — no missing-asset step.</div>
-          <div class="k">Text</div>
-          <div class="v">Font size is a % of the container's height, so it scales with the screen.</div>
           <div class="k">Rect</div>
-          <div class="v">A coloured box with optional radius/border. What most buttons actually are.</div>
+          <div class="v">A coloured box with optional radius, border, gradient and shadow.</div>
+          <div class="k">Button</div>
+          <div class="v">A box that centres a label, with an optional icon. Clickable by default, ships with a
+            pressed state, and can carry actions — often no code needed at all.</div>
+          <div class="k">Group</div>
+          <div class="v">A container. Nested children position relative to <em>it</em>, and move/resize together.
+            Turn on <strong>Clip contents</strong> to use one as a mask.</div>
+          <div class="k">Progress</div>
+          <div class="v">A track and a fill, in any of four directions. Drive it with
+            <code>ui.setValue(name, 0…1)</code>.</div>
+          <div class="k">Slider</div>
+          <div class="v">Draggable at runtime over your own min/max. Each change fires
+            <code>"name:change"</code> through <code>onAction</code>.</div>
+          <div class="k">Toggle / Checkbox</div>
+          <div class="v">Flip themselves on click; read with <code>ui.isOn(name)</code>.</div>
+          <div class="k">Sprite</div>
+          <div class="v">A spritesheet animated in pure CSS — no per-frame JS, so it costs nothing at runtime.</div>
+          <div class="k">Shape</div>
+          <div class="v">Star, hexagon, heart and friends, clipped from the box. Scales at any size.</div>
+          <div class="k">Icon</div>
+          <div class="v">A single glyph or emoji, sized and coloured like text.</div>
+          <div class="k">Video</div>
+          <div class="v">Muted + autoplay by default — the only combination most ad WebViews will actually start
+            without a user gesture. Embedded like every other asset, so keep the clip short.</div>
           <div class="k">Joystick</div>
           <div class="v">Must be named exactly <code>joystick</code> in <code>mainLayout.json</code> —
             <code>Game.ts</code> looks it up by that name and throws loudly if it's missing.</div>
-          <div class="k">Group</div>
-          <div class="v">A container. Nested children position relative to <em>it</em>, and move/resize together.</div>
         </div>
       </div>
     </section>
@@ -126,6 +154,78 @@
     <section class="step">
       <div class="step-num">4</div>
       <div class="step-body">
+        <h2>The tools around the canvas</h2>
+        <p>
+          Everything lives in the one top toolbar — there is no floating bar over the artboard.
+          Press <kbd>?</kbd> for the full shortcut list.
+        </p>
+        <div class="ref-table">
+          <div class="k">Align &amp; distribute</div>
+          <div class="v">Select two or more, then <strong>⌗</strong>. Aligns against the selection's own bounding
+            box (not the canvas — those are separate buttons), spaces evenly, or matches sizes.</div>
+          <div class="k">Rulers &amp; guides</div>
+          <div class="v"><kbd>R</kbd>. Drag off a ruler to drop a guide; drop it back at the edge to discard.
+            Click the corner square to clear them all.</div>
+          <div class="k">Snapping</div>
+          <div class="v"><kbd>S</kbd>. Sibling edges and centres, container centres, and your guides. The
+            highlighted line is the one that actually caught.</div>
+          <div class="k">Zoom &amp; pan</div>
+          <div class="v"><kbd>Ctrl</kbd>+wheel (or trackpad pinch) to zoom, <kbd>Space</kbd>+drag or middle-drag
+            to pan, <kbd>Ctrl</kbd>+<kbd>0</kbd> to reset.</div>
+          <div class="k">Safe area</div>
+          <div class="v"><kbd>A</kbd>. Overlays the inset that notches and ad-network chrome eat into. A guide,
+            not a constraint.</div>
+          <div class="k">Animation preview</div>
+          <div class="v"><kbd>P</kbd>. Off by default — elements moving while you position them is the opposite
+            of useful.</div>
+          <div class="k">Lock</div>
+          <div class="v"><kbd>Ctrl</kbd>+<kbd>L</kbd>. A locked element can't be grabbed or marquee-selected on
+            the canvas, but stays fully editable from Layers. For finished backgrounds.</div>
+          <div class="k">Assets / Prefabs</div>
+          <div class="v">Sidebar tabs. Assets is a reusable image library; Prefabs stores a selection you can
+            stamp back in later — as a copy, so edits don't flow back.</div>
+          <div class="k">Autosave</div>
+          <div class="v">Mirrors your work to browser storage and offers it back if the tab dies. It never writes
+            a project file — it is not a substitute for Save.</div>
+        </div>
+        <div class="callout">
+          <strong>The ✅ badge is worth watching.</strong> It catches what otherwise only surfaces as a broken
+          ad much later: duplicate names, missing image sources, zero-size or fully-transparent elements, a
+          font size of 0, and actions pointing at an element you've since deleted. Click a finding to jump
+          to it.
+        </div>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">5</div>
+      <div class="step-body">
+        <h2>Make a button work without code</h2>
+        <p>
+          A button's <strong>Actions</strong> section handles the common cases outright. <code>show</code>,
+          <code>hide</code>, <code>toggleVisible</code> and <code>setText</code> run entirely in the
+          runtime; <code>cta</code> fires the configured store link.
+        </p>
+        <p>
+          For anything game-specific, use <code>emit</code>: it sends a named event you handle in one place,
+          which is how a designed button triggers your logic without the engine ever learning your game's
+          vocabulary.
+        </p>
+        <pre><code>ui.onAction((event, element) =&gt; {
+  if (event === "start-game") this.begin();
+  if (event === "volume:change") this.setVolume(ui.getValue("volume"));
+});</code></pre>
+        <p>
+          <strong>States</strong> sit next to it — hover, pressed and disabled each take a small visual
+          override (colour, opacity, scale). A new button ships with a pressed state already, because a
+          button with no press feedback feels broken on touch.
+        </p>
+      </div>
+    </section>
+
+    <section class="step">
+      <div class="step-num">6</div>
+      <div class="step-body">
         <h2>Drive it from code</h2>
         <p>
           <code>game.ui</code> is the main layout, <code>game.endcardUILayout</code> is the end card. Both
@@ -168,7 +268,7 @@ export class HUD {
     </section>
 
     <section class="step">
-      <div class="step-num">5</div>
+      <div class="step-num">7</div>
       <div class="step-body">
         <h2>Bind an element to a field</h2>
         <p>
@@ -198,7 +298,7 @@ export class HUD {
     </section>
 
     <section class="step">
-      <div class="step-num">6</div>
+      <div class="step-num">8</div>
       <div class="step-body">
         <h2>Full API</h2>
         <div class="api">
@@ -232,6 +332,22 @@ export class HUD {
               state underneath.</span>
           </div>
 
+          <div class="api-head">Controls</div>
+          <div class="api-row">
+            <span class="sig">setValue(name: string, value: number): void</span>
+            <span class="desc">Drive a <strong>progress</strong> fill (0–1) or a <strong>slider</strong> (in its own
+              min/max, normalised for you). Out-of-range values clamp rather than overflowing the track.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">getValue(name: string): number | undefined</span>
+            <span class="desc">Current value, in the units you authored — not the normalised fraction.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">isOn(name: string): boolean | undefined</span>
+            <span class="desc">A <strong>toggle</strong> or <strong>checkbox</strong>'s state. Both flip themselves
+              on click; you only read them.</span>
+          </div>
+
           <div class="api-head">Interaction</div>
           <div class="api-row">
             <span class="sig">setInteractive(nameOrElement, onClick?): void</span>
@@ -239,29 +355,43 @@ export class HUD {
               element itself (what a bound field holds).</span>
           </div>
           <div class="api-row">
+            <span class="sig">onAction(handler: (event, element) =&gt; void): void</span>
+            <span class="desc">Receives <code>emit</code> actions authored in the editor, the <code>cta</code>
+              action, and slider changes as <code>"name:change"</code>. This is the one seam that lets a
+              designed button do something game-specific — the engine never learns your vocabulary.</span>
+          </div>
+          <div class="api-row">
             <span class="sig">getJoystick(name): { base, knob } | undefined</span>
             <span class="desc">The two nodes <code>DynamicJoystick</code> needs. You won't normally call this —
               <code>Game.ts</code> does.</span>
           </div>
 
-          <div class="api-head">Layout</div>
+          <div class="api-head">Layout &amp; lifecycle</div>
           <div class="api-row">
             <span class="sig">updateScale(width: number, height: number): void</span>
             <span class="desc">Re-derive every element's geometry for a new container size. <code>Game.ts</code>
               already calls this on resize — you only need it for a container you own.</span>
+          </div>
+          <div class="api-row">
+            <span class="sig">dispose(): void</span>
+            <span class="desc">Drops every listener this layout attached. <code>Game.dispose()</code> already calls
+              it; it matters because those handlers close over the <em>Game</em>, so on a dev hot reload
+              leaving them attached keeps a disposed Game alive.</span>
           </div>
         </div>
       </div>
     </section>
 
     <section class="step">
-      <div class="step-num">7</div>
+      <div class="step-num">9</div>
       <div class="step-body">
         <h2>Save</h2>
         <p>
           With the dev server running, <strong>💾 Save</strong> writes straight into the project — no
-          download step. <strong>⭐ Set as Main</strong> and <strong>🏁 Set as Endcard</strong> write the
-          two files the game actually loads.
+          download step. The button turns <strong>green with a ✓</strong> and names what it wrote, so you
+          get confirmation where you clicked rather than having to spot a status label at the far end of
+          the toolbar. <strong>⭐ Main</strong> and <strong>🏁 Endcard</strong> write the two files the
+          game actually loads.
         </p>
         <div class="tree">
           <span class="dir">src/game/ui/</span>
@@ -278,7 +408,7 @@ export class HUD {
     </section>
 
     <section class="step">
-      <div class="step-num">8</div>
+      <div class="step-num">10</div>
       <div class="step-body">
         <h2>When something doesn't work</h2>
         <div class="cheat">
@@ -301,6 +431,26 @@ export class HUD {
           <div class="cheat-row">
             <div class="q">Bound field is <code>undefined</code></div>
             <div class="a">Not assigned yet, or class name differs</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Text is invisible in the game</div>
+            <div class="a">Font size may be 0 — the ✅ badge flags it</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">One of two same-named elements is unreachable</div>
+            <div class="a">Rename it; only the first ever resolves</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">A button's action does nothing</div>
+            <div class="a">Its target was probably deleted — check the badge</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Can't select something on the canvas</div>
+            <div class="a">It's locked 🔒 — unlock from Layers</div>
+          </div>
+          <div class="cheat-row">
+            <div class="q">Canvas no longer lines up with the game</div>
+            <div class="a">You're zoomed — <kbd>Ctrl</kbd>+<kbd>0</kbd> to reset</div>
           </div>
           <div class="cheat-row">
             <div class="q">Editor shows stale behaviour</div>

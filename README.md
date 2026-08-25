@@ -114,15 +114,18 @@ active, both the game and the editor agree on where the "screen" is.
 Switching tabs works whether the editor is open or closed.
 
 **Workflow:**
-1. Click **+ Image**/**+ Text**/**+ Rect**/**+ Joystick** to add an
-   element (images are embedded as base64, so a saved layout file is
-   fully self-contained).
-2. Drag it into place on the canvas; drag the red handle to resize (from
-   center).
+1. **＋ Insert** (or <kbd>I</kbd>) opens the element palette; images come
+   in through the 🖼️ button beside it and are embedded as base64, so a
+   saved layout file is fully self-contained.
+2. Drag it into place — it snaps to sibling edges/centers and to guides
+   pulled off a ruler. Eight handles resize it (dragging pins the
+   opposite edge; **Alt** scales about the center, **Shift** keeps the
+   ratio), and the grip above it rotates.
 3. Use the **Properties** panel for precise X/Y/width/height, rotation,
-   opacity, anchor point (Unity RectTransform-pivot style), an idle
-   **animation** (pulse/bob/spin/fadeIn), and whether it's **visible on
-   game start** (toggle later via `game.ui.show()`/`hide()`). Each of
+   opacity, anchor point (Unity RectTransform-pivot style), fill (solid
+   or gradient), typography, an idle **animation**, hover/pressed
+   **states**, click **actions**, and whether it's **visible on game
+   start** (toggle later via `game.ui.show()`/`hide()`). Each of
    X/Y/Width/Height has its own **%** / **PX** toggle:
    - **%** (default) stretches proportionally with the screen — the
      right choice for anything that should stay centered or
@@ -136,7 +139,12 @@ Switching tabs works whether the editor is open or closed.
      point is that corner, so e.g. bottom-left `32,32` sits 32px in from
      it — matching the real joystick-base's own hardcoded
      `left: 32px; bottom: 32px` in `public/index.html`.
-4. Reorder layers with the ▲/▼ buttons in the **Layers** panel (left).
+4. Reorder layers with the ▲/▼ buttons in the **Layers** panel (left),
+   which also has a filter box, collapsible groups, and per-row lock and
+   visibility toggles. The **Assets** and **Prefabs** tabs beside it hold
+   reusable images and saved selections. Watch the **✅ badge** in the
+   toolbar for problems (duplicate names, missing sources, dead action
+   targets) before they become a broken ad.
 5. **Project sync** — Save/Load write straight into the project, no
    download-and-move step, via whichever of these is available:
    - **Local dev server** (default whenever `npm run dev` is running):

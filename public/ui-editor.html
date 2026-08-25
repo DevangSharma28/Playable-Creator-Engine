@@ -2637,25 +2637,29 @@
     <div id="properties">
       <div class="panel-header">🔎 Properties</div>
       <div id="properties-body">
+        <!-- Kept in step with renderProperties()'s own empty-state copy —
+             this static markup is what shows before the first render, and
+             the two drifting apart is how the old "drag the red handle"
+             text survived long after the single handle became eight. -->
         <div id="no-selection">
-          Select a layer to edit it, or add a new element from the toolbar.<br /><br />
-          Drag on the canvas to move (snaps to center). Drag the red handle to resize — always from the element's
-          center, never a corner.<br /><br />
+          Select a layer to edit it, or press <b>＋ Insert</b> to add one.<br /><br />
+          Drag on the canvas to move — it snaps to sibling edges, centers and your own guides. Drag any of the eight
+          handles to resize from the opposite side (<b>Alt</b> resizes about the center, <b>Shift</b> keeps the ratio),
+          or the grip above an element to rotate it.<br /><br />
+          Drag on empty canvas to marquee-select. <b>Ctrl</b>/<b>Cmd</b>+Click (or <b>Shift</b>+Click) adds to the
+          selection; with several selected you get align, distribute and match-size tools.<br /><br />
           Check <b>🔒 Lock aspect ratio</b> on a layer (always on for Joystick) to stop it stretching into an ellipse on
-          screen shapes different from this one — or use a <b>PX</b> size instead, which never stretches at
-          all.<br /><br />
-          Click <b>⭐ Set as Main</b> or <b>🏁 Set as Endcard</b> when done — the running game hot-reloads immediately.
-          <br /><br />
-          <b>Ctrl</b>/<b>Cmd</b>+Click (or <b>Shift</b>+Click) a layer or element to select several, then <b>⊞ Group
-            Selected</b> to combine them into one <b>🗂️ Group</b> — move, resize, or rotate the group and everything
-          inside moves with it. <b>⊟ Ungroup</b> dissolves a group again.
+          screen shapes different from this one — or use a <b>PX</b> size instead, which scales uniformly and never
+          stretches.<br /><br />
+          Click <b>⭐ Main</b> or <b>🏁 Endcard</b> when done — the running game hot-reloads immediately.
           <div class="shortcuts">
+            <div><kbd>?</kbd> — every shortcut</div>
+            <div><kbd>I</kbd> — insert palette</div>
             <div><kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd> — undo / redo</div>
-            <div><kbd>Ctrl+D</kbd> — duplicate selected</div>
-            <div><kbd>Ctrl+G</kbd> / <kbd>Ctrl+Shift+G</kbd> — group / ungroup selected</div>
-            <div><kbd>Delete</kbd> — delete selected</div>
-            <div><kbd>Arrow keys</kbd> — nudge (+<kbd>Shift</kbd> for bigger steps)</div>
-            <div><kbd>Esc</kbd> — deselect</div>
+            <div><kbd>Ctrl+C</kbd> / <kbd>Ctrl+V</kbd> — copy / paste</div>
+            <div><kbd>Ctrl+L</kbd> — lock / unlock</div>
+            <div><kbd>Ctrl</kbd>+wheel — zoom, <kbd>Space</kbd>+drag — pan</div>
+            <div><kbd>Arrow keys</kbd> — nudge (+<kbd>Shift</kbd> for 10px)</div>
             <div>Double-click a layer name to rename</div>
           </div>
         </div>
