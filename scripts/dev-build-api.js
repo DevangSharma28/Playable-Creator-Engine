@@ -42,6 +42,12 @@ const COLLIDERS_FILE = path.join(ROOT, "src", "game", "colliders.json");
 // runs in the production build. Only the *configuration* is stored — never
 // a snapshot of live particles.
 const PARTICLES_FILE = path.join(ROOT, "src", "game", "particles.json");
+// The 3D editor's Environment dock — camera framing, lighting, and world
+// settings; see /list-environment and /save-environment below, and
+// src/engine/scene/SceneEnvSerialization.ts (the runtime side that reads
+// this same file). Ships for the same reason the two above do: what the
+// panel authors is what the production playable renders.
+const ENVIRONMENT_FILE = path.join(ROOT, "src", "game", "environment.json");
 const SRC_DIR = path.join(ROOT, "src");
 const SCRIPT_CATEGORIES = { engine: path.join(SRC_DIR, "engine"), game: path.join(SRC_DIR, "game") };
 
@@ -764,6 +770,23 @@ function writeParticles(data) {
   fs.writeFileSync(PARTICLES_FILE, JSON.stringify(data, null, 2));
 }
 
+function readEnvironment() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(ENVIRONMENT_FILE, "utf8"));
+    if (!parsed || typeof parsed !== "object") throw new Error("malformed");
+    return parsed;
+  } catch {
+    // The runtime loader fills every missing field from its own defaults
+    // (see loadSceneEnv), so an empty object is a valid answer here rather
+    // than an error — a project that has never opened the panel simply has
+    // no file yet.
+    return { version: 1 };
+  }
+}
+function writeEnvironment(data) {
+  fs.writeFileSync(ENVIRONMENT_FILE, JSON.stringify(data, null, 2));
+}
+
 // Vite's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
@@ -1297,10 +1320,49 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/list-environment") {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify(readEnvironment()));
+    return;
+  }
+
+  // A wholesale replace, same as the two above and for the same reasons.
+  // The body is small and fixed-shape (one camera block, one ambient block,
+  // a handful of lights, one world block), so the limit is correspondingly
+  // tight — there is no legitimate megabyte-sized environment config.
+  if (req.method === "POST" && req.url === "/save-environment") {
+    readRequestBody(req, 256 * 1024)
+      .then((raw) => {
+        const body = JSON.parse(raw);
+        if (!body.camera || !body.ambient || !body.world) throw new Error("Missing camera, ambient, or world block");
+        if (!Array.isArray(body.directionals)) throw new Error("Missing directionals array");
+        for (const light of body.directionals) {
+          if (!light.id) throw new Error("Every directional light needs an id");
+        }
+        writeEnvironment({
+          version: 1,
+          camera: body.camera,
+          ambient: body.ambient,
+          directionals: body.directionals,
+          world: body.world,
+        });
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, lights: body.directionals.length }));
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
+    return;
+  }
+
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("Not found");
 });
 
 server.listen(PORT, "127.0.0.1", () => {
-  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings, GET /list-colliders, POST /save-colliders, GET /list-particles, POST /save-particles)`);
+  console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings, GET /list-colliders, POST /save-colliders, GET /list-particles, POST /save-particles, GET /list-environment, POST /save-environment)`);
 });

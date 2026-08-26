@@ -15,8 +15,8 @@ export interface InspectorToolState {
 
 export interface SceneInspectorOptions {
   scene: THREE.Scene;
-  /** The real gameplay camera — its frustum is drawn via CameraHelper so you can see what it sees while freely orbiting with a different camera. Deliberately keeps the *game's* aspect, not the editor viewport's, so the frustum shows the shape the playable actually ships at. */
-  gameplayCamera: THREE.PerspectiveCamera;
+  /** The real gameplay camera — its frustum is drawn via CameraHelper so you can see what it sees while freely orbiting with a different camera. Deliberately keeps the *game's* aspect, not the editor viewport's, so the frustum shows the shape the playable actually ships at. Either projection: the Environment panel can switch the rig between them live, and setGameplayCamera() below is how that reaches the helper. */
+  gameplayCamera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
   /** The camera actually being rendered through (freecam) — what the transform gizmo operates against. */
   viewCamera: THREE.Camera;
   renderer: THREE.WebGLRenderer;
@@ -49,15 +49,23 @@ export interface SceneInspectorOptions {
  */
 export class SceneInspector {
   private readonly scene: THREE.Scene;
-  private readonly gameplayCamera: THREE.PerspectiveCamera;
+  private gameplayCamera: THREE.PerspectiveCamera | THREE.OrthographicCamera;
   private readonly viewCamera: THREE.Camera;
   private readonly renderer: THREE.WebGLRenderer;
   private readonly orbitControls: OrbitControls;
   private readonly selection: EditorSelection;
   private readonly unsubscribe: () => void;
 
-  private readonly cameraHelper: THREE.CameraHelper;
-  private readonly lightHelpers: THREE.Object3D[] = [];
+  private cameraHelper: THREE.CameraHelper;
+  /**
+   * One helper per light currently in the scene, keyed by the light itself.
+   *
+   * A Map rather than the flat array this used to be because lights are no
+   * longer fixed for a session: the Environment panel creates, removes, and
+   * moves them live, and refreshLightHelpers() reconciles against this to
+   * add and drop helpers without rebuilding the ones that didn't change.
+   */
+  private readonly lightHelpers = new Map<THREE.Object3D, THREE.Object3D>();
   private readonly gridHelper: THREE.GridHelper;
   /** Every visual this class added to the scene. Exposed so the picker and hierarchy can exclude them — they're debug chrome, not scene content, and must be neither selectable nor listed. */
   private readonly helpers = new Set<THREE.Object3D>();
@@ -94,14 +102,7 @@ export class SceneInspector {
     this.scene.add(this.gridHelper);
     this.helpers.add(this.gridHelper);
 
-    this.scene.traverse((obj) => {
-      const helper = this.makeLightHelper(obj);
-      if (helper) {
-        this.lightHelpers.push(helper);
-        this.scene.add(helper);
-        this.helpers.add(helper);
-      }
-    });
+    this.refreshLightHelpers();
 
     this.transformControls = new TransformControls(this.viewCamera, this.renderer.domElement);
     this.transformControls.setMode("translate");
@@ -155,7 +156,7 @@ export class SceneInspector {
   /** Call once per frame while active — refreshes helper gizmos. TransformControls' own gizmo re-syncs to the selected object automatically via the normal scene render (its helper overrides updateMatrixWorld), so it needs no explicit update() call here. */
   update(): void {
     this.cameraHelper.update();
-    for (const helper of this.lightHelpers) {
+    for (const [, helper] of this.lightHelpers) {
       (helper as { update?: () => void }).update?.();
     }
     this.selectionHelper?.update();
@@ -206,7 +207,7 @@ export class SceneInspector {
   toggleHelpers(): boolean {
     this.helpersVisible = !this.helpersVisible;
     this.cameraHelper.visible = this.helpersVisible;
-    for (const helper of this.lightHelpers) helper.visible = this.helpersVisible;
+    for (const [, helper] of this.lightHelpers) helper.visible = this.helpersVisible;
     this.emitStateChange();
     return this.helpersVisible;
   }
@@ -261,6 +262,60 @@ export class SceneInspector {
     for (const cb of this.onStateChange) cb(state);
   }
 
+  /**
+   * Repoints the frustum drawing at a different gameplay camera.
+   *
+   * CameraHelper binds to one camera at construction, so a live
+   * perspective/orthographic switch in the Environment panel needs the
+   * helper rebuilt — otherwise the editor keeps drawing the frustum of a
+   * camera the game stopped rendering through. A no-op when the identity
+   * hasn't actually changed, so EditorRoot can call it every frame.
+   */
+  setGameplayCamera(camera: THREE.PerspectiveCamera | THREE.OrthographicCamera): void {
+    if (camera === this.gameplayCamera) return;
+    this.gameplayCamera = camera;
+    this.scene.remove(this.cameraHelper);
+    this.helpers.delete(this.cameraHelper);
+    this.cameraHelper.dispose();
+    this.cameraHelper = new THREE.CameraHelper(camera);
+    this.cameraHelper.visible = this.helpersVisible;
+    this.scene.add(this.cameraHelper);
+    this.helpers.add(this.cameraHelper);
+  }
+
+  /**
+   * Reconciles the light helpers against whatever lights are in the scene
+   * right now.
+   *
+   * Called at construction and again whenever the Environment panel reports
+   * a change, which is what makes a light added or deleted from that panel
+   * gain or lose its helper immediately rather than at the next editor
+   * session. Existing helpers are left alone — rebuilding them all would
+   * make a colour tweak flicker every gizmo in the scene.
+   */
+  refreshLightHelpers(): void {
+    const seen = new Set<THREE.Object3D>();
+    this.scene.traverse((obj) => {
+      if (!(obj as THREE.Light).isLight) return;
+      seen.add(obj);
+      if (this.lightHelpers.has(obj)) return;
+      const helper = this.makeLightHelper(obj);
+      if (!helper) return;
+      helper.visible = this.helpersVisible;
+      this.lightHelpers.set(obj, helper);
+      this.scene.add(helper);
+      this.helpers.add(helper);
+    });
+
+    for (const [light, helper] of [...this.lightHelpers]) {
+      if (seen.has(light)) continue;
+      this.scene.remove(helper);
+      this.helpers.delete(helper);
+      (helper as { dispose?: () => void }).dispose?.();
+      this.lightHelpers.delete(light);
+    }
+  }
+
   dispose(): void {
     window.removeEventListener("keydown", this.onKeyDown);
     this.unsubscribe();
@@ -272,6 +327,7 @@ export class SceneInspector {
       this.selectionHelper = undefined;
     }
     this.helpers.clear();
+    this.lightHelpers.clear();
     this.onModeChange.clear();
     this.onStateChange.clear();
   }

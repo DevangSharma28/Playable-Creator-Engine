@@ -33,13 +33,22 @@ import { AreaDemo } from "./AreaDemo";
 import { SoundHandler } from "./SoundHandler";
 import { manifest, libGlb, libAudio } from "./assets";
 import { Environment } from "./entities/Environment";
+import { SceneEnvironment, loadSceneEnv } from "../engine/scene";
+import type { SceneEnvData } from "../engine/scene";
+import environmentRaw from "./environment.json";
 
 const mainLayoutData = mainLayoutRaw as UILayoutData;
 const endcardLayoutData = endcardLayoutRaw as UILayoutData;
 
 const COIN_COUNT = 6;
 const AUTO_END_MS = 15000;
-const CAMERA_OFFSET = new THREE.Vector3(0, 12, 12);
+/**
+ * Camera framing, lighting, and world settings, authored in the 3D
+ * editor's Environment dock. A real import, so it ships: what you set in
+ * the panel is what the production playable runs, exactly like
+ * colliders.json and particles.json.
+ */
+const environmentData = loadSceneEnv(environmentRaw as unknown);
 /** Real store listing / click-through URL — swap this for the actual app before a network build. Every CTA (HUD button, endcard) routes through Cta.open(), which picks the right network API automatically and falls back to a new tab in a plain browser (this dev preview included). Only consulted on the paths that actually take a URL — network-owned handlers redirect to the listing the network itself has configured; see src/engine/Cta.ts. */
 const STORE_URL = "https://devangsharma28.github.io/portfolio/";
 // Same URL the CTA buttons use, registered once at module load so
@@ -50,8 +59,13 @@ setCrashRecoveryUrl(STORE_URL);
 
 export class Game {
   private readonly scene: THREE.Scene;
-  private readonly camera: THREE.PerspectiveCamera;
   private readonly renderer: THREE.WebGLRenderer;
+  /**
+   * The live scene environment. Ships (it's what applies environment.json
+   * at boot); the *panel* that edits it is dev-only — see
+   * engine/scene/SceneEnvironment.ts's own note on the split.
+   */
+  private readonly sceneEnv: SceneEnvironment;
 
   private readonly world: World;
   private readonly player: Player;
@@ -116,6 +130,8 @@ export class Game {
   private colliderDirtyCallback: (() => void) | undefined;
   /** Same again, for particle edits. */
   private particleDirtyCallback: (() => void) | undefined;
+  /** Same again, for environment edits — camera, lighting, or world. */
+  private environmentDirtyCallback: (() => void) | undefined;
   /** Same again, for undo/redo — lets the toolbars repaint their buttons without polling. */
   private historyChangeCallback: (() => void) | undefined;
   /** Held so re-attaching on a new editor session drops the previous session's subscription rather than stacking another. */
@@ -139,16 +155,50 @@ export class Game {
 
     this.scene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.01, 1000);
-    this.camera.lookAt(0, 0, 0);
-    this.soundHandler = new SoundHandler(this.camera, musicBuffer);
+    // The rig owns both cameras and every projection setting — see
+    // CameraHandler. Built before the renderer because SoundHandler parents
+    // its AudioListener to the perspective camera, and before
+    // SceneEnvironment because that drives it.
+    this.cameraHandler = new CameraHandler(environmentData.camera);
+    this.soundHandler = new SoundHandler(this.cameraHandler.perspective, musicBuffer);
 
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+    // Lights, fog, background, tone mapping, shadow settings, and the
+    // camera block above — all from environment.json, all applied here.
+    // Nothing else in the game may add scene lighting: the Environment
+    // panel edits this instance, and a second set of lights added
+    // elsewhere would be lighting the scene while the panel edited
+    // something invisible. (World.ts used to build three by hand; those are
+    // now this file's defaults, with identical colours and intensities.)
+    this.sceneEnv = new SceneEnvironment(
+      {
+        scene: this.scene,
+        renderer: this.renderer,
+        rig: this.cameraHandler,
+        // Same contract the particle editor uses: the environment never
+        // loads an asset itself, so a background/skybox texture is
+        // preloaded with the manifest and inlined by the production build
+        // like any other asset.
+        resolveTexture: (path) => {
+          try {
+            return this.assetLoader.getTexture(path);
+          } catch {
+            console.warn(`Environment: texture "${path}" isn't preloaded — add it to src/game/assets.ts's manifest.`);
+            return undefined;
+          }
+        },
+      },
+      environmentData
+    );
+    this.sceneEnv.apply();
+    // The rig was constructed against a 1×1 viewport; give it the real one
+    // before the first frame so the projection is right on frame one rather
+    // than after the first resize event.
+    this.cameraHandler.handleResize(window.innerWidth, window.innerHeight);
 
     this.world = new World(this.scene);
 
@@ -283,8 +333,6 @@ export class Game {
       this.hud.hideDragHint();
       this.soundHandler.playMusic();
     });
-
-    this.cameraHandler = new CameraHandler(this.camera, CAMERA_OFFSET);
 
     // import.meta.env.DEV first, so the whole ViewHelperWidget module (and
     // the second WebGLRenderer it owns) is statically unreachable in a
@@ -422,7 +470,8 @@ export class Game {
       if (!import.meta.env.DEV) return;
       const hierarchyEl = document.getElementById("si-hierarchy");
       const inspectorEl = document.getElementById("si-inspector");
-      if (!hierarchyEl || !inspectorEl) return;
+      const environmentEl = document.getElementById("si-environment");
+      if (!hierarchyEl || !inspectorEl || !environmentEl) return;
 
       // The canvas's own container is what the editor measures for
       // viewport size — never the window, which doesn't account for the
@@ -439,7 +488,7 @@ export class Game {
 
       this.editor = new EditorRoot({
         scene: this.scene,
-        gameplayCamera: this.camera,
+        getGameplayCamera: () => this.cameraHandler.camera,
         renderer: this.renderer,
         viewportContainer: viewportContainer as HTMLElement,
         hierarchyEl,
@@ -459,6 +508,11 @@ export class Game {
         // import.meta.env.DEV, the same gate particleGizmos is built under.
         particleVisuals: this.particleGizmos as ParticleVisuals,
         onParticleDirty: () => this.particleDirtyCallback?.(),
+        // The live environment, not a copy — what the panel tunes is what
+        // gameplay resumes rendering with on exit.
+        environment: this.sceneEnv,
+        onEnvironmentDirty: () => this.environmentDirtyCallback?.(),
+        environmentEl,
         // Particle textures go through the game's own AssetLoader, so they
         // are preloaded with everything else and base64-inlined by the
         // production build like any other asset — the editor never loads
@@ -703,6 +757,28 @@ export class Game {
   // Dev-only: editor undo/redo. One stack shared by every editor mode —
   // see EditorRoot.history for why it lives there rather than per-mode.
   // -----------------------------------------------------------------------
+  // Scene environment (camera / lighting / world) — thin passthroughs to the
+  // editor's Environment dock, plus the one runtime accessor the dev page's
+  // save path needs. Only meaningful while the editor is open; the
+  // environment itself runs regardless.
+  // -----------------------------------------------------------------------
+
+  /** Every authored environment setting, as a JSON-ready record for src/game/environment.json. */
+  serializeEnvironment(): SceneEnvData | undefined {
+    return this.editor?.serializeEnvironment();
+  }
+  hasEnvironmentChanges(): boolean {
+    return this.editor?.hasEnvironmentChanges() ?? false;
+  }
+  markEnvironmentSaved(): void {
+    this.editor?.markEnvironmentSaved();
+  }
+  /** Same per-session re-attach contract as onColliderDirty — see its own note. */
+  onEnvironmentDirty(cb: () => void): void {
+    this.environmentDirtyCallback = cb;
+  }
+
+  // -----------------------------------------------------------------------
 
   editorUndo(): boolean {
     return this.editor?.undo() ?? false;
@@ -771,7 +847,7 @@ export class Game {
   }
 
   render(): void {
-    const activeCamera = this.editor?.camera ?? this.camera;
+    const activeCamera = this.editor?.camera ?? this.cameraHandler.camera;
     this.editor?.update();
     // After the editor (which is what syncs colliders while gameplay is
     // paused) and before the draw, so the wireframes show this frame's
@@ -840,6 +916,10 @@ export class Game {
     // on stale UI drive it.
     this.mainUI.dispose();
     this.endcardUI.dispose();
+    // Releases every light it created plus the PMREM render target behind
+    // a generated environment map — both would otherwise accumulate one
+    // full set per in-place hot reload.
+    this.sceneEnv.dispose();
     this.renderer.dispose();
   }
 

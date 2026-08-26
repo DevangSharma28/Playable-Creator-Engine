@@ -1,52 +1,26 @@
 import * as THREE from "three";
 
 /**
- * The static play environment: lighting, ground, and boundary walls.
- * Nothing in here moves or has per-frame update logic — it's set up
- * once in the constructor and left alone.
+ * The static play environment's *gameplay* extents.
+ *
+ * Lighting, fog, background, tone mapping, and shadow settings used to be
+ * built here by hand. They now live in src/game/environment.json and are
+ * applied by the engine's SceneEnvironment, so the 3D editor's Environment
+ * dock can author them live — the values it ships with are exactly the ones
+ * this class used to hardcode, so nothing looks different by default.
+ *
+ * What's left is the one thing that genuinely belongs to the *game* rather
+ * than to the renderer: how far from the origin gameplay is allowed to
+ * reach. Nothing in here moves or has per-frame update logic.
  */
 export class World {
   /** Half-extent minus a small margin — the furthest an entity should travel from center. */
   readonly bound: number;
 
-  constructor(scene: THREE.Scene, size = 10) {
-    scene.background = new THREE.Color(0x8ed1ef);
-    // near/far tuned for this class's own 10-unit procedural arena, but
-    // Game.ts now also drops Cinema_World.glb into the same scene — a
-    // ~109×124-unit environment (measured via its own world-space AABB) —
-    // and the old far:26 fogged out almost all of it into flat sky-blue.
-    // Pushed out to actually cover that footprint; near:30 stays past the
-    // player's own gameplay-camera distance (~21 units, see CAMERA_OFFSET
-    // in Game.ts) so nothing in the immediate play area fogs.
-    scene.fog = new THREE.Fog(0x8ed1ef, 30, 180);
-
-    this.addLights(scene);
-    // this.addGround(scene, size);
-    // this.addWalls(scene, size);
-
+  constructor(_scene: THREE.Scene, size = 10) {
+    // this.addGround(_scene, size);
+    // this.addWalls(_scene, size);
     this.bound = size;
-  }
-
-  private addLights(scene: THREE.Scene): void {
-    const ambient = new THREE.AmbientLight(0xffffff, 0.7);
-    ambient.name = "Ambient Light";
-    scene.add(ambient);
-
-    const sun = new THREE.DirectionalLight(0xfff4d6, 1.2);
-    sun.name = "Sun";
-    sun.position.set(6, 12, 6);
-    sun.castShadow = false;
-    // sun.shadow.mapSize.set(1024, 1024);
-    // sun.shadow.camera.left = -20;
-    // sun.shadow.camera.right = 20;
-    // sun.shadow.camera.top = 20;
-    // sun.shadow.camera.bottom = -20;
-    scene.add(sun);
-
-    const fillLight = new THREE.DirectionalLight(0xbfe3ff, 0.35);
-    fillLight.name = "Fill Light";
-    fillLight.position.set(-6, 4, -4);
-    scene.add(fillLight);
   }
 
   private addGround(scene: THREE.Scene, size: number): void {

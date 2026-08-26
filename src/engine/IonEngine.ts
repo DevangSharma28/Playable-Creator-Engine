@@ -98,6 +98,14 @@ import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
  * __onColliderDirty is the reverse direction, so the Exit button can show
  * there's something to save.
  *
+ * __serializeEnvironment / __hasEnvironmentChanges /
+ * __markEnvironmentSaved / __onEnvironmentDirty: the same four-hook shape
+ * for the 3D editor's Environment dock (camera framing, lighting, world),
+ * writing src/game/environment.json. Batched for the identical reason —
+ * that file is a real import in main.ts's module graph, so writing it
+ * mid-session would hot-reload the scene out from under the panel tuning
+ * it.
+ *
  * __getInspectable: the Engine Room panel's Control Desk (a live public-
  * field viewer/editor, keyed by class name) calls this to reach an actual
  * running instance — Player, CoinField, World, Game itself, whatever
@@ -157,6 +165,10 @@ type EngineWindow = Window & {
   __markCollidersSaved?: () => void;
   __getColliderStats?: () => { total: number; enabled: number; narrowTests: number; activePairs: number };
   __onColliderDirty?: () => void;
+  __serializeEnvironment?: () => unknown;
+  __hasEnvironmentChanges?: () => boolean;
+  __markEnvironmentSaved?: () => void;
+  __onEnvironmentDirty?: () => void;
   __setColliderDebug?: (visible: boolean) => boolean | undefined;
   __toggleColliderDebug?: () => boolean | undefined;
   __setParticleMode?: (active: boolean) => boolean | undefined;
@@ -516,6 +528,14 @@ export class IonEngine {
     this.win.__markCollidersSaved = () => activeGame.markCollidersSaved();
     this.win.__getColliderStats = () => activeGame.getColliderStats();
     activeGame.onColliderDirty(() => this.win.__onColliderDirty?.());
+
+    // The 3D editor's Environment dock. Not a mode — the panel is simply
+    // present for the whole session — so there's nothing to switch on and
+    // off here, only the four persistence hooks.
+    this.win.__serializeEnvironment = () => activeGame.serializeEnvironment();
+    this.win.__hasEnvironmentChanges = () => activeGame.hasEnvironmentChanges();
+    this.win.__markEnvironmentSaved = () => activeGame.markEnvironmentSaved();
+    activeGame.onEnvironmentDirty(() => this.win.__onEnvironmentDirty?.());
 
     // The 3D editor's "Particle System" mode — same passthrough shape as
     // the collider toolbar above, and only meaningful while the editor is

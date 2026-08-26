@@ -1,0 +1,131 @@
+{
+  "version": 1,
+  "camera": {
+    "projection": "perspective",
+    "fov": 50,
+    "near": 0.01,
+    "far": 1000,
+    "zoom": 1,
+    "orthoSize": 10,
+    "referenceAspect": 0,
+    "follow": true,
+    "offset": [
+      0,
+      12,
+      12
+    ],
+    "lookAtHeight": 0.3,
+    "damping": 6.91,
+    "position": [
+      0,
+      12,
+      12
+    ],
+    "rotation": [
+      -45,
+      0,
+      0
+    ]
+  },
+  "ambient": {
+    "enabled": true,
+    "mode": "ambient",
+    "color": [
+      1,
+      1,
+      1
+    ],
+    "groundColor": [
+      0.35,
+      0.32,
+      0.28
+    ],
+    "intensity": 1.07
+  },
+  "directionals": [
+    {
+      "id": "sun",
+      "name": "Sun",
+      "enabled": true,
+      "color": [
+        1,
+        0.957,
+        0.839
+      ],
+      "intensity": 2.7,
+      "position": [
+        6,
+        12,
+        6
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "castShadow": false,
+      "shadowMapSize": 1024,
+      "shadowBias": -0.0005,
+      "shadowNormalBias": 0.02,
+      "shadowRadius": 1,
+      "shadowCameraExtent": 20,
+      "shadowCameraNear": 0.5,
+      "shadowCameraFar": 80
+    },
+    {
+      "id": "fill",
+      "name": "Fill Light",
+      "enabled": false,
+      "color": [
+        0.749,
+        0.89,
+        1
+      ],
+      "intensity": 1.91,
+      "position": [
+        -6,
+        4,
+        -4
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "castShadow": false,
+      "shadowMapSize": 1024,
+      "shadowBias": -0.0005,
+      "shadowNormalBias": 0.02,
+      "shadowRadius": 1,
+      "shadowCameraExtent": 20,
+      "shadowCameraNear": 0.5,
+      "shadowCameraFar": 80
+    }
+  ],
+  "world": {
+    "backgroundMode": "color",
+    "backgroundColor": [
+      0.6980392156862745,
+      0.7568627450980392,
+      0.7803921568627451
+    ],
+    "backgroundTexture": "",
+    "backgroundBlurriness": 0,
+    "backgroundIntensity": 1.29,
+    "environmentSource": "none",
+    "environmentIntensity": 1,
+    "fogMode": "linear",
+    "fogColor": [
+      0.557,
+      0.82,
+      0.937
+    ],
+    "fogNear": 24,
+    "fogFar": 80,
+    "fogDensity": 0.01,
+    "toneMapping": "none",
+    "toneMappingExposure": 1.22,
+    "shadowsEnabled": true,
+    "shadowType": "pcfsoft"
+  }
+}

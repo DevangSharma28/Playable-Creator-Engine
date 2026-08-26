@@ -1387,8 +1387,9 @@
     }
 
     /* ============================================================
-       3D Viewer/Editor docks — two full-height panels flanking the
-       viewport. Widths live in CSS variables because the script's own
+       3D Viewer/Editor docks — three full-height panels flanking the
+       viewport (Environment, then Hierarchy/Scripts, then the Inspector
+       side). Widths live in CSS variables because the script's own
        currentInsets() reads them back (see EDITOR_LEFT_W/EDITOR_RIGHT_W),
        so the space #device-frame is laid out into and the space these
        actually occupy can never drift apart. That matters more than usual
@@ -1401,15 +1402,21 @@
        something to animate instead of snapping.
        ============================================================ */
     /* clamp(), not fixed widths: currentInsets() reserves exactly these
-       for the viewport, so two fixed docks wider than the window together
+       for the viewport, so fixed docks wider than the window together
        would leave #device-frame with a negative/near-zero box — at a narrow
        9:16 window (540px) a fixed 264+316 left the viewport ~2px wide and
        the 3D view effectively gone. Scaling with viewport width keeps a
        usable viewport at every aspect the editor has to support, while the
        upper bounds stop the docks bloating on a wide monitor. */
     :root {
-      --editor-left-w: clamp(170px, 22vw, 300px);
-      --editor-right-w: clamp(170px, 24vw, 316px);
+      --editor-env-w: clamp(158px, 19vw, 278px);
+      --editor-left-w: clamp(158px, 19vw, 278px);
+      --editor-right-w: clamp(166px, 21vw, 306px);
+      /* Width of the Environment dock's collapsed rail. Wide enough for the
+         one glyph on it and nothing more — the point of collapsing is to
+         hand the whole width back to the viewport on a narrow window, where
+         three docks plus a usable 3D view don't all fit. */
+      --editor-env-rail-w: 30px;
     }
 
     .editor-dock {
@@ -1436,8 +1443,115 @@
       transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
     }
 
-    #editor-left {
+    /* Furthest left of the three. Hierarchy/Scripts sit to its right, which
+       is why #editor-left below is offset by this dock's width rather than
+       pinned to 0 — currentInsets() sums both to reserve the viewport's
+       left edge. */
+    #editor-env {
       left: 0;
+      width: var(--editor-env-w);
+      border-right: 1px solid var(--eng-border);
+      box-shadow: 10px 0 30px rgba(0, 0, 0, 0.45);
+      transform: translateX(-14px);
+    }
+
+    /* Collapsed: the pane is gone and only the rail button remains, so the
+       dock's real border-box shrinks to the rail width — which is all
+       editorDockWidth() measures, so the viewport reclaims the space with
+       no second source of truth to keep in sync. */
+    #editor-env.collapsed {
+      width: var(--editor-env-rail-w);
+      padding: 6px 0;
+    }
+
+    #editor-env.collapsed #editor-pane-environment {
+      display: none;
+    }
+
+    /* The collapsed dock's only affordance, so it has to read as a button
+       at a glance. As a bare 12px emoji on a transparent 26px strip it was
+       a faint dot you had to already know about; it now gets an accent
+       chip, a larger glyph, and a vertical label — the standard
+       collapsed-panel treatment, and unmistakable against the dock's flat
+       background. */
+    #editor-env-rail {
+      display: none;
+      flex-shrink: 0;
+      /* Scoped, like #device-frame's own — the accent border must render
+         inside the rail's width or it overflows the dock that
+         currentInsets() just measured. */
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      padding: 10px 0;
+      font-family: inherit;
+      font-size: 15px;
+      line-height: 1;
+      color: var(--eng-accent);
+      background: linear-gradient(180deg, var(--eng-accent-soft), rgba(232, 150, 30, 0.06) 40%, transparent);
+      border: none;
+      border-right: 2px solid var(--eng-accent);
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    #editor-env.collapsed #editor-env-rail {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* The label reads bottom-to-top, the convention for a left-edge rail. */
+    #editor-env-rail .rail-label {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      color: var(--eng-text-dim);
+      white-space: nowrap;
+    }
+
+    #editor-env-rail:hover {
+      background: linear-gradient(180deg, rgba(232, 150, 30, 0.28), rgba(232, 150, 30, 0.1) 40%, transparent);
+      border-right-color: var(--eng-accent-hover);
+    }
+
+    #editor-env-rail:hover .rail-label {
+      color: var(--eng-text);
+    }
+
+    #editor-pane-environment {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+
+    #si-environment {
+      flex: 1;
+      min-height: 0;
+      overflow-y: auto;
+      padding: 0 10px 8px;
+      font-size: 11px;
+      color: var(--eng-text);
+    }
+
+    /* Matches the Save/Undo/Redo affordances the collider and particle
+       toolbars already use, so "there is unsaved work here" and "that write
+       landed" read the same wherever they appear. */
+    #si-env-save.dirty {
+      border-color: rgba(255, 200, 60, 0.75);
+      color: #ffe066;
+    }
+
+    #si-env-save.saved {
+      color: #86efac;
+      border-color: rgba(74, 222, 128, 0.7);
+    }
+
+    #editor-left {
+      left: var(--editor-env-w);
       width: var(--editor-left-w);
       border-right: 1px solid var(--eng-border);
       box-shadow: 10px 0 30px rgba(0, 0, 0, 0.45);
@@ -1452,12 +1566,31 @@
       transform: translateX(14px);
     }
 
+    body.env-collapsed #editor-left {
+      left: var(--editor-env-rail-w);
+    }
+
     .editor-dock.visible {
       pointer-events: auto;
       visibility: visible;
       opacity: 1;
-      transform: translateX(0);
       transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+
+    /* The slide-in's resting position, stated per id rather than once on
+       .editor-dock.visible.
+
+       It has to be: each dock's hidden offset lives in its own #id rule
+       above, and an id selector outranks a two-class one — so the shared
+       `transform: translateX(0)` never won, and all three docks sat
+       permanently 14px off their edges. That left a 14px gap between each
+       dock and the viewport #device-frame was laid out into, because
+       currentInsets() reserves the docks' *widths* and knows nothing about
+       a transform displacing them. */
+    #editor-env.visible,
+    #editor-left.visible,
+    #editor-right.visible {
+      transform: translateX(0);
     }
 
     /* Each pane is its own bordered card that scrolls independently, so a
@@ -3466,14 +3599,32 @@
       </div>
     </div>
   </div>
-  <!-- 3D Viewer/Editor chrome: two full-height docks flanking the
-       viewport. The viewport itself is #device-frame (the same canvas
+  <!-- 3D Viewer/Editor chrome: three full-height docks — Environment and
+       Hierarchy/Scripts on the left, Inspector/Control Desk on the right —
+       flanking the viewport. The viewport itself is #device-frame (the same canvas
        container the device-preview uses) — currentInsets() reserves these
        two widths so it's laid out *between* them rather than underneath
        them, and EditorViewport measures that container with a
        ResizeObserver to drive the renderer/camera. That's what keeps the
        scene undistorted at any panel width or window aspect: the projection
        follows the real box, and nothing scales the world to fit. -->
+  <div id="editor-env" class="editor-dock">
+    <button id="editor-env-rail" type="button" title="Show the Environment panel">🌐<span class="rail-label">Environment</span></button>
+    <div class="editor-pane" id="editor-pane-environment">
+      <div class="editor-pane-title">
+        🌐 Environment
+        <span class="er-cd-actions">
+          <button type="button" id="si-env-undo" title="Undo (Ctrl+Z)" disabled>↶</button>
+          <button type="button" id="si-env-redo" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" disabled>↷</button>
+          <button type="button" id="si-env-save" title="Save camera, lighting, and world settings to src/game/environment.json">💾</button>
+          <button type="button" id="si-env-collapse" title="Hide the Environment panel">‹</button>
+        </span>
+      </div>
+      <!-- EditorEnvironment renders Camera / Lighting / World in here -->
+      <div id="si-environment"></div>
+    </div>
+  </div>
+
   <div id="editor-left" class="editor-dock">
     <div class="editor-pane" id="editor-pane-hierarchy">
       <div class="editor-pane-title">🌳 Hierarchy</div>
@@ -3694,14 +3845,22 @@
       // reserve the space it would have used; the freecam viewport gets
       // the full height instead of leaving a blank strip where the bar
       // used to be.
-      // In the 3D Viewer/Editor the two editor docks reserve real space on
-      // both sides, and #device-frame — which IS the editor viewport — is
-      // laid out strictly between them. Widths come from the same CSS
+      // In the 3D Viewer/Editor the editor docks reserve real space on both
+      // sides, and #device-frame — which IS the editor viewport — is laid
+      // out strictly between them. Widths come from the same CSS
       // variables the docks are sized by, read back rather than duplicated
       // as literals here, so the reservation and the actual panels can't
       // drift apart.
       if (freecamActive) {
-        return { top: 0, left: editorDockWidth("editor-left"), right: editorDockWidth("editor-right") };
+        // Two docks on the left now (Environment, then Hierarchy/Scripts),
+        // one on the right. Summed rather than assumed, so collapsing the
+        // Environment dock to its rail hands the difference straight back
+        // to the viewport with nothing else to update.
+        return {
+          top: 0,
+          left: editorDockWidth("editor-env") + editorDockWidth("editor-left"),
+          right: editorDockWidth("editor-right"),
+        };
       }
       return { top: TOP_BAR_HEIGHT, left: 0, right: ENGINE_ROOM_WIDTH };
     }
@@ -4738,6 +4897,7 @@
     const viewerBtn = document.getElementById("er-btn-viewer");
     const exitViewerBtn = document.getElementById("er-exit-3d");
     const gizmoToolbar = document.getElementById("si-gizmo-toolbar");
+    const editorEnv = document.getElementById("editor-env");
     const editorLeft = document.getElementById("editor-left");
     const editorRight = document.getElementById("editor-right");
     const editorScriptsPane = document.getElementById("editor-pane-scripts");
@@ -4821,6 +4981,15 @@
      */
     let particleDirty = false;
 
+    /**
+     * Whether any camera, lighting, or world setting changed this session.
+     *
+     * One flag for the same reason the two above are one: /save-environment
+     * replaces src/game/environment.json wholesale, so there is nothing to
+     * accumulate, only "is there anything to write".
+     */
+    let environmentDirty = false;
+
     function queueSceneBinding(edit) {
       pendingSceneBindings.set(edit.className + "." + edit.fieldName, edit);
       updateExitButtonPending();
@@ -4828,7 +4997,7 @@
 
     function updateExitButtonPending() {
       const bindings = pendingSceneBindings.size;
-      const n = bindings + (colliderDirty ? 1 : 0) + (particleDirty ? 1 : 0);
+      const n = bindings + (colliderDirty ? 1 : 0) + (particleDirty ? 1 : 0) + (environmentDirty ? 1 : 0);
       const btn = document.getElementById("er-exit-3d");
       btn.textContent = n > 0 ? "\u2715 Exit & Save (" + n + ")" : "\u2715 Exit Editor";
       btn.classList.toggle("has-pending", n > 0);
@@ -4836,6 +5005,7 @@
       if (bindings > 0) parts.push(bindings + " assignment" + (bindings === 1 ? "" : "s") + " \u2192 src/game/sceneBindings.json");
       if (colliderDirty) parts.push("collider changes \u2192 src/game/colliders.json");
       if (particleDirty) parts.push("particle changes \u2192 src/game/particles.json");
+      if (environmentDirty) parts.push("environment changes \u2192 src/game/environment.json");
       btn.title = parts.length ? "Written on exit: " + parts.join("; ") : "Exit 3D Viewer/Editor";
     }
 
@@ -4929,6 +5099,37 @@
       }
     }
 
+    /**
+     * Writes the whole authored environment — camera framing, lighting, and
+     * world settings — to src/game/environment.json in one request.
+     *
+     * Must run while the editor is still open, for the same reason
+     * flushColliders must: __serializeEnvironment reads the live EditorRoot,
+     * which stops existing the moment freecam turns off.
+     */
+    async function flushEnvironment() {
+      if (!window.__hasEnvironmentChanges || !window.__hasEnvironmentChanges()) return true;
+      const environment = window.__serializeEnvironment && window.__serializeEnvironment();
+      if (!environment) return false;
+      try {
+        const res = await fetch("http://127.0.0.1:8001/save-environment", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(environment),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "save-environment failed");
+        // Marks only the environment side clean — see flushColliders above.
+        window.__markEnvironmentSaved && window.__markEnvironmentSaved();
+        environmentDirty = false;
+        updateExitButtonPending();
+        return true;
+      } catch (err) {
+        console.error("3D Editor: couldn't persist environment settings — the edits stay in this session only.", err);
+        return false;
+      }
+    }
+
     /* ============================================================
        Undo / Redo / Save — shared by the collider and particle toolbars.
 
@@ -4950,6 +5151,12 @@
     const partUndoBtn = document.getElementById("si-part-undo");
     const partRedoBtn = document.getElementById("si-part-redo");
     const partSaveBtn = document.getElementById("si-part-save");
+    // The Environment dock's own trio. Same shared history as the two
+    // toolbars above — the dock is always open, so these are simply the
+    // copy of the controls that's reachable without entering a mode.
+    const envUndoBtn = document.getElementById("si-env-undo");
+    const envRedoBtn = document.getElementById("si-env-redo");
+    const envSaveBtn = document.getElementById("si-env-save");
 
     function paintHistoryButtons() {
       const h = window.__getEditorHistory && window.__getEditorHistory();
@@ -4957,11 +5164,11 @@
       const canRedo = !!(h && h.canRedo);
       const undoTitle = canUndo ? "Undo " + h.undoLabel + " (Ctrl+Z)" : "Nothing to undo (Ctrl+Z)";
       const redoTitle = canRedo ? "Redo " + h.redoLabel + " (Ctrl+Y / Ctrl+Shift+Z)" : "Nothing to redo (Ctrl+Y / Ctrl+Shift+Z)";
-      for (const btn of [colUndoBtn, partUndoBtn]) {
+      for (const btn of [colUndoBtn, partUndoBtn, envUndoBtn]) {
         btn.disabled = !canUndo;
         btn.title = undoTitle;
       }
-      for (const btn of [colRedoBtn, partRedoBtn]) {
+      for (const btn of [colRedoBtn, partRedoBtn, envRedoBtn]) {
         btn.disabled = !canRedo;
         btn.title = redoTitle;
       }
@@ -4972,6 +5179,8 @@
       colSaveBtn.title = h && h.colliderDirty ? "Unsaved collider changes — write src/game/colliders.json" : "Colliders are saved";
       partSaveBtn.classList.toggle("dirty", !!(h && h.particleDirty));
       partSaveBtn.title = h && h.particleDirty ? "Unsaved particle changes — write src/game/particles.json" : "Particle systems are saved";
+      envSaveBtn.classList.toggle("dirty", !!(h && h.environmentDirty));
+      envSaveBtn.title = h && h.environmentDirty ? "Unsaved environment changes — write src/game/environment.json" : "Environment is saved";
     }
 
     /** The engine's own push/undo/redo signal — repaints without polling. */
@@ -4994,8 +5203,10 @@
 
     colUndoBtn.addEventListener("click", doUndo);
     partUndoBtn.addEventListener("click", doUndo);
+    envUndoBtn.addEventListener("click", doUndo);
     colRedoBtn.addEventListener("click", doRedo);
     partRedoBtn.addEventListener("click", doRedo);
+    envRedoBtn.addEventListener("click", doRedo);
 
     /** Flashes the button green so a silent, reload-free write still has a visible outcome. */
     function flashSaved(button) {
@@ -5018,6 +5229,41 @@
       if (ok) flashSaved(partSaveBtn);
       paintHistoryButtons();
     });
+
+    envSaveBtn.addEventListener("click", async () => {
+      envSaveBtn.disabled = true;
+      const ok = await flushEnvironment();
+      envSaveBtn.disabled = false;
+      if (ok) flashSaved(envSaveBtn);
+      paintHistoryButtons();
+    });
+
+    /* The engine's own signal that a camera, light, or world setting
+       changed — the same reverse direction __onColliderDirty serves, and
+       needed for the same reason: every one of those edits happens inside
+       the panel's own rows, which this script never sees. */
+    window.__onEnvironmentDirty = () => {
+      environmentDirty = true;
+      updateExitButtonPending();
+    };
+
+    /* Collapse to a rail. Three docks plus a usable 3D viewport don't all
+       fit on a narrow window, and the Environment panel is the one you tune
+       and then leave alone — so it's the one that folds away. Width is
+       driven purely by the class (see #editor-env.collapsed), and
+       currentInsets() measures the real box, so the viewport reclaims the
+       space without anything here restating a number. */
+    const envCollapseBtn = document.getElementById("si-env-collapse");
+    const envRailBtn = document.getElementById("editor-env-rail");
+
+    function setEnvCollapsed(collapsed) {
+      editorEnv.classList.toggle("collapsed", collapsed);
+      document.body.classList.toggle("env-collapsed", collapsed);
+      applyDeviceFrameInstant();
+    }
+
+    envCollapseBtn.addEventListener("click", () => setEnvCollapsed(true));
+    envRailBtn.addEventListener("click", () => setEnvCollapsed(false));
 
     /* Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z, only while the 3D editor is open.
        Guarded against text fields for the same reason EditorHierarchy
@@ -5057,6 +5303,7 @@
     function setFreecamUI(on) {
       freecamActive = on;
       engineRoom.style.display = on ? "none" : "";
+      editorEnv.classList.toggle("visible", on);
       editorLeft.classList.toggle("visible", on);
       editorRight.classList.toggle("visible", on);
       gizmoToolbar.classList.toggle("visible", on);
@@ -5077,6 +5324,10 @@
         // on.
         setParticleMode(false);
         particleDirty = false;
+        // Same reasoning again: a fresh EditorRoot builds a fresh
+        // EditorEnvironment with its own clean dirty flag, so leaving this
+        // set would claim unsaved work that no longer exists anywhere.
+        environmentDirty = false;
         updateExitButtonPending();
       }
       // The 3D Viewer/Editor always uses the full space between its docks —
@@ -5119,11 +5370,13 @@
       // Game.ts's applySceneBindings — so it has to land after the editor
       // has stopped being the thing rendering.
       exitViewerBtn.disabled = true;
-      // Colliders and particles first, and all three before
-      // setFreecamUI(false): each reads the live EditorRoot, which is torn
-      // down the instant freecam turns off.
+      // Colliders, particles, and the environment first, and all four
+      // before setFreecamUI(false): each reads the live EditorRoot, which
+      // is torn down the instant freecam turns off. Scene bindings go last
+      // because that write is the one that triggers the hot reload.
       await flushColliders();
       await flushParticles();
+      await flushEnvironment();
       await flushSceneBindings();
       exitViewerBtn.disabled = false;
       setFreecamUI(false);

@@ -461,6 +461,39 @@
         1.1210961937904358,
         0.8138871192932129
       ]
+    },
+    {
+      "id": "col_unabe1uuvp",
+      "name": "Box Collider 9",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/moviescreen",
+      "attachName": "moviescreen",
+      "offset": {
+        "position": [
+          0.0175,
+          2.4893,
+          -0.0757
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        8.486136748156197,
+        4.978699207305908,
+        1.5196786278216208
+      ]
     }
   ]
 }

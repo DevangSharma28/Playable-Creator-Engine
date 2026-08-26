@@ -14,22 +14,37 @@ import { sceneObjectPath } from "../SceneBindings";
 import { EditorColliders } from "./EditorColliders";
 import { EditorParticles } from "./EditorParticles";
 import { EditorHistory } from "./EditorHistory";
+import { EditorEnvironment } from "./EditorEnvironment";
 import type { ParticleVisuals } from "./ParticleVisuals";
 import type { ParticleManager } from "../particles/ParticleManager";
 import type { ParticleSystemConfig } from "../particles/ParticleTypes";
 import { serializeParticles } from "../particles/ParticleSerialization";
 import type { ColliderManager } from "../collision/ColliderManager";
 import type { ColliderData, ColliderShape } from "../collision/ColliderTypes";
+import type { SceneEnvironment } from "../scene/SceneEnvironment";
+import type { SceneEnvData } from "../scene/SceneEnvTypes";
 
 export interface EditorRootOptions {
   scene: THREE.Scene;
-  /** The real gameplay camera. Never orbited or resized by the editor — it stays exactly as gameplay left it so the CameraHelper frustum keeps showing the shape the playable actually ships at. */
-  gameplayCamera: THREE.PerspectiveCamera;
+  /**
+   * The real gameplay camera. Never orbited or resized by the editor — it
+   * stays exactly as gameplay left it so the CameraHelper frustum keeps
+   * showing the shape the playable actually ships at.
+   *
+   * A getter rather than a value because the Environment panel can switch
+   * the rig between perspective and orthographic mid-session, which changes
+   * the camera's *identity* — a reference captured once would leave the
+   * editor drawing the frustum of a camera the game stopped rendering
+   * through (see update(), which re-syncs it every frame).
+   */
+  getGameplayCamera: () => THREE.PerspectiveCamera | THREE.OrthographicCamera;
   renderer: THREE.WebGLRenderer;
   /** The element the canvas fills — measured continuously; the single source of truth for viewport size. */
   viewportContainer: HTMLElement;
   hierarchyEl: HTMLElement;
   inspectorEl: HTMLElement;
+  /** The Environment dock's pane. Its own element, not the Inspector's — the environment isn't a property of the selected object. */
+  environmentEl: HTMLElement;
   /** Where to point the orbit camera on entry (typically the player). */
   initialTarget?: THREE.Vector3;
   /** The live ION Collider registry — the editor edits the same colliders gameplay runs against, never a copy. */
@@ -44,6 +59,10 @@ export interface EditorRootOptions {
   particleVisuals: ParticleVisuals;
   /** Fired the first time a particle edit happens, so the Exit button can count it alongside collider and binding changes. */
   onParticleDirty?: () => void;
+  /** The live scene environment — camera framing, lighting, and world settings. The editor edits the same instance gameplay runs against, never a copy. */
+  environment: SceneEnvironment;
+  /** Fired the first time an environment edit happens, so the Exit button can count it alongside the rest. */
+  onEnvironmentDirty?: () => void;
   /** Resolves a particle texture path through the game's AssetLoader — the editor never loads assets itself. */
   resolveTexture?: (path: string) => THREE.Texture | undefined;
 }
@@ -125,6 +144,8 @@ export class EditorRoot {
   private readonly editorColliders: EditorColliders;
   /** "Particle System" mode: authoring, emission-volume gizmos, live preview transport, and the Inspector's sixteen module panels. */
   private readonly editorParticles: EditorParticles;
+  /** The Environment dock: Camera, Lighting, World. Always present while the editor is open — unlike the two modes above, it isn't something you switch into. */
+  private readonly editorEnvironment: EditorEnvironment;
   private onPickStateChange: ((pending: boolean) => void) | undefined;
   private readonly rendererRef: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
@@ -137,16 +158,33 @@ export class EditorRoot {
   private lastFrameMs = performance.now();
   private readonly unsubscribeDrag: () => void;
 
-  /** Held so dispose() can hand the particle system's camera back — see its own note there. */
-  private readonly gameplayCameraRef: THREE.PerspectiveCamera;
+  /** Held so dispose() can hand the particle system's camera back — see its own note there. Called rather than captured, since the rig's camera identity can change mid-session. */
+  private readonly getGameplayCamera: () => THREE.PerspectiveCamera | THREE.OrthographicCamera;
+  private readonly environment: SceneEnvironment;
+  /** Last environment revision the editor reconciled its scene helpers against — see update(). */
+  private lastEnvironmentVersion = -1;
 
   constructor(opts: EditorRootOptions) {
     this.rendererRef = opts.renderer;
     this.scene = opts.scene;
-    this.gameplayCameraRef = opts.gameplayCamera;
+    this.getGameplayCamera = opts.getGameplayCamera;
+    this.environment = opts.environment;
     this.viewportContainerRect = () => opts.viewportContainer.getBoundingClientRect();
 
-    this.editorCamera = opts.gameplayCamera.clone();
+    // The editor always orbits with a perspective camera, whatever the game
+    // is set to: orbiting an orthographic view gives no depth cue at all,
+    // and the projection you author *for the game* is a property of the
+    // game, not of how you look at it. Cloned when the game is already
+    // perspective so the starting near/far/FOV match what it ships with.
+    const gameplayCamera = opts.getGameplayCamera();
+    this.editorCamera =
+      gameplayCamera instanceof THREE.PerspectiveCamera
+        ? gameplayCamera.clone()
+        : new THREE.PerspectiveCamera(50, 1, gameplayCamera.near, gameplayCamera.far);
+    if (!(gameplayCamera instanceof THREE.PerspectiveCamera)) {
+      this.editorCamera.position.copy(gameplayCamera.position);
+      this.editorCamera.quaternion.copy(gameplayCamera.quaternion);
+    }
     this.orbitControls = new OrbitControls(this.editorCamera, opts.renderer.domElement);
     this.orbitControls.enableDamping = true;
     if (opts.initialTarget) this.orbitControls.target.copy(opts.initialTarget);
@@ -162,7 +200,7 @@ export class EditorRoot {
 
     this.sceneInspector = new SceneInspector({
       scene: opts.scene,
-      gameplayCamera: opts.gameplayCamera,
+      gameplayCamera,
       viewCamera: this.editorCamera,
       renderer: opts.renderer,
       orbitControls: this.orbitControls,
@@ -231,6 +269,20 @@ export class EditorRoot {
       onDirty: opts.onParticleDirty,
     });
 
+    // Not a mode: unlike Configure Colliders and Particle System, the
+    // Environment dock is simply present for the whole session. It edits
+    // the same live SceneEnvironment gameplay runs against, so every change
+    // is visible in the viewport the instant it's made — and pushes onto
+    // the same shared history, so one Ctrl+Z walks back through
+    // environment, collider, and particle edits in the order they happened.
+    this.editorEnvironment = new EditorEnvironment({
+      container: opts.environmentEl,
+      environment: opts.environment,
+      history: this.history,
+      onDirty: opts.onEnvironmentDirty,
+      getViewCamera: () => this.editorCamera,
+    });
+
     // One gizmo drag = one undo entry. Both editors get the begin/end
     // edge; each ignores it unless the drag is actually on something it
     // owns, so there's no need to know which mode is active here.
@@ -279,7 +331,7 @@ export class EditorRoot {
     return this.history.redo();
   }
   /** Everything the toolbars need to paint their Undo/Redo/Save buttons in one read. */
-  getHistoryState(): { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string; colliderDirty: boolean; particleDirty: boolean; depth: number } {
+  getHistoryState(): { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string; colliderDirty: boolean; particleDirty: boolean; environmentDirty: boolean; depth: number } {
     return {
       canUndo: this.history.canUndo,
       canRedo: this.history.canRedo,
@@ -287,6 +339,7 @@ export class EditorRoot {
       redoLabel: this.history.redoLabel ?? "",
       colliderDirty: this.editorColliders.hasChanges,
       particleDirty: this.editorParticles.hasChanges,
+      environmentDirty: this.editorEnvironment.hasChanges,
       depth: this.history.depth,
     };
   }
@@ -308,6 +361,22 @@ export class EditorRoot {
   // Each file now marks only itself (markCollidersSaved /
   // markParticlesSaved below), which makes the cross-clear unrepresentable
   // rather than merely fixed.
+
+  // -----------------------------------------------------------------------
+  // Scene environment — thin passthroughs; the behavior is EditorEnvironment's.
+  // -----------------------------------------------------------------------
+
+  /** The whole authored environment, as JSON-ready records for src/game/environment.json. */
+  serializeEnvironment(): SceneEnvData {
+    return this.editorEnvironment.serialize();
+  }
+  hasEnvironmentChanges(): boolean {
+    return this.editorEnvironment.hasChanges;
+  }
+  /** Called after a successful write — see the note above getHistoryState on why each file marks only itself. */
+  markEnvironmentSaved(): void {
+    this.editorEnvironment.markSaved();
+  }
 
   /** The camera the scene is rendered through while the editor is open. */
   get camera(): THREE.PerspectiveCamera {
@@ -334,6 +403,20 @@ export class EditorRoot {
     const dt = Math.min((now - this.lastFrameMs) / 1000, 0.05);
     this.lastFrameMs = now;
     this.editorParticles.update(dt);
+
+    // The Environment panel's own rows, and — only when something in the
+    // environment actually changed — the scene chrome that depends on it.
+    // A light created or deleted from the panel needs its helper added or
+    // dropped, and a perspective/orthographic switch changes the camera's
+    // identity, which CameraHelper binds to at construction. The Hierarchy
+    // needs no prompting: it already notices graph-shape changes on its
+    // own (see refreshIfChanged).
+    this.editorEnvironment.update();
+    if (this.lastEnvironmentVersion !== this.environment.version) {
+      this.lastEnvironmentVersion = this.environment.version;
+      this.sceneInspector.setGameplayCamera(this.getGameplayCamera());
+      this.sceneInspector.refreshLightHelpers();
+    }
 
     this.hierarchy.refreshIfChanged();
     this.inspector.refresh();
@@ -599,7 +682,8 @@ export class EditorRoot {
     // camera stops existing with this instance, and a billboard shader
     // reading a dead camera's matrix would freeze every particle facing
     // wherever the editor was last looking.
-    this.particleManager.setCamera(this.gameplayCameraRef);
+    this.particleManager.setCamera(this.getGameplayCamera());
+    this.editorEnvironment.dispose();
     this.picker.dispose();
     this.hierarchy.dispose();
     this.inspector.dispose();

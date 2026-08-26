@@ -27,12 +27,12 @@ export default defineConfig({
     host: "127.0.0.1",
     watch: {
       /**
-       * The two files the 3D editor saves are deliberately NOT watched.
+       * The three files the 3D editor saves are deliberately NOT watched.
        *
-       * Both are real imports in main.ts's module graph, so writing one
-       * trips HMR and tears down the very scene the editor is editing —
+       * All three are real imports in main.ts's module graph, so writing
+       * one trips HMR and tears down the very scene the editor is editing —
        * which is why saving used to be batched all the way to Exit Editor.
-       * Now that both editors have their own Save button, that reload
+       * Now that each of those editors has its own Save button, that reload
        * would fire mid-session and throw away the selection and the whole
        * undo history every time you pressed it.
        *
@@ -45,7 +45,7 @@ export default defineConfig({
        * one genuinely needs the reload, because re-applying assignments
        * only happens through Game.ts's applySceneBindings at boot.
        */
-      ignored: ["**/src/game/colliders.json", "**/src/game/particles.json"],
+      ignored: ["**/src/game/colliders.json", "**/src/game/particles.json", "**/src/game/environment.json"],
     },
   },
 });

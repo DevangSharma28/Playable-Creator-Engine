@@ -40,6 +40,11 @@ const MAX_PIXEL_RATIO = 2;
  * resize is still settling. Writing inline px onto the canvas instead (the
  * setSize default) is what let a stale buffer size stretch across a
  * differently-sized box in the first place.
+ *
+ * For that to actually hold, the constructor has to *clear* the inline
+ * width/height first — see its own note. Without that step the rule above
+ * was only half true, and it showed the moment the viewport box changed
+ * mid-session.
  */
 export class EditorViewport {
   private camera: THREE.Camera | undefined;
@@ -50,7 +55,28 @@ export class EditorViewport {
     private readonly renderer: THREE.WebGLRenderer,
     /** The element the canvas actually fills — measured, never assumed. */
     private readonly container: HTMLElement
-  ) {}
+  ) {
+    // Hand *displayed* size back to CSS for the whole editor session.
+    //
+    // Game's own sizing path calls setSize(w, h) with three.js's default
+    // `updateStyle: true`, which writes inline `width`/`height` in px onto
+    // the canvas. An inline style beats the `#game { width: 100% }` rule,
+    // so while those px are set the canvas cannot follow its container —
+    // and Game.resizeTo() deliberately early-returns while the editor is
+    // open, so nothing ever updates them again either. The result was a
+    // canvas frozen at whatever size the viewport happened to be at editor
+    // entry: the drawing buffer tracked the container correctly (applySize
+    // below), the displayed box didn't, and every later change to the
+    // viewport — collapsing a dock, resizing the window — rendered a
+    // correctly-sized image squashed into a stale box.
+    //
+    // Clearing them once here is the whole fix. Exiting the editor restores
+    // them on its own, because Game.applyCurrentSize() goes back through
+    // the normal setSize(w, h) path.
+    const canvas = renderer.domElement;
+    canvas.style.width = "";
+    canvas.style.height = "";
+  }
 
   /** The camera whose projection tracks this viewport. Swapping cameras re-applies the current size immediately, so a newly-attached camera is never left with a stale projection for a frame. */
   setCamera(camera: THREE.Camera | undefined): void {
