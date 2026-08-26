@@ -21,6 +21,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
+import { writeManifest } from "../packages/project/lib/integrity.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PKGS = path.join(ROOT, "packages");
@@ -33,12 +34,12 @@ const BUNDLED = [
     // `three` stays external: the project depends on it directly, and two
     // copies of three.js in one bundle is a class of bug that shows up as
     // `instanceof` silently failing across the boundary.
-    external: ["three", "three/*"],
+    externalExact: ["three"],
   },
   {
     name: "editor",
     entry: "packages/editor/src/index.ts",
-    external: ["three", "three/*", "@ion-engine/runtime"],
+    externalExact: ["three", "@ion-engine/runtime"],
   },
 ];
 
@@ -70,7 +71,30 @@ function spec_define(name) {
     : { "import.meta.env.DEV": "globalThis.__ION_DEV__" };
 }
 
-async function bundle({ name, entry, external }) {
+/**
+ * Externalises only the *bare* specifier, never its subpaths.
+ *
+ * esbuild's own `external: ["three"]` also covers `three/examples/jsm/...`,
+ * which leaves those as bare imports in the artifact — and they then only
+ * resolve for a consumer who happens to have three as a direct sibling. The
+ * jsm modules (OrbitControls, TransformControls, RoomEnvironment, the meshopt
+ * decoder, tween) are part of what these packages *are*, so they get bundled
+ * in; only three's own core stays shared, which is what keeps a single THREE
+ * identity across the game and the editor.
+ */
+function externalBarePlugin(names) {
+  return {
+    name: "ion:external-bare",
+    setup(build) {
+      for (const name of names) {
+        const filter = new RegExp(`^${name.replace(/[/\\]/g, "\\$&")}$`);
+        build.onResolve({ filter }, (args) => ({ path: args.path, external: true }));
+      }
+    },
+  };
+}
+
+async function bundle({ name, entry, externalExact }) {
   const outfile = path.join(PKGS, name, "dist", "index.js");
   const result = await esbuild.build({
     entryPoints: [path.join(ROOT, entry)],
@@ -79,7 +103,7 @@ async function bundle({ name, entry, external }) {
     format: "esm",
     platform: "browser",
     target: "es2019",
-    external,
+    plugins: [externalBarePlugin(externalExact)],
     // Not minified. A published package is read by bundlers and by people
     // debugging their own game against it; unreadable frames in a stack trace
     // cost real support time, and minifying buys no protection (the registry
@@ -167,8 +191,34 @@ const buildLib = path.join(PKGS, "build", "lib");
 fs.rmSync(buildLib, { recursive: true, force: true });
 copyTree(path.join(ROOT, "build.sh"), path.join(buildLib, "build.sh"));
 copyTree(path.join(ROOT, "scripts", "compress-assets.mjs"), path.join(buildLib, "compress-assets.mjs"));
+// The dev API ships with the build package rather than the editor: it is the
+// thing that reads and writes the *project's* files, which is a build/tooling
+// concern, and `ion dev` launches it with ION_PROJECT_ROOT pointed at the
+// customer's directory.
+// Copied as .cjs deliberately: this file is CommonJS, and @ion-engine/build
+// declares "type": "module", under which a bare .js is parsed as ESM and dies
+// on its first `require`. Renaming at copy time beats converting a 1,400-line
+// server that works.
+copyTree(path.join(ROOT, "scripts", "dev-build-api.js"), path.join(buildLib, "dev-build-api.cjs"));
 copyTree(path.join(ROOT, "scripts", "check-build-report.mjs"), path.join(buildLib, "check-build-report.mjs"));
 copyTree(path.join(ROOT, "vite.config.prod.mts"), path.join(buildLib, "vite.config.prod.mts"));
+copyTree(path.join(ROOT, "src", "index.template.html"), path.join(buildLib, "index.template.html"));
 log(`  build payload:  ${fs.readdirSync(buildLib).length} files`);
+
+// ── Integrity manifests ────────────────────────────────────────────────────
+// Lets `ion doctor` tell a customer that engine code has been edited inside
+// node_modules — where such an edit is invisible to git and evaporates on the
+// next clean install. See packages/project/lib/integrity.mjs for why this is
+// a correctness check and explicitly not a security control.
+log("");
+for (const [pkg, dirs] of [
+  ["runtime", ["dist"]],
+  ["editor", ["dist", "studio"]],
+  ["build", ["lib"]],
+  ["project", ["bin", "lib"]],
+]) {
+  const n = writeManifest(path.join(PKGS, pkg), dirs);
+  log(`  integrity: @ion-engine/${pkg.padEnd(8)} ${String(n).padStart(4)} files hashed`);
+}
 
 log("\n✓ Packages built into packages/*/dist\n");

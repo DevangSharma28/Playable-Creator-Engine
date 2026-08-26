@@ -23,6 +23,14 @@ set -e
 # still times just this build.
 SECONDS=0
 
+# Where this pipeline's own helpers live, and which Vite config to build with.
+# Unset means "this repository" — ION's own development mode, unchanged. The
+# `ion build` command sets both to @ion-engine/build's installed lib/ so a
+# customer project runs this exact script without a copy of it in their tree.
+: "${ION_BUILD_LIB:=scripts}"
+: "${ION_VITE_CONFIG:=vite.config.prod.mts}"
+
+
 # Compresses assets/models/*.glb and assets/sounds/*.ogg into .build-cache/
 # — never touches assets/ itself. HALF_FLOAT (set by the Builder panel's
 # checkbox via scripts/dev-build-api.js; defaults to on here for a plain
@@ -33,9 +41,9 @@ SECONDS=0
 # (missing devDependency, no ffmpeg, ...) only warns — the inline step
 # below falls back to the real assets/ files for anything the cache is
 # missing, same as it always has.
-node scripts/compress-assets.mjs
+node "${ION_BUILD_LIB:-scripts}/compress-assets.mjs"
 
-npx vite build --config vite.config.prod.mts
+npx vite build --config "${ION_VITE_CONFIG:-vite.config.prod.mts}"
 
 # vite-plugin-singlefile names its output after the input HTML's own
 # basename (src/index.template.html), landing at dist/index.template.html
@@ -174,7 +182,7 @@ import json
 import os
 import pathlib
 
-BUDGET_BYTES = 5 * 1024 * 1024
+BUDGET_BYTES = int(os.environ.get("ION_BUDGET_BYTES") or 5 * 1024 * 1024)
 
 try:
     compress_report = json.loads(pathlib.Path(".build-cache/report.json").read_text())
@@ -294,4 +302,4 @@ fi
 #
 # Escape hatch, for when you genuinely want the artifact anyway:
 #   ALLOW_COMPAT_WARNINGS=1 npm run build
-node scripts/check-build-report.mjs
+node "${ION_BUILD_LIB:-scripts}/check-build-report.mjs"

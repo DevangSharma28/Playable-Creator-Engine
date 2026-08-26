@@ -1,11 +1,23 @@
 {
   "name": "@ion-engine/project",
   "version": "0.1.0",
-  "description": "The `ion` command — dev server, build, preview, doctor — plus ion.config loading and validation.",
+  "description": "The `ion` command \u2014 dev server, build, preview, doctor \u2014 plus ion.config loading and validation.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",
-  "bin": { "ion": "./bin/ion.mjs" },
-  "exports": { ".": "./lib/index.mjs", "./config": "./lib/config.mjs" },
-  "files": ["bin", "lib", "LICENSE.md"],
-  "peerDependencies": { "vite": "^8.2.1" }
+  "bin": {
+    "ion": "./bin/ion.mjs"
+  },
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./config": "./lib/config.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "bin",
+    "lib",
+    "LICENSE.md"
+  ],
+  "peerDependencies": {
+    "vite": "^8.2.1"
+  }
 }

@@ -91,7 +91,13 @@ export abstract class IonGame {
   /** Class-name → instance, for Control Desk. Subclasses add to it via `inspect()`. */
   private readonly inspectables = new Map<string, object>();
 
-  protected constructor(options: IonGameOptions) {
+  /**
+   * Public because `IonGame.create()` constructs `new this(options)` and
+   * TypeScript will not accept a protected constructor there. Call `create()`
+   * rather than this directly — it preloads assets and runs the ordered
+   * setup that collider, particle and binding data depend on.
+   */
+  constructor(options: IonGameOptions) {
     const data = options.data ?? {};
     const environmentData: SceneEnvData = loadSceneEnv(data.environment);
 

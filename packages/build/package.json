@@ -1,11 +1,18 @@
 {
   "name": "@ion-engine/build",
   "version": "0.1.0",
-  "description": "ION production build pipeline — single-file output, asset compression, ad-network compatibility gate.",
+  "description": "ION production build pipeline \u2014 single-file output, asset compression, ad-network compatibility gate.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",
-  "exports": { ".": "./lib/index.mjs", "./vite-config": "./lib/vite.config.prod.mjs" },
-  "files": ["lib", "LICENSE.md"],
+  "exports": {
+    ".": "./lib/index.mjs",
+    "./vite-config": "./lib/vite.config.prod.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "LICENSE.md"
+  ],
   "dependencies": {
     "@gltf-transform/core": "^4.4.2",
     "@gltf-transform/extensions": "^4.4.2",
@@ -14,5 +21,7 @@
     "sharp": "^0.35.3",
     "vite-plugin-singlefile": "^2.3.3"
   },
-  "peerDependencies": { "vite": "^8.2.1" }
+  "peerDependencies": {
+    "vite": "^8.2.1"
+  }
 }

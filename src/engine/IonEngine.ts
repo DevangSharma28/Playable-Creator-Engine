@@ -1,5 +1,4 @@
 import type * as THREE from "three";
-import { Game } from "../game/Game";
 import type { UILayout } from "./ui/UILayout";
 import { Scheduler } from "./core/Scheduler";
 import { EventBus } from "./core/EventBus";
@@ -312,7 +311,32 @@ export interface GameDevFacade {
   readonly ui?: UILayout;
 }
 
+/**
+ * The four things IonEngine needs of a game. Everything else it might ask for
+ * is optional — see GameDevFacade.
+ */
+export interface IonGameLike {
+  update(dt: number, elapsed: number): void;
+  render(): void;
+  dispose(): void;
+}
+
+/** Builds the game for a canvas. Async because assets preload before the first frame. */
+export type CreateGame = (canvas: HTMLCanvasElement) => Promise<IonGameLike>;
+
 export interface IonEngineOptions {
+  /**
+   * How to construct the game.
+   *
+   * A factory rather than an import, and that inversion is load-bearing: this
+   * file used to `import { Game } from "../game/Game"`, which pointed the
+   * engine at one specific playable. Beyond breaking the engine/game rule on
+   * paper, it meant anything bundling the engine also bundled that game — its
+   * entities, its UI, and its asset manifest, so a different project would
+   * try to fetch models it has never heard of.
+   */
+  createGame?: CreateGame;
+
   /**
    * Run gameplay on a fixed timestep (seconds — e.g. `1/60`) instead of
    * the default variable, frame-length dt.
@@ -354,7 +378,7 @@ const MAX_FIXED_STEPS_PER_FRAME = 5;
 export class IonEngine {
   private readonly win = window as EngineWindow;
 
-  private game: Game | undefined;
+  private game: IonGameLike | undefined;
   private freecamActive = false;
   private fps = 0;
   private uiEditorPaused: boolean;
@@ -409,12 +433,12 @@ export class IonEngine {
 
   /** Access designed sprites/text from mainLayout.json by the name given in tools/ui-editor.html. Undefined only before Game.create() resolves — not meaningfully useful to callers until then anyway. */
   get ui(): UILayout | undefined {
-    return (this.game as (Game & Partial<GameDevFacade>) | undefined)?.ui;
+    return (this.game as (IonGameLike & Partial<GameDevFacade>) | undefined)?.ui;
   }
 
   /** Access designed sprites/text from endcardLayout.json. */
   get endcardUI(): UILayout | undefined {
-    return (this.game as (Game & Partial<GameDevFacade>) | undefined)?.endcardUILayout;
+    return (this.game as (IonGameLike & Partial<GameDevFacade>) | undefined)?.endcardUILayout;
   }
 
   private async start(): Promise<void> {
@@ -440,7 +464,14 @@ export class IonEngine {
     // already run, and unbindIon is context-guarded, so a late teardown
     // from a superseded bundle can't unbind this one.
     bindIon(this.ionContext);
-    const activeGame = await Game.create(this.canvas);
+    const createGame = this.options.createGame;
+    if (!createGame) {
+      throw new Error(
+        "IonEngine.boot() needs a game to run: pass { createGame }.\n" +
+          "  e.g. IonEngine.boot(canvas, { createGame: (c) => Game.create(c) })"
+      );
+    }
+    const activeGame = await createGame(this.canvas);
     this.game = activeGame;
     this.installDevHooks(activeGame);
 
@@ -520,11 +551,11 @@ export class IonEngine {
     requestAnimationFrame(loop);
   }
 
-  private installDevHooks(activeGame: Game): void {
+  private installDevHooks(activeGame: IonGameLike): void {
     // Every dev-panel member is optional (see GameDevFacade). Reaching them
     // through this alias rather than off `activeGame` directly is what keeps
     // them from being a hard requirement on every game built on this engine.
-    const dev = activeGame as Game & Partial<GameDevFacade>;
+    const dev = activeGame as IonGameLike & Partial<GameDevFacade>;
     this.win.__disposeGame = () => {
       // Order matters: drop this instance's pending timers/tweens *before*
       // the Game they close over is torn down. A surviving one-shot from

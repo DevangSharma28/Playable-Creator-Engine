@@ -1,7 +1,12 @@
 import { IonEngine } from "./engine/IonEngine";
+import { Game } from "./game/Game";
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
-IonEngine.boot(canvas);
+// The engine is handed the game rather than importing it. That inversion is
+// what keeps `engine/` genuinely free of any one playable — including of that
+// playable's asset manifest, which anything bundling the engine would
+// otherwise pull in and try to fetch.
+IonEngine.boot(canvas, { createGame: (c) => Game.create(c) });
 
 // Vite HMR (dev only — inert in the production build, where import.meta.hot
 // is always undefined): self-accept so ANY change anywhere in this file's

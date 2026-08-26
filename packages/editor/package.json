@@ -1,13 +1,24 @@
 {
   "name": "@ion-engine/editor",
   "version": "0.1.0",
-  "description": "ION Studio — the 3D editor, Engine Room panel and UI editor. Development only; never present in a production build.",
+  "description": "ION Studio \u2014 the 3D editor, Engine Room panel and UI editor. Development only; never present in a production build.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",
   "exports": {
-    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
-    "./studio/*": "./studio/*"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./studio/*": "./studio/*",
+    "./package.json": "./package.json"
   },
-  "files": ["dist", "studio", "LICENSE.md"],
-  "peerDependencies": { "@ion-engine/runtime": "0.1.0", "three": "^0.185.1" }
+  "files": [
+    "dist",
+    "studio",
+    "LICENSE.md"
+  ],
+  "peerDependencies": {
+    "@ion-engine/runtime": "0.1.0",
+    "three": "^0.185.1"
+  }
 }

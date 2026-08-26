@@ -21,10 +21,13 @@ import { viteSingleFile } from "vite-plugin-singlefile";
  * retargeted at Vite's output instead of esbuild's.
  */
 export default defineConfig({
-  root: path.resolve(import.meta.dirname, "src"),
+  // ION's own repo when unset; the customer's project when `ion build` sets
+  // it. Without this the config would resolve "src" relative to its own
+  // installed location inside node_modules and build the package, not the game.
+  root: path.resolve(process.env.ION_PROJECT_ROOT ?? import.meta.dirname, "src"),
   publicDir: false, // no dist/assets copy — every real asset is base64-inlined by build.sh's own post-build step instead, not shipped as separate files (the whole point of the single-file build)
   build: {
-    outDir: path.resolve(import.meta.dirname, "dist"),
+    outDir: path.resolve(process.env.ION_PROJECT_ROOT ?? import.meta.dirname, "dist"),
     emptyOutDir: true,
     // Vite's own default target ("baseline-widely-available") assumes a
     // real modern browser and leaves plenty of recent syntax untouched —
@@ -42,7 +45,7 @@ export default defineConfig({
     // project's own TypeScript.
     target: "es2015",
     rollupOptions: {
-      input: path.resolve(import.meta.dirname, "src/index.template.html"),
+      input: path.resolve(process.env.ION_PROJECT_ROOT ?? import.meta.dirname, "src/index.template.html"),
       output: {
         // Vite's default output is a real ES module (<script type="module">,
         // plus any import/export keywords Rollup can't fully inline away) —
