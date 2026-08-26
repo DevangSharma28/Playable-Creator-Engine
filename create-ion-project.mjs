@@ -12,11 +12,12 @@
  *   node create-ion-project.mjs --name cool-ad       # set the package name
  *   node create-ion-project.mjs --ref some-branch    # pull a different branch
  *   node create-ion-project.mjs --token ghp_xxx      # private repo (or set GITHUB_TOKEN)
+ *   node create-ion-project.mjs --interactive        # let git prompt for credentials
  *
- * The repo this defaults to is PRIVATE, so an unauthenticated download 404s.
- * With no token the scaffolder falls back to `git clone`, which reuses
- * whatever credentials the machine already has — but `--from` a local
- * checkout is the simplest route if you already have one.
+ * The default repo is public, so the plain anonymous download works with no
+ * setup. The token and `git clone` routes below exist for the cases that
+ * aren't: a private fork, a self-hosted mirror, or a branch that hasn't been
+ * pushed. `--from` a local checkout skips the network entirely.
  *
  * Why a scaffolder and not `npm install ion-engine`: the engine is not a
  * published package, and it can't currently become one unchanged. `main.ts`
@@ -58,6 +59,18 @@ const from = flag("from", null);
 const repo = flag("repo", DEFAULT_REPO);
 const ref = flag("ref", "main");
 const projectName = flag("name", path.basename(targetDir).replace(/[^a-z0-9._-]/gi, "-").toLowerCase() || "ion-playable");
+/**
+ * Let `git clone` ask for credentials instead of failing fast.
+ *
+ * Off by default so the scaffolder can never sit waiting on a prompt in a
+ * script or a CI job. Worth turning on in a real terminal when a credential
+ * helper is installed: a bare clone URL carries no username, so git has to
+ * ask for one before the helper can look anything up, and that single
+ * question is all that stands between a stored token and a working clone.
+ *
+ * SSH stays non-interactive regardless — see the GIT_SSH_COMMAND note below.
+ */
+const interactive = argv.includes("--interactive");
 
 const say = (msg) => console.log(msg);
 const die = (msg) => {
@@ -128,7 +141,25 @@ function repoUrls(input) {
     .replace(/^https?:\/\/(?:[^@]*@)?github\.com\//, "")
     .replace(/\.git$/, "")
     .replace(/\/+$/, "");
-  return { slug, github: true, cloneUrls: [`https://github.com/${slug}.git`, `git@github.com:${slug}.git`] };
+  const owner = slug.split("/")[0];
+  return {
+    slug,
+    github: true,
+    cloneUrls: [
+      // Owner-qualified HTTPS first, and this one matters more than it looks.
+      // A credential helper (osxkeychain, gnome-keyring, manager-core) stores
+      // the token against github.com, but git still has to know *which user*
+      // before it can look one up — and a bare https://github.com/... URL has
+      // no username in it, so git asks, and asking is exactly what a
+      // non-interactive clone can't do. Putting the owner in the URL is what
+      // lets the helper answer silently, and for a repo you own the owner is
+      // your username. This is the same shape `git remote -v` already shows
+      // in a checkout of a private repo.
+      `https://${owner}@github.com/${slug}.git`,
+      `https://github.com/${slug}.git`,
+      `git@github.com:${slug}.git`,
+    ],
+  };
 }
 
 function unpackTarball(buffer) {
@@ -200,9 +231,27 @@ async function fetchSource() {
     const dest = path.join(tmp, "repo");
     try {
       execFileSync("git", ["clone", "--depth", "1", "--branch", ref, "--quiet", url, dest], {
-        stdio: ["ignore", "ignore", "pipe"],
-        // Never hang on a credential prompt — fail fast and try the next route.
-        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+        stdio: interactive ? ["inherit", "inherit", "pipe"] : ["ignore", "ignore", "pipe"],
+        env: {
+          ...process.env,
+          // Never hang on a credential prompt — fail fast, try the next route.
+          // --interactive opts into letting git ask, which is what makes an
+          // installed credential helper usable (see `interactive` above).
+          GIT_TERMINAL_PROMPT: interactive ? "1" : "0",
+          // And never hang on SSH either. `stdio: "ignore"` does NOT cover
+          // this: ssh reads its host-key and passphrase prompts from
+          // /dev/tty directly, not from stdin, so ignoring stdin leaves the
+          // scaffolder sitting on "Are you sure you want to continue
+          // connecting (yes/no)?" forever. BatchMode makes ssh fail instead
+          // of asking.
+          //
+          // Deliberately NOT StrictHostKeyChecking=no or =accept-new:
+          // trusting an unverified host key on first contact is a real
+          // security decision, and silently making it inside a project
+          // scaffolder is not this tool's call. If ssh isn't set up yet,
+          // the error below says how to do it properly, once.
+          GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND ?? "ssh -o BatchMode=yes -o ConnectTimeout=10",
+        },
       });
       fs.rmSync(path.join(dest, ".git"), { recursive: true, force: true });
       return dest;
@@ -223,7 +272,13 @@ async function fetchSource() {
       `\n\n  If the repo is private, pick one:\n` +
       `    node create-ion-project.mjs --from /path/to/Playable-Creator-Engine   ← simplest, if you have it checked out\n` +
       `    gh auth login                                                        ← then re-run; the token is picked up automatically\n` +
-      `    GITHUB_TOKEN=ghp_xxx node create-ion-project.mjs                      ← a token with \`repo\` scope\n\n` +
+      `    GITHUB_TOKEN=ghp_xxx node create-ion-project.mjs                      ← a token with \`repo\` scope\n` +
+      `    node create-ion-project.mjs --interactive                            ← let git ask; a credential helper can then answer\n\n` +
+      `  If you'd rather use SSH, set it up once (this scaffolder deliberately\n` +
+      `  won't accept an unverified host key on your behalf):\n` +
+      `    ssh -T git@github.com     ← verify the fingerprint against\n` +
+      `                                 https://docs.github.com/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints\n` +
+      `                                 before answering yes\n\n` +
       `  If the branch isn't "${ref}", pass --ref <branch>.`
   );
 }

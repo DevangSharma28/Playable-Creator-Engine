@@ -1631,14 +1631,26 @@ Everything here is a real gap in the current code. Nothing in this document desc
 
 ```bash
 mkdir my-playable && cd my-playable
-node create-ion-project.mjs                    # or --from /path/to/this/repo
+curl -O https://raw.githubusercontent.com/DevangSharma28/Playable-Creator-Engine/main/create-ion-project.mjs
+node create-ion-project.mjs
 npm install
 npm run dev                                    # http://localhost:8000
 ```
 
+`--from /path/to/a/checkout` skips the network entirely. Other flags: `--name`, `--repo` (any GitHub slug or git URL), `--ref`, `--token` (or `GITHUB_TOKEN` / `GH_TOKEN` / an authenticated `gh`), `--interactive` (let git prompt for credentials).
+
 It copies `src/engine/`, `src/main.ts`, `src/index.template.html`, `index.html`, `tools/ui-editor.html`, `scripts/`, `build.sh`, both vite configs, `tsconfig.json`, `.gitignore` and `.github/workflows/ci.yml` verbatim, then generates a fresh `src/game/` (a ground plane, a rotating cube, a `UILayout`, and the six authored JSON files), a `package.json`, and a README. It deliberately does **not** copy `src/game/`, `assets/`, `public/`, `tests/`, or this project's own docs — those belong to the reference playable, not to yours.
 
-Without `--from` it downloads the repo tarball from GitHub and unpacks it with `tar`; with `--from <path>` it works entirely offline from a local checkout.
+**Source resolution**, tried in order, so it works whether or not the repo is reachable anonymously:
+
+| # | Route | When it applies |
+| --- | --- | --- |
+| 1 | `--from <path>` | A local checkout. Offline. |
+| 2 | Authenticated tarball | `--token`, `GITHUB_TOKEN`/`GH_TOKEN`, or an authenticated `gh` CLI |
+| 3 | Anonymous tarball | Public repos — the default path |
+| 4 | `git clone --depth 1` | Private forks and self-hosted mirrors, reusing the machine's existing git credentials |
+
+Two things it will never do: hang, or make a security decision for you. `GIT_TERMINAL_PROMPT=0` and `GIT_SSH_COMMAND="ssh -o BatchMode=yes"` mean every route fails fast rather than sitting on a prompt — `stdio: "ignore"` is *not* sufficient for the latter, because ssh reads host-key and passphrase questions from `/dev/tty` rather than stdin. And it deliberately does not pass `StrictHostKeyChecking=no`/`accept-new`: trusting an unverified host key on first contact is a real decision, and a scaffolder is the wrong place to make it silently. `--interactive` opts into letting git ask for credentials (SSH stays non-interactive regardless).
 
 > **Why a scaffolder rather than `npm install ion-engine`.** The engine is not a published package and cannot become one unchanged: `main.ts` imports it by relative path, the production build inlines its *source* into a single HTML file, and both the Engine Room (`index.html`) and the UI editor (`tools/ui-editor.html`) are project files rather than library exports. Copying the tree in is what works today — and it puts the engine in `src/engine/` where it can be read and modified, which is how playables actually get built.
 
