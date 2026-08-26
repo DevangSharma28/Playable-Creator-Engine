@@ -11,6 +11,12 @@
  *   node create-ion-project.mjs --from ../ion-repo   # from a local checkout
  *   node create-ion-project.mjs --name cool-ad       # set the package name
  *   node create-ion-project.mjs --ref some-branch    # pull a different branch
+ *   node create-ion-project.mjs --token ghp_xxx      # private repo (or set GITHUB_TOKEN)
+ *
+ * The repo this defaults to is PRIVATE, so an unauthenticated download 404s.
+ * With no token the scaffolder falls back to `git clone`, which reuses
+ * whatever credentials the machine already has — but `--from` a local
+ * checkout is the simplest route if you already have one.
  *
  * Why a scaffolder and not `npm install ion-engine`: the engine is not a
  * published package, and it can't currently become one unchanged. `main.ts`
@@ -96,21 +102,39 @@ function copyRecursive(src, dest) {
   }
 }
 
-/** Downloads the repo tarball and unpacks it into a temp dir, returning that path. */
-async function fetchSource() {
-  const url = `https://codeload.github.com/${repo}/tar.gz/refs/heads/${ref}`;
-  say(`  Downloading ${repo}@${ref}…`);
-  let res;
+/** `gh auth token`, if the GitHub CLI is installed and logged in. Many people already are. */
+function ghCliToken() {
   try {
-    res = await fetch(url);
-  } catch (err) {
-    die(`Could not reach GitHub (${err.message}).\n  If you already have the engine locally, use:\n    node create-ion-project.mjs --from /path/to/Playable-Creator-Engine`);
+    return execFileSync("gh", ["auth", "token"], { stdio: ["ignore", "pipe", "ignore"] }).toString().trim() || null;
+  } catch {
+    return null;
   }
-  if (!res.ok) die(`GitHub returned ${res.status} for ${url}\n  Check --repo and --ref, or use --from with a local checkout.`);
+}
 
+/**
+ * Normalizes --repo into what the routes below need.
+ *
+ * Accepts "owner/name", a GitHub URL in either form, or any other git URL
+ * (`file://`, `ssh://`, a self-hosted host). Only GitHub gets the tarball
+ * routes — everything else is clone-only, since there's no equivalent
+ * archive endpoint to guess at.
+ */
+function repoUrls(input) {
+  const isUrl = /^(?:file|ssh|git|https?):\/\//.test(input) || input.startsWith("git@");
+  const isGithub = !isUrl || /github\.com/.test(input);
+  if (!isGithub) return { slug: input, github: false, cloneUrls: [input] };
+  const slug = input
+    .replace(/^git@github\.com:/, "")
+    .replace(/^https?:\/\/(?:[^@]*@)?github\.com\//, "")
+    .replace(/\.git$/, "")
+    .replace(/\/+$/, "");
+  return { slug, github: true, cloneUrls: [`https://github.com/${slug}.git`, `git@github.com:${slug}.git`] };
+}
+
+function unpackTarball(buffer) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ion-"));
   const tarball = path.join(tmp, "src.tar.gz");
-  fs.writeFileSync(tarball, Buffer.from(await res.arrayBuffer()));
+  fs.writeFileSync(tarball, buffer);
   try {
     // `tar` ships with macOS, Linux, and Windows 10+. Shelling out beats
     // hand-rolling a gzip+tar reader for the one place this is needed.
@@ -121,6 +145,87 @@ async function fetchSource() {
   const unpacked = fs.readdirSync(tmp).map((d) => path.join(tmp, d)).find((d) => fs.statSync(d).isDirectory());
   if (!unpacked) die("Downloaded archive looked empty.");
   return unpacked;
+}
+
+/**
+ * Gets the engine source into a temp dir and returns that path.
+ *
+ * Four routes, tried in order, because the one that works depends on whether
+ * the repo is public and on what credentials the machine already has. The
+ * *private repo* case is the one that bit first: codeload answers an
+ * unauthenticated request for a private repo with a plain 404, identical to
+ * the response for a repo that doesn't exist — so "404" alone tells you
+ * nothing about which it was.
+ */
+async function fetchSource() {
+  const { slug, github, cloneUrls } = repoUrls(repo);
+  const token = github ? flag("token", process.env.GITHUB_TOKEN || process.env.GH_TOKEN || ghCliToken()) : null;
+  const attempts = [];
+
+  // 1 — Authenticated tarball. The only route that works for a private repo
+  //     without git, and the fastest when a token is already around.
+  if (github && token) {
+    say(`  Downloading ${slug}@${ref} (authenticated)…`);
+    try {
+      const res = await fetch(`https://api.github.com/repos/${slug}/tarball/${ref}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json", "User-Agent": "create-ion-project" },
+      });
+      if (res.ok) return unpackTarball(Buffer.from(await res.arrayBuffer()));
+      attempts.push(`token auth → HTTP ${res.status}${res.status === 401 || res.status === 403 ? " (token rejected or lacks `repo` scope)" : ""}`);
+    } catch (err) {
+      attempts.push(`token auth → ${err.message}`);
+    }
+  }
+
+  // 2 — Anonymous tarball. Works for public repos, no git and no token needed.
+  if (github) {
+    say(`  Downloading ${slug}@${ref}…`);
+    try {
+      const res = await fetch(`https://codeload.github.com/${slug}/tar.gz/refs/heads/${ref}`);
+      if (res.ok) return unpackTarball(Buffer.from(await res.arrayBuffer()));
+      attempts.push(`anonymous download → HTTP ${res.status}${res.status === 404 ? " (private repo, or no such repo/branch)" : ""}`);
+    } catch (err) {
+      attempts.push(`anonymous download → ${err.message}`);
+    }
+  }
+
+  // 3 — git clone. Reuses whatever credentials the machine already has (a
+  //     credential helper, an SSH key, gh's git integration), which is the
+  //     route most likely to just work for a private repo you own. HTTPS
+  //     first because that's what `git remote -v` usually shows; SSH after,
+  //     since a machine with a key but no helper is common.
+  for (const url of cloneUrls) {
+    say(`  Cloning ${url}…`);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "ion-clone-"));
+    const dest = path.join(tmp, "repo");
+    try {
+      execFileSync("git", ["clone", "--depth", "1", "--branch", ref, "--quiet", url, dest], {
+        stdio: ["ignore", "ignore", "pipe"],
+        // Never hang on a credential prompt — fail fast and try the next route.
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      });
+      fs.rmSync(path.join(dest, ".git"), { recursive: true, force: true });
+      return dest;
+    } catch (err) {
+      fs.rmSync(tmp, { recursive: true, force: true });
+      // The first `fatal:`/`ERROR:` line, not the last line of the blurb —
+      // git's auth failures end with generic advice ("and the repository
+      // exists."), which reads as nonsense on its own.
+      const lines = (err.stderr?.toString() || err.message || "").split("\n").map((l) => l.trim()).filter(Boolean);
+      const detail = lines.find((l) => /^(fatal|error|ERROR):/i.test(l)) ?? lines[0];
+      attempts.push(`git clone ${url.startsWith("git@") ? "(ssh)" : "(https)"} → ${detail || "failed"}`);
+    }
+  }
+
+  die(
+    `Couldn't get the engine source for ${slug}@${ref}.\n\n` +
+      attempts.map((a) => `    ${a}`).join("\n") +
+      `\n\n  If the repo is private, pick one:\n` +
+      `    node create-ion-project.mjs --from /path/to/Playable-Creator-Engine   ← simplest, if you have it checked out\n` +
+      `    gh auth login                                                        ← then re-run; the token is picked up automatically\n` +
+      `    GITHUB_TOKEN=ghp_xxx node create-ion-project.mjs                      ← a token with \`repo\` scope\n\n` +
+      `  If the branch isn't "${ref}", pass --ref <branch>.`
+  );
 }
 
 // ------------------------------------------------------ generated files ----
