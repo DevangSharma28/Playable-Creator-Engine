@@ -24,6 +24,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline/promises";
+import { fileURLToPath } from "node:url";
 import { stdin, stdout } from "node:process";
 
 const ION_VERSION = "0.1.0";
@@ -44,6 +45,11 @@ const positional = argv.filter(
 );
 
 const say = (m = "") => console.log(m);
+/** Whichever of the relative or absolute form is actually shorter — a relative path out of /private/tmp is not more readable than the real one. */
+const shortPath = (p) => {
+  const rel = path.relative(process.cwd(), p);
+  return rel && rel.length < p.length ? rel : p;
+};
 const die = (m) => {
   console.error(`\n✖ ${m}\n`);
   process.exit(1);
@@ -92,6 +98,47 @@ function validateDestination(dir) {
     return `${dir} is already an ION project.\n  Generating over it would overwrite src/game. Delete it first, or choose another folder.`;
   }
   return `${dir} is not empty (${entries.slice(0, 4).join(", ")}${entries.length > 4 ? ", …" : ""}).\n  Generate into an empty folder.`;
+}
+
+/**
+ * Where the four @ion-engine packages should come from.
+ *
+ * Order matters, and the middle case is the one that stops a very confusing
+ * first run. The packages are not on the public registry, so emitting
+ * `"@ion-engine/build": "^0.1.0"` into package.json makes `npm install` fail
+ * with a bare E404 that says nothing about ION. When this generator is being
+ * run out of an ION checkout — which is exactly what happens while the
+ * packages are unpublished — the checkout right next to it is the obvious and
+ * correct source, so use it and say so.
+ *
+ * @returns {{ mode: "local"|"registry", dir: string|null, problem: string|null }}
+ */
+function resolveIonPackages(explicit) {
+  const check = (dir, source) => {
+    if (!fs.existsSync(path.join(dir, "runtime", "package.json"))) {
+      return { mode: "local", dir, problem: `${source} doesn't contain the ION packages (no runtime/package.json in ${dir}).` };
+    }
+    if (!fs.existsSync(path.join(dir, "runtime", "dist", "index.js"))) {
+      return {
+        mode: "local",
+        dir,
+        problem:
+          `The ION packages in ${dir} haven't been built.\n` +
+          `  Build them first, from the ION checkout:\n` +
+          `    node scripts/build-packages.mjs`,
+      };
+    }
+    return { mode: "local", dir, problem: null };
+  };
+
+  if (explicit) return check(path.resolve(explicit), "--ion-packages");
+
+  // This file's own neighbours: running `node <ion-checkout>/create-ion-project.mjs`
+  // should Just Work without anyone having to know about --ion-packages.
+  const adjacent = path.join(path.dirname(fileURLToPath(import.meta.url)), "packages");
+  if (fs.existsSync(path.join(adjacent, "runtime", "package.json"))) return check(adjacent, "the ION checkout beside this script");
+
+  return { mode: "registry", dir: null, problem: null };
 }
 
 function preflight() {
@@ -371,7 +418,9 @@ async function main() {
   // `--ion-packages <dir>` points the dependencies at a local packages/ folder
   // instead of the registry. That is how ION itself is tested before a
   // release, and how you would consume an unpublished build.
-  const local = flag("ion-packages", null);
+  const source = resolveIonPackages(flag("ion-packages", null));
+  if (source.problem) die(source.problem);
+  const local = source.mode === "local" ? source.dir : null;
   const dep = (pkg) => (local ? `file:${path.resolve(local, pkg)}` : `^${ION_VERSION}`);
 
   const files = {
@@ -446,7 +495,14 @@ async function main() {
   const where = targetDir === process.cwd() ? "." : path.relative(process.cwd(), targetDir);
   say(`  ✓ ${config.name} — ${template.label}, ${template.orientation}, ${template.resolution.width}×${template.resolution.height}`);
   say(`    ${Object.keys(files).length} files in ${where}`);
-  say(`    ION ${ION_VERSION}${local ? "  (from local packages)" : ""}`);
+  say(`    ION ${ION_VERSION}${local ? `  (from ${shortPath(local)})` : "  (from the npm registry)"}`);
+  if (!local) {
+    say("");
+    say("  ⚠ The @ion-engine packages are not on the public npm registry.");
+    say("    `npm install` will fail with E404 unless you are authenticated to a");
+    say("    registry that hosts them. If you have an ION checkout, point at it:");
+    say("      node create-ion-project.mjs --ion-packages /path/to/ion/packages");
+  }
   say("");
   say("    src/game/          yours");
   say("    node_modules/      ION engine, editor, build — git-ignored, not yours to edit");
