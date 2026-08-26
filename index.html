@@ -3754,7 +3754,7 @@
     <button data-sim="landscape">Landscape 16:9</button>
     <button data-sim="real">Real</button>
   </div>
-  <iframe id="ui-editor-frame" src="/ui-editor.html" title="UI Layout Editor" allowtransparency="true"></iframe>
+  <iframe id="ui-editor-frame" data-ion-src="/ui-editor.html" title="UI Layout Editor" allowtransparency="true"></iframe>
 
   <div id="frame-stage">
     <div id="device-frame">
@@ -3766,6 +3766,28 @@
 
   <script type="module" src="/src/main.ts"></script>
   <script>
+    /* ─────────────────────────────────────────────────────────────────────
+       Where this page's two external dependencies live.
+    
+       The Engine Room is served two ways: from this repository's own root
+       while ION itself is being worked on, and out of @ion-engine/editor's
+       studio payload when a generated project runs `ion dev`. The defaults
+       below are exactly what the first case has always used, so nothing
+       changes here; `ion dev` injects overrides before this script runs.
+    
+       __ION_API_ORIGIN — the dev build API (scripts/dev-build-api.js). A
+       generated project may need it on a different port, e.g. when ION's own
+       dev server is already holding 8001.
+    
+       __ION_STUDIO_BASE — prefix for studio-owned pages (the UI editor, the
+       guide). Empty means "served at the web root", which is how this repo
+       serves them out of public/.
+       ───────────────────────────────────────────────────────────────────── */
+    const ION_API_ORIGIN = window.__ION_API_ORIGIN || "http://127.0.0.1:8001";
+    const ION_STUDIO_BASE = window.__ION_STUDIO_BASE || "";
+    document.getElementById("ui-editor-frame").src =
+      ION_STUDIO_BASE + document.getElementById("ui-editor-frame").dataset.ionSrc;
+
     // Hot reload (dev only — not present in the production build): Vite's
     // own HMR replaces esbuild's old EventSource-based bundle-swap here —
     // main.ts self-accepts its own updates (see its doc comment) so a
@@ -3802,7 +3824,7 @@
     // system as the Ion Engine Guide artifact — served by Vite's own
     // publicDir, no dev API round-trip needed.
     document.getElementById("er-btn-guide").addEventListener("click", () => {
-      window.open("/guide.html", "_blank");
+      window.open(ION_STUDIO_BASE + "/guide.html", "_blank");
     });
     document.getElementById("er-btn-editor").addEventListener("click", () => {
       editorFrame.style.display = "block";
@@ -4026,7 +4048,7 @@
     // Build button below. Fetched once on load; a stale hash until the
     // next full reload is an acceptable tradeoff for a dev panel (nothing
     // here re-polls a slow git subprocess every few seconds).
-    fetch("http://127.0.0.1:8001/version")
+    fetch(ION_API_ORIGIN + "/version")
       .then((res) => res.json())
       .then((info) => {
         const el = document.getElementById("engine-room-version");
@@ -4055,8 +4077,8 @@
     // real, just-measured number and flips the badge back to fresh.
     // Both talk to scripts/dev-build-api.js (started alongside this dev
     // server by scripts/dev.js).
-    const ESTIMATE_API = "http://127.0.0.1:8001/estimate-size";
-    const BUILD_API = "http://127.0.0.1:8001/build";
+    const ESTIMATE_API = ION_API_ORIGIN + "/estimate-size";
+    const BUILD_API = ION_API_ORIGIN + "/build";
     const BUILD_BUDGET_BYTES = 5 * 1024 * 1024;
     const openBuilderBtn = document.getElementById("er-btn-build");
     const builderBackdrop = document.getElementById("builder-modal-backdrop");
@@ -4222,7 +4244,7 @@
     // data-driven optimization notes. Entirely a read of a file build.sh
     // already wrote — no new build step of its own.
     (() => {
-      const REPORT_API = "http://127.0.0.1:8001/build-report";
+      const REPORT_API = ION_API_ORIGIN + "/build-report";
       const reportBtn = document.getElementById("builder-report-btn");
       const reportBackdrop = document.getElementById("report-modal-backdrop");
       const reportClose = document.getElementById("report-modal-close");
@@ -4492,7 +4514,7 @@
     // rewrite. Saving touches a watched source file, so Vite's dev
     // watcher rebuilds and the game hot-reloads, same as any other save.
     (() => {
-      const LOCAL_API_ORIGIN = "http://127.0.0.1:8001";
+      const LOCAL_API_ORIGIN = ION_API_ORIGIN;
       const scriptsListEl = document.getElementById("er-scripts-list");
       const scriptsCountEl = document.getElementById("er-scripts-count");
       const cdBody = document.getElementById("er-controldesk-body");
@@ -5047,7 +5069,7 @@
       if (pendingSceneBindings.size === 0) return;
       const edits = [...pendingSceneBindings.values()];
       try {
-        const res = await fetch("http://127.0.0.1:8001/save-scene-bindings", {
+        const res = await fetch(ION_API_ORIGIN + "/save-scene-bindings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ edits }),
@@ -5075,7 +5097,7 @@
       const colliders = window.__serializeColliders && window.__serializeColliders();
       if (!colliders) return false;
       try {
-        const res = await fetch("http://127.0.0.1:8001/save-colliders", {
+        const res = await fetch(ION_API_ORIGIN + "/save-colliders", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ colliders }),
@@ -5114,7 +5136,7 @@
       const systems = window.__serializeParticles && window.__serializeParticles();
       if (!systems) return false;
       try {
-        const res = await fetch("http://127.0.0.1:8001/save-particles", {
+        const res = await fetch(ION_API_ORIGIN + "/save-particles", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ systems }),
@@ -5145,7 +5167,7 @@
       const environment = window.__serializeEnvironment && window.__serializeEnvironment();
       if (!environment) return false;
       try {
-        const res = await fetch("http://127.0.0.1:8001/save-environment", {
+        const res = await fetch(ION_API_ORIGIN + "/save-environment", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(environment),

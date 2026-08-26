@@ -12,9 +12,27 @@ const { exec, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
-const PORT = 8001;
-const ROOT = path.join(__dirname, "..");
-const PACKAGE_VERSION = require(path.join(ROOT, "package.json")).version;
+/** Overridable so a generated project can run its own API alongside ION's. The Engine Room reads the matching origin from `window.__ION_API_ORIGIN`, which `ion dev` injects — change one without the other and every Save silently 404s. */
+const PORT = Number(process.env.ION_API_PORT ?? 8001);
+/**
+ * The project this API reads and writes.
+ *
+ * Two callers, two answers. Run directly out of this repository (ION's own
+ * development mode) it is the repo root, exactly as it always was. Run from
+ * inside a generated project's node_modules by `ion dev`, `__dirname` points
+ * at the installed package instead — which would have this happily serving
+ * and *writing* the engine's own src/game rather than the customer's. So the
+ * CLI passes the real project root explicitly and the fallback stays put.
+ */
+const ROOT = process.env.ION_PROJECT_ROOT ? path.resolve(process.env.ION_PROJECT_ROOT) : path.join(__dirname, "..");
+/** Best-effort: a generated project always has one, but a malformed or absent package.json shouldn't stop the API booting. */
+const PACKAGE_VERSION = (() => {
+  try {
+    return require(path.join(ROOT, "package.json")).version ?? "0.0.0";
+  } catch {
+    return "0.0.0";
+  }
+})();
 const UI_DIR = path.join(ROOT, "src", "game", "ui"); // src/ is split into engine/ (reusable) and game/ (this playable ad) — mainLayout.json/endcardLayout.json live under the latter
 const LAYOUTS_DIR = path.join(UI_DIR, "layouts");
 const ACTIVE_FILES = { main: "mainLayout.json", endcard: "endcardLayout.json" };
@@ -49,7 +67,18 @@ const PARTICLES_FILE = path.join(ROOT, "src", "game", "particles.json");
 // panel authors is what the production playable renders.
 const ENVIRONMENT_FILE = path.join(ROOT, "src", "game", "environment.json");
 const SRC_DIR = path.join(ROOT, "src");
-const SCRIPT_CATEGORIES = { engine: path.join(SRC_DIR, "engine"), game: path.join(SRC_DIR, "game") };
+/**
+ * Where the Scripts panel and Control Desk look for classes.
+ *
+ * `engine` only exists while ION is developed in-repo. A generated project
+ * consumes the engine as a package, so there is no src/engine to scan — and
+ * there shouldn't be: those files are not the customer's to edit. The
+ * category is dropped entirely rather than left pointing at a missing
+ * directory, so /list-scripts returns an honest empty list instead of an
+ * error the panel would render as a broken API.
+ */
+const SCRIPT_CATEGORIES = { game: path.join(SRC_DIR, "game") };
+if (fs.existsSync(path.join(SRC_DIR, "engine"))) SCRIPT_CATEGORIES.engine = path.join(SRC_DIR, "engine");
 
 /**
  * tools/ui-editor.html's Save/Set-as-Main/Set-as-Endcard prefer writing
@@ -792,7 +821,16 @@ function writeEnvironment(data) {
 // browsing the page — the CORS origin allowed here has to match whichever
 // one the tab is actually on, or the browser silently discards the
 // response and the button just reads "API offline" for no visible reason.
-const ALLOWED_ORIGINS = new Set(["http://localhost:8000", "http://127.0.0.1:8000"]);
+//
+// ION_DEV_ORIGINS (comma-separated) widens this for a generated project,
+// whose Vite server may well not be on 8000 — `ion dev` sets it to whatever
+// port it actually bound. The 8000 pair stays the default so this repo's own
+// dev mode is unaffected.
+const ALLOWED_ORIGINS = new Set([
+  "http://localhost:8000",
+  "http://127.0.0.1:8000",
+  ...(process.env.ION_DEV_ORIGINS ?? "").split(",").map((o) => o.trim()).filter(Boolean),
+]);
 
 /** Best-effort — a fresh clone with no commits yet, or no git on PATH, shouldn't break the panel, just show what it can. */
 function readGitInfo() {
