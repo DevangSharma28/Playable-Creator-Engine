@@ -78,3 +78,11 @@ out/
 .yarn/unplugged
 .yarn/install-state.gz
 .pnp.*
+### ION package build output
+# packages/*/src is the source; everything below is produced by
+# `node scripts/build-packages.mjs` and must never be committed — a stale
+# committed bundle silently shadowing a rebuilt one is the exact failure this
+# avoids.
+packages/*/dist/
+packages/editor/studio/
+packages/build/lib/

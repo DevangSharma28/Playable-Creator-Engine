@@ -1,0 +1,9 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../..",
+    "paths": { "@ion-engine/runtime": ["../runtime/src/index.ts"] }
+  },
+  "include": ["src"]
+}
