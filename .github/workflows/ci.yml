@@ -1,0 +1,105 @@
+# Runs the verification suite and a real production build on every push and
+# pull request.
+#
+# This exists because the repo's guarantees were, until now, only as good as
+# someone remembering to type `npm test` — and the geometry-parity suite (the
+# mechanical enforcement the locked UI-scaling system depends on) sat red
+# across several commits precisely because nobody did. Having a test and
+# running a test are different things.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A new push to the same branch supersedes an in-flight run. PRs get this per
+# head ref, so force-pushing a fix doesn't leave the old run burning minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Matches the Node the project is developed against. The suites use
+          # node:test and top-level await, so 18 is the real floor; pinning 22
+          # keeps CI and local behaviour identical rather than merely compatible.
+          node-version: 22
+          cache: npm
+
+      # ci, not install: fails loudly if package-lock.json and package.json
+      # have drifted, rather than quietly resolving a different tree than the
+      # one anyone tested against.
+      - run: npm ci
+
+      # typecheck + particles + shaders + geometry parity + scene environment
+      # + UI layout/editor + render-defaults parity + the editor smoke pass.
+      # No browser needed: every suite is node:test over jsdom or plain
+      # typed-array maths (see ENGINE.md §13).
+      - run: npm test
+
+  build:
+    name: Production build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Deliberately NOT `needs: test`. The two answer different questions and a
+    # broken build is worth knowing about in the same run as a failing test,
+    # not one round trip later.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # build.sh needs python3 (present on ubuntu-latest) and zip (present).
+      # ffmpeg is NOT installed on the runner and is deliberately not added:
+      # scripts/compress-assets.mjs degrades to using the original .ogg files
+      # and warns, so CI still exercises the real pipeline. It means audio is
+      # uncompressed in CI's output, so treat the size numbers below as an
+      # upper bound rather than the figure a local build produces.
+      # build.sh gates itself: its final step is
+      # scripts/check-build-report.mjs, which exits 2 on a non-empty
+      # compatibilityWarnings or an over-budget artifact. So this step failing
+      # already means "built, but not submittable" — nothing extra is needed
+      # here to enforce it.
+      - name: Build
+        run: npm run build
+
+      # Purely to emit the job summary. The gate has already run inside
+      # build.sh above, so this adds no enforcement — it re-reads the same
+      # report to write the size/compatibility table onto the run, and does so
+      # even when the build failed, which is exactly when those numbers are
+      # worth having. continue-on-error keeps it from reporting the same
+      # failure a second time.
+      - name: Build report summary
+        if: always()
+        continue-on-error: true
+        run: node scripts/check-build-report.mjs
+
+      - name: Upload build output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playable-${{ github.sha }}
+          path: |
+            dist/index.html
+            dist/build-report.json
+          if-no-files-found: error
+          retention-days: 14

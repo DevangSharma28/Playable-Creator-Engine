@@ -893,19 +893,49 @@ const server = http.createServer((req, res) => {
           { cwd: ROOT, timeout: 120000, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, HALF_FLOAT: halfFloat ? "1" : "0" } },
           (err, stdout, stderr) => {
             res.setHeader("Content-Type", "application/json");
-            if (err) {
+
+            // build.sh's final step is scripts/check-build-report.mjs, which
+            // exits 2 for "built, but not submittable" — a non-empty
+            // compatibilityWarnings, or an over-budget artifact. That is a
+            // genuinely different outcome from a build failure and must not
+            // be reported as one: dist/index.html, the report and the zip
+            // were all written before the check ran, so every number the
+            // Builder panel shows is real and worth showing. Anything else
+            // non-zero is a real failure with nothing to paint.
+            const notSubmittable = !!err && err.code === 2;
+            if (err && !notSubmittable) {
               res.writeHead(500);
               res.end(JSON.stringify({ ok: false, error: err.message, stdout, stderr }));
               return;
             }
+
             // build.sh prints this on its own final line once dist/index.html is
             // written — parsed straight from stdout rather than re-stat-ing the
             // file here so the reported size is exactly the bytes build.sh itself
             // just measured, not a second, possibly-racy read.
             const sizeMatch = stdout.match(/BUILD_SIZE_BYTES=(\d+)/);
             const sizeBytes = sizeMatch ? Number(sizeMatch[1]) : null;
+
+            // Read back the findings rather than scraping them out of stdout:
+            // the report is the same file the "📊 Build Report" button renders,
+            // so the panel's flag and its report can't disagree about what was
+            // wrong.
+            let findings = [];
+            let overBudget = false;
+            if (notSubmittable) {
+              try {
+                const report = JSON.parse(fs.readFileSync(path.join(ROOT, "dist", "build-report.json"), "utf8"));
+                findings = Array.isArray(report.compatibilityWarnings) ? report.compatibilityWarnings : [];
+                overBudget = !!report.overBudget;
+              } catch {
+                // The gate said the build isn't submittable, so say so even if
+                // the report can't be re-read — losing the detail is better
+                // than losing the flag.
+              }
+            }
+
             res.writeHead(200);
-            res.end(JSON.stringify({ ok: true, stdout, stderr, sizeBytes }));
+            res.end(JSON.stringify({ ok: true, submittable: !notSubmittable, findings, overBudget, stdout, stderr, sizeBytes }));
           }
         );
       })

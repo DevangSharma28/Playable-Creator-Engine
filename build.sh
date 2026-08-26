@@ -272,3 +272,26 @@ if command -v zip >/dev/null 2>&1; then
 else
   echo "zip not found — skipping dist/index.zip (dist/index.html is still the complete, self-contained output)"
 fi
+
+# The submittability gate. Deliberately the very last step, after
+# dist/index.html, dist/build-report.json and dist/index.zip have all been
+# written: a build that fails this still leaves a complete, inspectable
+# artifact on disk. You get the non-zero exit code *and* the output to look
+# at, which is usually how you work out what caused the finding.
+#
+# It fails on two things, both already computed by the python block above:
+#   - a non-empty compatibilityWarnings — every pattern in there is supposed
+#     to be impossible given vite.config.prod.mts's format:"iife" /
+#     target:"es2015", so a hit means one of those regressed (most likely via
+#     a dependency upgrade) and the build will bounce at ad-network review
+#   - overBudget — the Builder panel has drawn that budget bar since it
+#     existed, and until now nothing enforced it
+#
+# Exit code 2 specifically means "built, but not submittable" (1 would mean
+# the check itself couldn't run) — scripts/dev-build-api.js branches on that
+# so the Builder panel can still show the real size figures while flagging
+# the build red. See scripts/check-build-report.mjs's own header.
+#
+# Escape hatch, for when you genuinely want the artifact anyway:
+#   ALLOW_COMPAT_WARNINGS=1 npm run build
+node scripts/check-build-report.mjs

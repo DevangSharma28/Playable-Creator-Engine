@@ -846,6 +846,19 @@
       box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset, 0 0 24px -2px rgba(74, 222, 128, 0.6);
     }
 
+    /* Built, but the gate rejected it — a genuinely different outcome from
+       .failed, and it has to read that way. The artifact exists and every
+       size figure beside it is real; what's wrong is that submitting it
+       would bounce at ad-network review. Amber, matching the freshness
+       pill's own "stale" warning colour rather than inventing a third
+       palette. */
+    #builder-build-btn.warn {
+      animation: none;
+      background: linear-gradient(120deg, #e0a32e, var(--eng-warn));
+      color: #1a1204;
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18) inset, 0 0 24px -2px rgba(255, 204, 77, 0.6);
+    }
+
     #builder-build-btn.failed {
       animation: none;
       background: linear-gradient(120deg, #dc4545, var(--eng-danger));
@@ -4133,7 +4146,7 @@
 
     builderBuildBtn.addEventListener("click", async () => {
       builderBuildBtn.disabled = true;
-      builderBuildBtn.classList.remove("done", "failed");
+      builderBuildBtn.classList.remove("done", "failed", "warn");
       builderBuildBtn.classList.add("building");
       builderBuildBtnText.textContent = "Building…";
       builderStatus.textContent = "Building…";
@@ -4147,14 +4160,34 @@
         const data = await res.json();
         builderBuildBtn.classList.remove("building");
         if (data.ok) {
-          builderBuildBtn.classList.add("done");
-          builderBuildBtnText.textContent = "Built ✓";
+          // Three outcomes, not two. build.sh's final gate
+          // (scripts/check-build-report.mjs) exits 2 for "built, but not
+          // submittable" — a non-empty compatibilityWarnings or an
+          // over-budget artifact — which POST /build reports as ok:true with
+          // submittable:false. dist/index.html and its report were written
+          // before the gate ran, so the size figures below are real either
+          // way; what changes is that this build would bounce at review, and
+          // saying "Built ✓" would be a lie of exactly the expensive kind.
+          const submittable = data.submittable !== false;
+          builderBuildBtn.classList.add(submittable ? "done" : "warn");
+          builderBuildBtnText.textContent = submittable ? "Built ✓" : "Not submittable";
           if (typeof data.sizeBytes === "number") {
-            setFreshness("fresh", "Just built");
+            setFreshness(submittable ? "fresh" : "stale", submittable ? "Just built" : "Built — will fail review");
             paintSize(data.sizeBytes, false);
           } else {
-            builderStatus.textContent = "Build complete";
+            builderStatus.textContent = submittable ? "Build complete" : "Built, but not submittable";
             builderDetail.textContent = "(size unavailable)";
+          }
+          if (!submittable) {
+            const findings = Array.isArray(data.findings) ? data.findings : [];
+            const parts = [];
+            if (findings.length) parts.push(findings.length + " compatibility warning" + (findings.length === 1 ? "" : "s"));
+            if (data.overBudget) parts.push("over the size budget");
+            builderStatus.textContent = "Built, but not submittable";
+            // paintSize() owns builderDetail on the success path, so this
+            // deliberately runs after it.
+            builderDetail.textContent = (parts.length ? parts.join(" · ") : "See the Build Report") + " — open 📊 Build Report for detail";
+            console.warn("Build is not submittable:\n" + (findings.length ? findings.map((f) => "  - " + f).join("\n") : "  (see dist/build-report.json)"));
           }
         } else {
           builderBuildBtn.classList.add("failed");
@@ -4175,7 +4208,7 @@
       }
       setTimeout(() => {
         builderBuildBtn.disabled = false;
-        builderBuildBtn.classList.remove("done", "failed");
+        builderBuildBtn.classList.remove("done", "failed", "warn");
         builderBuildBtnText.textContent = "Build Now";
       }, 2200);
       refreshReportButton();

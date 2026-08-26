@@ -176,6 +176,7 @@ src/
     particles.json              authored by the Particle System mode
     environment.json            authored by the Environment dock
 
+create-ion-project.mjs          one-file scaffolder for a new playable — see §15.2
 index.html                      DEV entry — the Engine Room panel + editor chrome
 tools/ui-editor.html            the visual UI editor (single file, standalone)
 public/ui-editor.html           synced copy served by the dev server
@@ -186,6 +187,8 @@ scripts/
   compress-assets.mjs           GLB + audio compression into .build-cache/
   sync-assets.js                assets/ → public/assets/, tools/ → public/
   test-ui-editor.js             end-to-end UI editor smoke pass
+  check-build-report.mjs        CI gate over dist/build-report.json
+.github/workflows/ci.yml        CI — tests + a real production build
 tests/                          seven node:test suites — see §13
 build.sh                        the production pipeline
 vite.config.mts                 dev server config
@@ -286,6 +289,12 @@ interface IonEngineOptions {
 ```
 
 Responsibilities: the rAF loop and `dt` capping, EMA FPS tracking, ownership and teardown of the `Scheduler` / `EventBus` / `ColliderManager` / `ParticleManager`, the `Ion` binding, the crash guard, the in-place hot-reload handshake, and — DEV only — the `window.__*` hook surface the Engine Room panel talks to (see [§11.1](#111-dev-hook-surface)).
+
+**The `Game` contract is four members.** `static create(canvas): Promise<Game>`, `update(dt, elapsed)`, `render()`, `dispose()`. That is everything `IonEngine` requires to run a game.
+
+Everything else the Engine Room can ask for — 59 members covering the collider, particle, environment, history, gizmo, Control Desk, and audio panels — is declared **optional** on the `GameDevFacade` interface in this same file, and `installDevHooks` reaches them through `activeGame as Game & Partial<GameDevFacade>`. Implement a member and the matching dev control starts working; omit it and that control does nothing, which is correct for a game that never wired it. Every Engine Room call site is already written `window.__x && window.__x()`, so the degradation is graceful by construction, and the few hooks whose declared return is non-optional fall back to a zeroed value (`rendererStats`, `getColliderStats`, `getParticleStats`, `getParticlePresets`) or `false`.
+
+> This used to be a hard requirement, because `installDevHooks` is not behind `import.meta.env.DEV` — the hook bodies dead-code-eliminate at build time, but TypeScript still type-checks every `activeGame.x()` reference. Measured on a minimal game, that forced **64 of 108 lines of `Game.ts` to be pure stubs** before it would compile. The same minimal game is now 31 lines.
 
 ### 2.2 `Ion.ts` — the one-line facade
 
@@ -548,7 +557,7 @@ Trigger zones, area volumes, character collision shapes, and solid geometry that
 
 That's the right trade for a playable ad. Trigger zones, pickup radii, "did the player reach the machine" — none of it wants a simulation step, and all of it has to survive a hard size budget. This costs a few kilobytes of JS and a handful of dot products per frame.
 
-**The runtime ships; the editor for it does not.** `collision/` is ordinary engine runtime, imported by `Game.ts` and present in `dist/index.html`. The authoring half (`editor/EditorColliders.ts`, `editor/ColliderVisuals.ts`) lives under `editor/` and tree-shakes out with the rest of it — verified by grepping the production bundle, see [§12.4](#124--what-actually-ships).
+**The runtime ships; the editor for it does not.** `collision/` is ordinary engine runtime, imported by `Game.ts` and present in `dist/index.html`. The authoring half (`editor/EditorColliders.ts`, `editor/ColliderVisuals.ts`) lives under `editor/` and tree-shakes out with the rest of it — verified by grepping the production bundle, see [§12.4](#124-what-actually-ships).
 
 | File | What it is |
 | --- | --- |
@@ -704,7 +713,7 @@ All four presented identically — "the editor forgot my collider on reload" —
 
 A GPU-instanced particle system built for playable ads: one draw call per emitter, preallocated typed-array storage, zero per-frame allocation in steady state, and every expensive feature genuinely optional. **No `Object3D` is ever created per particle.**
 
-**The runtime ships; the editor for it does not.** `particles/` is ordinary engine runtime, imported by `Game.ts` and present in `dist/index.html`. The authoring half (`editor/EditorParticles.ts`, `editor/ParticleVisuals.ts`) lives under `editor/` and tree-shakes out with the rest of it — verified the same way as the collider editor, see [§12.4](#124--what-actually-ships).
+**The runtime ships; the editor for it does not.** `particles/` is ordinary engine runtime, imported by `Game.ts` and present in `dist/index.html`. The authoring half (`editor/EditorParticles.ts`, `editor/ParticleVisuals.ts`) lives under `editor/` and tree-shakes out with the rest of it — verified the same way as the collider editor, see [§12.4](#124-what-actually-ships).
 
 | File | What it is |
 | --- | --- |
@@ -840,7 +849,7 @@ The `Renderer` module carries a `softParticles` flag, `ParticleMaterial` compile
 
 ### Undo-friendly removal
 
-`ParticleManager.remove`, `ParticleSystem.removeEmitter`, and `ColliderManager.remove` all take a `keepAlive` flag that detaches without releasing GPU resources, so the editor's undo can put *the same instance* back — see [§10.12](#1012--undo--redo--save) for why identity matters more than it looks. Anything holding a detached object owns it and must re-add or dispose it. `detach()`/`reattach()` are symmetric on purpose: a **world-space** emitter's render mesh is parented under the manager's `PARTICLES` group rather than its own system's group, so removing the system group alone would leave its particles hanging in the scene.
+`ParticleManager.remove`, `ParticleSystem.removeEmitter`, and `ColliderManager.remove` all take a `keepAlive` flag that detaches without releasing GPU resources, so the editor's undo can put *the same instance* back — see [§10.12](#1012-undo--redo--save) for why identity matters more than it looks. Anything holding a detached object owns it and must re-add or dispose it. `detach()`/`reattach()` are symmetric on purpose: a **world-space** emitter's render mesh is parented under the manager's `PARTICLES` group rather than its own system's group, so removing the system group alone would leave its particles hanging in the scene.
 
 
 ---
@@ -1013,7 +1022,7 @@ The Engine Room is the collapsed dev sidebar. Its controls:
 | --- | --- |
 | ✏️ **UI Editor** | Opens `tools/ui-editor.html` as a full-screen overlay iframe over the running game, and pauses gameplay via `__setUIEditorPaused` |
 | 🛠 **Builder** | Modal: live size estimate against a 5 MB budget, freshness dot, Half-Float compression toggle, **Build Now** (`POST /build`), **Build Report** |
-| 🧭 **3D Viewer/Editor** | Enters the freecam editor — see [§10.2](#102--the-3d-viewereditor--layout-and-composition) |
+| 🧭 **3D Viewer/Editor** | Enters the freecam editor — see [§10.2](#102-the-3d-viewereditor--layout-and-composition) |
 | 🎧 **Audio Reactor** | Live frequency-spectrum readout of the game's music |
 | 🧊 **Show Colliders** (`Shift+K`) | Draws collider/trigger volumes over the **running** game |
 | **Engine Guide** | Opens `public/guide.html` in a new tab |
@@ -1368,7 +1377,10 @@ SECONDS=0
  6 ─ python3: gzip size + ad-network compatibility scan
  7 ─ python3: write dist/build-report.json
  8 ─ zip -j dist/index.zip dist/index.html      (best-effort, only if `zip` is on PATH)
+ 9 ─ node scripts/check-build-report.mjs        THE GATE — exits 2 if not submittable
 ```
+
+Note the ordering: the gate is last, so every output above it exists on disk even when the build is rejected. See [§12.6](#126-the-submittability-gate).
 
 Output: a single self-contained `dist/index.html`. No server, no `dist/assets/` folder, no relative paths — it works opened directly over `file://`.
 
@@ -1406,7 +1418,21 @@ Two `vite.config.prod.mts` settings exist *specifically* for ad-network review, 
 
 **Step 6's compatibility pre-flight** re-reads the final `dist/index.html` bytes and scans for the exact patterns known to fail review: `type="module"`, `crossorigin`, real `import`/`export`, `static{}`, `catch{}`, `?.`, `??`. Every one is *supposed* to be impossible given the two settings above, so this exists to catch a regression — a dependency upgrade, a loosened setting — the moment it is built rather than the next time a submission bounces. Any hit prints a `⚠` block to stdout and populates `compatibilityWarnings` in the report; a clean build prints `✓ No known ad-network compatibility issues found`.
 
-> **Known Limitation — the compatibility scan is a report, not a gate.** `build.sh` never exits non-zero on a non-empty `compatibilityWarnings`. A build that will fail ad-network review still completes and still writes `dist/index.html`. The Build Report modal renders the warnings as a red banner above everything else, but nothing forces anyone to open it.
+**Step 7 is the gate.** `scripts/check-build-report.mjs` reads `dist/build-report.json` and fails the build on a non-empty `compatibilityWarnings` **or** an over-budget `distBytes`, printing both plus the size, gzip, duration, compression mode and unused-asset figures. `npm run build` therefore exits non-zero on either, everywhere — locally, in CI, and through the Builder panel.
+
+It is deliberately the **last** step, after `dist/index.html`, `dist/build-report.json` and `dist/index.zip` have all been written. A failing build still leaves a complete, inspectable artifact on disk: you get the non-zero exit code *and* the output to look at, which is usually how you work out what caused the finding.
+
+**Exit codes are load-bearing:**
+
+| Code | Means |
+| --- | --- |
+| `0` | Clean, or downgraded to a report |
+| `1` | Could not check — no report, or it is not valid JSON |
+| `2` | Checked, and the build is **not submittable** |
+
+`2` is distinct from `1` because they mean opposite things to a caller. `POST /build` branches on it: exit 2 means the build genuinely succeeded and the Builder panel should still paint the real size figures — just flagged — while any other non-zero exit is a build failure with nothing worth painting. See [§12.6](#126-the-submittability-gate).
+
+**Escape hatch:** `ALLOW_COMPAT_WARNINGS=1 npm run build`, or `--allow-warnings` when invoking the checker directly. `npm run check:build` re-runs the check against the last build without rebuilding.
 
 ### 12.4 What actually ships
 
@@ -1436,7 +1462,35 @@ A sibling dev artifact, never inlined into `dist/index.html`. Merges:
 
 Served by `GET /build-report` to the Engine Room's 📊 **Build Report** button.
 
-### 12.6 Configuration reference
+### 12.6 The submittability gate
+
+Three consumers, one source of truth.
+
+```
+build.sh
+  └─ step 7: node scripts/check-build-report.mjs
+       reads dist/build-report.json
+       exit 0 clean · 1 cannot check · 2 not submittable
+            │
+            ├─▶ CLI            `npm run build` exits non-zero. The artifact is still on disk.
+            │
+            ├─▶ CI             .github/workflows/ci.yml fails the build job. A second,
+            │                  continue-on-error run of the same script writes the size
+            │                  and compatibility table into the run's job summary.
+            │
+            └─▶ Builder panel  POST /build sees err.code === 2 and returns
+                               { ok: true, submittable: false, findings, overBudget, sizeBytes }
+                               with HTTP 200 — NOT a 500. The panel paints the real size,
+                               turns the button amber ("Not submittable"), sets the freshness
+                               pill to "Built — will fail review", names the findings, and
+                               points at 📊 Build Report.
+```
+
+The panel distinction matters: a build that is merely un-submittable is not a build failure, and reporting it as one would throw away every number the Builder exists to show. The findings are re-read from `dist/build-report.json` rather than scraped out of stdout, so the panel's flag and the Build Report modal can never disagree about what was wrong.
+
+> **Known Limitation.** The Builder panel's amber state is not covered by any test — `index.html` has no test harness at all (see [§10.1](#101-the-engine-room-indexhtml)). It was verified manually by running the real build against a deliberately-lowered budget and a deliberately-matching compatibility pattern, and confirming `POST /build` returned `ok: true, submittable: false` with populated `findings`/`overBudget` and a real `sizeBytes`.
+
+### 12.7 Configuration reference
 
 | File | Role |
 | --- | --- |
@@ -1444,10 +1498,13 @@ Served by `GET /build-report` to the Engine Room's 📊 **Build Report** button.
 | `vite.config.prod.mts` | Production. `format: "iife"`, `target: "es2015"`, `vite-plugin-singlefile`, entry `src/index.template.html`. |
 | `tsconfig.json` | `strict: true`, `target: ES2019`, `module: ESNext`, `moduleResolution: bundler`, `resolveJsonModule: true`, `noEmitOnError: true`, `types: ["vite/client"]`. `noUnusedLocals` is **off**. |
 | `package.json` | See scripts below. |
+| `.github/workflows/ci.yml` | CI. Two parallel jobs — tests and a production build — on push to `main`, on pull requests, and via `workflow_dispatch`. Node 22, npm cache, `npm ci`, per-job timeouts, concurrency cancellation. |
 
 ```
 npm run dev            sync-assets → Vite (8000) + dev-build-api (8001)
 npm run build          bash build.sh
+npm run check:build    node scripts/check-build-report.mjs   (re-checks the last build, no rebuild)
+ALLOW_COMPAT_WARNINGS=1 npm run build        build anyway, gate downgraded to a report
 npm run typecheck      tsc --noEmit
 npm test               typecheck + every suite below + the editor smoke pass
 npm run test:particles      tests/particles.test.mjs tests/particle-shader.test.mjs
@@ -1505,8 +1562,8 @@ Everything here is a real gap in the current code. Nothing in this document desc
 
 | # | Gap | Detail |
 | --- | --- | --- |
-| 1 | **No CI** | No `.github/`, no workflow, nothing runs `npm test` on push. Roughly fifteen minutes of work and the single highest-leverage item here. |
-| 2 | **Compatibility scan is not a gate** | `build.sh` never exits non-zero on a non-empty `compatibilityWarnings`. A build that will fail ad-network review still succeeds. See [§12.3](#123-single-file-output-and-ad-network-compatibility). |
+| 1 | ~~No CI~~ — **closed** | `.github/workflows/ci.yml` runs typecheck, all seven suites, and a real production build on every push and pull request. See [§13](#13--testing-and-verification). |
+| 2 | ~~Compatibility scan is not a gate~~ — **closed** | `build.sh`'s final step is `scripts/check-build-report.mjs`, which exits 2 on a non-empty `compatibilityWarnings` or an over-budget artifact. `npm run build` fails everywhere — CLI, CI, and the Builder panel (which flags it amber rather than reporting a build failure). `ALLOW_COMPAT_WARNINGS=1` is the escape hatch. See [§12.6](#126-the-submittability-gate). |
 | 3 | **CTA paths are untestable here** | The six network branches in `Cta.ts` only exist inside a real host page. Re-verify each against the target network's current documentation before every submission. |
 | 4 | **`engine/` imports `game/`** | `IonEngine.ts:2`. See [§1.2](#12-the-enginegame-split). Blocks a clean engine extraction. |
 | 5 | **The endcard is disabled in the reference game** | Both `showEndCard` call sites in `Game.update()` are commented out — the 15-second auto-end and the all-coins-collected win. One of them is additionally misspelled `showEndCad`. The endcard layout, `HUD.showEndCard`, and `MindworksAdapter.gameEnd()` all exist and work; nothing currently calls them. **A playable with no reachable end state will not pass review.** |
@@ -1564,13 +1621,30 @@ Everything here is a real gap in the current code. Nothing in this document desc
 | `SoundHandler.ts` | Music + the Audio Reactor's analyser + Control Desk-tunable `volume`/`muted` |
 | `ui/HUD.ts` | The `applyBindings` reference — a UI class whose fields are assigned in the editor |
 
-> **Known Limitation.** `Game.ts` is 930 lines, of which roughly 250 are dev-only passthrough methods to `EditorRoot` (collider, particle, environment, history, and gizmo facades). They are all behind `this.editor?.…` so they cost nothing in production, but they make the file harder to read as gameplay code. Splitting them into a `GameDevFacade` is a known, unmade refactor.
+> **Known Limitation.** `Game.ts` is 930 lines, of which roughly 250 are dev-only passthrough methods to `EditorRoot` (collider, particle, environment, history, and gizmo facades). They are all behind `this.editor?.…` so they cost nothing in production, but they make the file harder to read as gameplay code. They are also now **optional** (see `GameDevFacade`, [§2.1](#21-ionenginets)) — this file keeps them because the reference playable wants every dev control working, not because the engine demands them. Moving them onto a separate object the dev hooks reach directly would delete all 250 lines from here; that refactor is known and unmade.
 
 > **Known Limitation — unguarded GLB name lookups.** `Game.ts` does three unchecked `getObjectByName` casts (`walkablearea`, `cinemafloor`, `Colliders`) and immediately reads `.visible`. Rename any of those nodes in the GLB export and the constructor throws a `TypeError` — a dead playable with no message. They belong in `sceneBindings.json` or behind a guarded helper.
 
 ### 15.2 Building a new playable on this engine
 
-1. Replace everything under `src/game/` with your own entities, world, and UI. Keep `src/engine/` untouched — except that `IonEngine.ts` currently imports `Game` by path, so your replacement must still export a `Game` class with a static `create(canvas): Promise<Game>` and instance `update(dt, elapsed)` / `render()` / `dispose()`.
+**Start with the scaffolder.** `create-ion-project.mjs` is a single, dependency-free file: drop it in an empty folder, run it, and it lays down the engine, the Engine Room, the UI editor, the build pipeline, CI, and a runnable starter game.
+
+```bash
+mkdir my-playable && cd my-playable
+node create-ion-project.mjs                    # or --from /path/to/this/repo
+npm install
+npm run dev                                    # http://localhost:8000
+```
+
+It copies `src/engine/`, `src/main.ts`, `src/index.template.html`, `index.html`, `tools/ui-editor.html`, `scripts/`, `build.sh`, both vite configs, `tsconfig.json`, `.gitignore` and `.github/workflows/ci.yml` verbatim, then generates a fresh `src/game/` (a ground plane, a rotating cube, a `UILayout`, and the six authored JSON files), a `package.json`, and a README. It deliberately does **not** copy `src/game/`, `assets/`, `public/`, `tests/`, or this project's own docs — those belong to the reference playable, not to yours.
+
+Without `--from` it downloads the repo tarball from GitHub and unpacks it with `tar`; with `--from <path>` it works entirely offline from a local checkout.
+
+> **Why a scaffolder rather than `npm install ion-engine`.** The engine is not a published package and cannot become one unchanged: `main.ts` imports it by relative path, the production build inlines its *source* into a single HTML file, and both the Engine Room (`index.html`) and the UI editor (`tools/ui-editor.html`) are project files rather than library exports. Copying the tree in is what works today — and it puts the engine in `src/engine/` where it can be read and modified, which is how playables actually get built.
+
+Doing it by hand instead:
+
+1. Replace everything under `src/game/` with your own entities, world, and UI. Keep `src/engine/` untouched — except that `IonEngine.ts` currently imports `Game` by path, so your replacement must still export a `Game` class with a static `create(canvas): Promise<Game>` and instance `update(dt, elapsed)` / `render()` / `dispose()`. Nothing beyond those four is required — see [§2.1](#21-ionenginets).
 2. `src/main.ts` stays as-is. It does not know or care what game is running.
 3. Write your asset manifest in `src/game/assets.ts` using `AssetEntry`. Everything preloads before gameplay; nothing loads lazily.
 4. Design your HUD and endcard in `tools/ui-editor.html`, which has no game-specific knowledge either.

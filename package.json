@@ -1,12 +1,13 @@
 {
   "name": "cube-joystick-ad",
-  "version": "3.13.2",
+  "version": "3.16.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "predev": "node scripts/sync-assets.js",
     "dev": "node scripts/dev.js",
     "build": "bash build.sh",
+    "check:build": "node scripts/check-build-report.mjs",
     "typecheck": "tsc --noEmit",
     "test:geometry": "node --test tests/geometry-parity.test.mjs",
     "test:environment": "node --test tests/scene-environment.test.mjs",

@@ -9,6 +9,14 @@ import { ParticleManager } from "./particles/ParticleManager";
 import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
 import { isAssignableObjectField } from "./editor/objectAssignment";
 import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
+// Type-only, so every one of these erases at build time and adds nothing to
+// the bundle. They exist to describe GameDevFacade below precisely rather
+// than restating each shape structurally and letting the two drift.
+import type { GizmoMode, InspectorToolState } from "./core/SceneInspector";
+import type { ColliderData, ColliderShape, ColliderStats } from "./collision";
+import type { ParticleStats, ParticleSystemConfig } from "./particles";
+import type { SceneEnvData } from "./scene";
+import type { EditorRoot, FieldPickCallbacks } from "./editor/EditorRoot";
 
 /**
  * Dev-only hooks the Engine Room panel (index.html, the dev entry — see
@@ -192,7 +200,7 @@ type EngineWindow = Window & {
   __setParticleQuality?: (quality: string) => void;
   __editorUndo?: () => boolean;
   __editorRedo?: () => boolean;
-  __getEditorHistory?: () => { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string; colliderDirty: boolean; particleDirty: boolean; depth: number } | undefined;
+  __getEditorHistory?: () => { canUndo: boolean; canRedo: boolean; undoLabel: string; redoLabel: string; colliderDirty: boolean; particleDirty: boolean; environmentDirty: boolean; depth: number } | undefined;
   __onEditorHistoryChanged?: () => void;
   __editorAssignmentFor?: (declaredType: string | undefined, object: unknown) => { value: unknown; object: unknown; objectPath: string; objectName: string; colliderId?: string } | undefined;
   __getEditorViewportInfo?: () => { containerWidth: number; containerHeight: number; containerAspect: number; rendererWidth: number; rendererHeight: number; cameraAspect: number; pixelRatio: number } | undefined;
@@ -224,6 +232,86 @@ type EngineWindow = Window & {
  * the engine's original behavior exactly — an existing playable that calls
  * `IonEngine.boot(canvas)` with no options behaves byte-for-byte as before.
  */
+/**
+ * Everything the Engine Room dev panel can ask a game for — all optional.
+ *
+ * `installDevHooks` used to call these straight off `Game`, which made every
+ * one of them a *hard* requirement: a new playable's Game class had to
+ * implement all 59 or the project wouldn't typecheck, even though nothing in
+ * a production build ever calls one. Measured on a minimal game, that was 64
+ * of 108 lines of pure stub.
+ *
+ * Declaring them here as optional and reaching them through this type instead
+ * means a game implements only the dev features it actually wants. The Engine
+ * Room already degrades gracefully — every one of its call sites is written
+ * `window.__x && window.__x()` — so a missing member simply means that button
+ * does nothing, which is the correct behaviour for a game that never wired it.
+ *
+ * `update`, `render`, `dispose` and the static `create` stay on `Game` itself
+ * and stay required: those are the actual contract for running a game.
+ */
+export interface GameDevFacade {
+  addParticleEmitter?(): void;
+  cancelObjectPick?(): void;
+  createCollider?(shape: ColliderShape): void;
+  createParticleSystem?(presetKey?: string): void;
+  deleteSelectedCollider?(): boolean;
+  deleteSelectedEmitter?(): boolean;
+  duplicateSelectedEmitter?(): boolean;
+  editorAssignmentFor?(declaredType: string | undefined, object: THREE.Object3D): ReturnType<EditorRoot["assignmentFor"]> | undefined;
+  editorDragAssign?(declaredType: string | undefined, commit: boolean, uuid?: string): ReturnType<EditorRoot["dragAssign"]> | undefined;
+  editorRedo?(): boolean;
+  editorUndo?(): boolean;
+  readonly endcardUILayout?: UILayout;
+  frameSelected?(): void;
+  getAudioAnalyser?(): THREE.AudioAnalyser;
+  getColliderStats?(): ColliderStats;
+  getEditorHistory?(): ReturnType<EditorRoot["getHistoryState"]> | undefined;
+  getEditorViewportInfo?(): ReturnType<EditorRoot["getViewportInfo"]> | undefined;
+  getInspectable?(className: string): object | undefined;
+  getParticlePresets?(): { key: string; label: string; description: string }[];
+  getParticleStats?(): ParticleStats;
+  hasColliderChanges?(): boolean;
+  hasEnvironmentChanges?(): boolean;
+  hasParticleChanges?(): boolean;
+  isMusicPlaying?(): boolean;
+  isParticlePreviewPlaying?(): boolean;
+  markCollidersSaved?(): void;
+  markEnvironmentSaved?(): void;
+  markParticlesSaved?(): void;
+  onColliderDirty?(cb: () => void): void;
+  onEditorHistoryChange?(cb: () => void): void;
+  onEnvironmentDirty?(cb: () => void): void;
+  onGizmoModeChange?(cb: (mode: GizmoMode) => void): void;
+  onInspectorStateChange?(cb: (state: InspectorToolState) => void): void;
+  onParticleDirty?(cb: () => void): void;
+  particleClear?(): void;
+  particlePause?(): void;
+  particlePlay?(): void;
+  particleRestart?(): void;
+  particleStop?(): void;
+  readonly rendererStats?: { drawCalls: number; triangles: number };
+  requestObjectPick?(declaredType: string | undefined, callbacks: FieldPickCallbacks): boolean;
+  resizeTo?(width: number, height: number): void;
+  serializeColliders?(): ColliderData[] | undefined;
+  serializeEnvironment?(): SceneEnvData | undefined;
+  serializeParticles?(): ParticleSystemConfig[] | undefined;
+  setColliderDebug?(visible: boolean): boolean | undefined;
+  setColliderMode?(active: boolean): boolean | undefined;
+  setFreecam?(active: boolean): void;
+  setGizmoMode?(mode: GizmoMode): void;
+  setParticleMode?(active: boolean): boolean | undefined;
+  setParticleQuality?(quality: "high" | "medium" | "low"): void;
+  toggleColliderDebug?(): boolean | undefined;
+  toggleColliderVisible?(): boolean | undefined;
+  toggleGrid?(): boolean | undefined;
+  toggleHelpers?(): boolean | undefined;
+  toggleParticleGizmo?(kind: "shapes" | "direction" | "bounds"): boolean | undefined;
+  toggleSnap?(): boolean | undefined;
+  toggleSpace?(): ("local" | "world") | undefined;
+  readonly ui?: UILayout;
+}
+
 export interface IonEngineOptions {
   /**
    * Run gameplay on a fixed timestep (seconds — e.g. `1/60`) instead of
@@ -321,12 +409,12 @@ export class IonEngine {
 
   /** Access designed sprites/text from mainLayout.json by the name given in tools/ui-editor.html. Undefined only before Game.create() resolves — not meaningfully useful to callers until then anyway. */
   get ui(): UILayout | undefined {
-    return this.game?.ui;
+    return (this.game as (Game & Partial<GameDevFacade>) | undefined)?.ui;
   }
 
   /** Access designed sprites/text from endcardLayout.json. */
   get endcardUI(): UILayout | undefined {
-    return this.game?.endcardUILayout;
+    return (this.game as (Game & Partial<GameDevFacade>) | undefined)?.endcardUILayout;
   }
 
   private async start(): Promise<void> {
@@ -433,6 +521,10 @@ export class IonEngine {
   }
 
   private installDevHooks(activeGame: Game): void {
+    // Every dev-panel member is optional (see GameDevFacade). Reaching them
+    // through this alias rather than off `activeGame` directly is what keeps
+    // them from being a hard requirement on every game built on this engine.
+    const dev = activeGame as Game & Partial<GameDevFacade>;
     this.win.__disposeGame = () => {
       // Order matters: drop this instance's pending timers/tweens *before*
       // the Game they close over is torn down. A surviving one-shot from
@@ -454,42 +546,45 @@ export class IonEngine {
       unbindIon(this.ionContext);
       activeGame.dispose();
     };
-    activeGame.onGizmoModeChange((mode) => this.win.__onGizmoModeChanged?.(mode));
+    dev.onGizmoModeChange?.((mode) => this.win.__onGizmoModeChanged?.(mode));
 
     this.win.__setUIEditorPaused = (paused) => {
       this.uiEditorPaused = paused;
     };
     this.win.__resizeGameTo = (width, height) => {
-      activeGame.resizeTo(width, height);
+      dev.resizeTo?.(width, height);
     };
     this.win.__setFreecamActive = (active) => {
       this.freecamActive = active;
-      activeGame.setFreecam(active);
+      dev.setFreecam?.(active);
     };
     this.win.__getEngineStats = () => ({
       fps: Math.round(this.fps),
-      drawCalls: activeGame.rendererStats.drawCalls,
-      triangles: activeGame.rendererStats.triangles,
+      // Zeroed rather than absent when a game doesn't expose them: the
+      // Engine Room's stats row renders a number or nothing, and "0" reads
+      // as "this game reports no counters" far better than a blank cell.
+      drawCalls: dev.rendererStats?.drawCalls ?? 0,
+      triangles: dev.rendererStats?.triangles ?? 0,
     });
     this.win.__setGizmoMode = (mode) => {
-      activeGame.setGizmoMode(mode as Parameters<Game["setGizmoMode"]>[0]);
+      dev.setGizmoMode?.(mode as GizmoMode);
     };
-    this.win.__toggleGrid = () => activeGame.toggleGrid();
-    this.win.__toggleHelpers = () => activeGame.toggleHelpers();
-    this.win.__toggleSnap = () => activeGame.toggleSnap();
-    this.win.__toggleSpace = () => activeGame.toggleSpace();
-    this.win.__frameSelected = () => activeGame.frameSelected();
+    this.win.__toggleGrid = () => dev.toggleGrid?.();
+    this.win.__toggleHelpers = () => dev.toggleHelpers?.();
+    this.win.__toggleSnap = () => dev.toggleSnap?.();
+    this.win.__toggleSpace = () => dev.toggleSpace?.();
+    this.win.__frameSelected = () => dev.frameSelected?.();
     // Ungated, unlike the editor hooks further down: the Engine Room's
     // Colliders overlay is meant to work over the *running* game with no
     // editor open. It's still dev-only in effect — the layer it drives is
     // built behind import.meta.env.DEV, so in production these return
     // undefined and draw nothing.
-    this.win.__setColliderDebug = (visible) => activeGame.setColliderDebug(visible);
-    this.win.__toggleColliderDebug = () => activeGame.toggleColliderDebug();
-    activeGame.onInspectorStateChange((state) => this.win.__onInspectorStateChanged?.(state));
-    this.win.__getInspectable = (className) => activeGame.getInspectable(className);
-    this.win.__getAudioAnalyser = () => activeGame.getAudioAnalyser();
-    this.win.__isMusicPlaying = () => activeGame.isMusicPlaying();
+    this.win.__setColliderDebug = (visible) => dev.setColliderDebug?.(visible);
+    this.win.__toggleColliderDebug = () => dev.toggleColliderDebug?.();
+    dev.onInspectorStateChange?.((state) => this.win.__onInspectorStateChanged?.(state));
+    this.win.__getInspectable = (className) => dev.getInspectable?.(className);
+    this.win.__getAudioAnalyser = () => dev.getAudioAnalyser?.();
+    this.win.__isMusicPlaying = () => dev.isMusicPlaying?.() ?? false;
     // Editor-only hooks, gated so a production build drops not just these
     // assignments but the entire editor module tree they reach into —
     // objectAssignment's type table and EditorDragSource's MIME constant
@@ -499,75 +594,78 @@ export class IonEngine {
     // the bundle, so they cost nothing beyond their own bytes.
     if (!import.meta.env.DEV) return this.win.__onGameReady?.();
 
+    // `?? false` for the same reason the boolean hooks above use it: the
+    // dev page reads a falsy return as "the editor isn't open / can't do
+    // this", which is precisely the situation a game with no facade is in.
     this.win.__editorRequestPick = (declaredType, callbacks) =>
-      activeGame.requestObjectPick(declaredType, {
+      dev.requestObjectPick?.(declaredType, {
         onResolve: (assignment) => callbacks.onResolve(assignment),
         onReject: callbacks.onReject,
         onCancel: callbacks.onCancel,
-      });
-    this.win.__editorCancelPick = () => activeGame.cancelObjectPick();
+      }) ?? false;
+    this.win.__editorCancelPick = () => dev.cancelObjectPick?.();
     // Available whenever the game is booted, not only while the editor is
     // open — Control Desk needs it to decide which fields get a "Pick"
     // button at render time, and it renders regardless of editor state.
     // Exposed rather than reimplemented in index.html so the declared-type
     // rules live in exactly one place (see editor/objectAssignment.ts).
     this.win.__editorIsPickableField = (declaredType) => isAssignableObjectField(declaredType);
-    this.win.__getEditorViewportInfo = () => activeGame.getEditorViewportInfo();
-    this.win.__editorAssignmentFor = (declaredType, object) => activeGame.editorAssignmentFor(declaredType, object as THREE.Object3D);
-    this.win.__editorDragAssign = (declaredType, commit, uuid) => activeGame.editorDragAssign(declaredType, commit, uuid);
+    this.win.__getEditorViewportInfo = () => dev.getEditorViewportInfo?.();
+    this.win.__editorAssignmentFor = (declaredType, object) => dev.editorAssignmentFor?.(declaredType, object as THREE.Object3D);
+    this.win.__editorDragAssign = (declaredType, commit, uuid) => dev.editorDragAssign?.(declaredType, commit, uuid);
     // Exposed so the Control Desk's drop targets match on the same MIME the
     // Hierarchy rows set, without that string being written out twice.
     this.win.__editorDragMime = OBJECT_DRAG_MIME;
 
-    this.win.__setColliderMode = (active) => activeGame.setColliderMode(active);
-    this.win.__createCollider = (shape) => activeGame.createCollider(shape as Parameters<Game["createCollider"]>[0]);
-    this.win.__deleteSelectedCollider = () => activeGame.deleteSelectedCollider();
-    this.win.__toggleColliderVisible = () => activeGame.toggleColliderVisible();
-    this.win.__serializeColliders = () => activeGame.serializeColliders();
-    this.win.__hasColliderChanges = () => activeGame.hasColliderChanges();
-    this.win.__markCollidersSaved = () => activeGame.markCollidersSaved();
-    this.win.__getColliderStats = () => activeGame.getColliderStats();
-    activeGame.onColliderDirty(() => this.win.__onColliderDirty?.());
+    this.win.__setColliderMode = (active) => dev.setColliderMode?.(active);
+    this.win.__createCollider = (shape) => dev.createCollider?.(shape as ColliderShape);
+    this.win.__deleteSelectedCollider = () => dev.deleteSelectedCollider?.() ?? false;
+    this.win.__toggleColliderVisible = () => dev.toggleColliderVisible?.();
+    this.win.__serializeColliders = () => dev.serializeColliders?.();
+    this.win.__hasColliderChanges = () => dev.hasColliderChanges?.() ?? false;
+    this.win.__markCollidersSaved = () => dev.markCollidersSaved?.();
+    this.win.__getColliderStats = () => dev.getColliderStats?.() ?? { total: 0, enabled: 0, narrowTests: 0, activePairs: 0 };
+    dev.onColliderDirty?.(() => this.win.__onColliderDirty?.());
 
     // The 3D editor's Environment dock. Not a mode — the panel is simply
     // present for the whole session — so there's nothing to switch on and
     // off here, only the four persistence hooks.
-    this.win.__serializeEnvironment = () => activeGame.serializeEnvironment();
-    this.win.__hasEnvironmentChanges = () => activeGame.hasEnvironmentChanges();
-    this.win.__markEnvironmentSaved = () => activeGame.markEnvironmentSaved();
-    activeGame.onEnvironmentDirty(() => this.win.__onEnvironmentDirty?.());
+    this.win.__serializeEnvironment = () => dev.serializeEnvironment?.();
+    this.win.__hasEnvironmentChanges = () => dev.hasEnvironmentChanges?.() ?? false;
+    this.win.__markEnvironmentSaved = () => dev.markEnvironmentSaved?.();
+    dev.onEnvironmentDirty?.(() => this.win.__onEnvironmentDirty?.());
 
     // The 3D editor's "Particle System" mode — same passthrough shape as
     // the collider toolbar above, and only meaningful while the editor is
     // open, except __getParticleStats which reads the always-present
     // runtime registry.
-    this.win.__setParticleMode = (active) => activeGame.setParticleMode(active);
-    this.win.__createParticleSystem = (presetKey) => activeGame.createParticleSystem(presetKey);
-    this.win.__addParticleEmitter = () => activeGame.addParticleEmitter();
-    this.win.__deleteSelectedEmitter = () => activeGame.deleteSelectedEmitter();
-    this.win.__duplicateSelectedEmitter = () => activeGame.duplicateSelectedEmitter();
-    this.win.__particlePlay = () => activeGame.particlePlay();
-    this.win.__particlePause = () => activeGame.particlePause();
-    this.win.__particleStop = () => activeGame.particleStop();
-    this.win.__particleRestart = () => activeGame.particleRestart();
-    this.win.__particleClear = () => activeGame.particleClear();
-    this.win.__isParticlePreviewPlaying = () => activeGame.isParticlePreviewPlaying();
-    this.win.__toggleParticleGizmo = (kind) => activeGame.toggleParticleGizmo(kind as "shapes" | "direction" | "bounds");
-    this.win.__getParticlePresets = () => activeGame.getParticlePresets();
-    this.win.__serializeParticles = () => activeGame.serializeParticles();
-    this.win.__hasParticleChanges = () => activeGame.hasParticleChanges();
-    this.win.__markParticlesSaved = () => activeGame.markParticlesSaved();
-    this.win.__getParticleStats = () => activeGame.getParticleStats();
-    this.win.__setParticleQuality = (quality) => activeGame.setParticleQuality(quality as "high" | "medium" | "low");
-    activeGame.onParticleDirty(() => this.win.__onParticleDirty?.());
+    this.win.__setParticleMode = (active) => dev.setParticleMode?.(active);
+    this.win.__createParticleSystem = (presetKey) => dev.createParticleSystem?.(presetKey);
+    this.win.__addParticleEmitter = () => dev.addParticleEmitter?.();
+    this.win.__deleteSelectedEmitter = () => dev.deleteSelectedEmitter?.() ?? false;
+    this.win.__duplicateSelectedEmitter = () => dev.duplicateSelectedEmitter?.() ?? false;
+    this.win.__particlePlay = () => dev.particlePlay?.();
+    this.win.__particlePause = () => dev.particlePause?.();
+    this.win.__particleStop = () => dev.particleStop?.();
+    this.win.__particleRestart = () => dev.particleRestart?.();
+    this.win.__particleClear = () => dev.particleClear?.();
+    this.win.__isParticlePreviewPlaying = () => dev.isParticlePreviewPlaying?.() ?? false;
+    this.win.__toggleParticleGizmo = (kind) => dev.toggleParticleGizmo?.(kind as "shapes" | "direction" | "bounds");
+    this.win.__getParticlePresets = () => dev.getParticlePresets?.() ?? [];
+    this.win.__serializeParticles = () => dev.serializeParticles?.();
+    this.win.__hasParticleChanges = () => dev.hasParticleChanges?.() ?? false;
+    this.win.__markParticlesSaved = () => dev.markParticlesSaved?.();
+    this.win.__getParticleStats = () => dev.getParticleStats?.() ?? { systems: 0, emitters: 0, activeParticles: 0, maxParticles: 0, simulating: 0, drawCalls: 0, bufferBytes: 0, lastUpdateMs: 0 };
+    this.win.__setParticleQuality = (quality) => dev.setParticleQuality?.(quality as "high" | "medium" | "low");
+    dev.onParticleDirty?.(() => this.win.__onParticleDirty?.());
 
     // Undo/redo. One stack across both editor modes (see EditorRoot), so
     // these are deliberately not namespaced per mode — a single Undo walks
     // back through whatever actually happened, in order.
-    this.win.__editorUndo = () => activeGame.editorUndo();
-    this.win.__editorRedo = () => activeGame.editorRedo();
-    this.win.__getEditorHistory = () => activeGame.getEditorHistory();
-    activeGame.onEditorHistoryChange(() => this.win.__onEditorHistoryChanged?.());
+    this.win.__editorUndo = () => dev.editorUndo?.() ?? false;
+    this.win.__editorRedo = () => dev.editorRedo?.() ?? false;
+    this.win.__getEditorHistory = () => dev.getEditorHistory?.();
+    dev.onEditorHistoryChange?.(() => this.win.__onEditorHistoryChanged?.());
 
     // Restore the 3D Viewer/Editor after an in-place reload, here rather
     // than in main.ts's hot-accept callback. That callback runs the moment
