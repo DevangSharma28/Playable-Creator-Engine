@@ -33,6 +33,23 @@ const PACKAGE_VERSION = (() => {
     return "0.0.0";
   }
 })();
+
+/**
+ * The ION engine version, which is not the same thing as the project version.
+ *
+ * In a generated project these differ and it is the engine's that matters:
+ * the Studio's version pill is answering "what am I running?", and a
+ * customer's own 0.1.0 says nothing about that. Read from the installed
+ * @ion-engine/runtime; in ION's own checkout there is no such package, and
+ * the repo version *is* the engine version.
+ */
+const ION_VERSION = (() => {
+  try {
+    return require(path.join(ROOT, "node_modules", "@ion-engine", "runtime", "package.json")).version;
+  } catch {
+    return PACKAGE_VERSION;
+  }
+})();
 const UI_DIR = path.join(ROOT, "src", "game", "ui"); // src/ is split into engine/ (reusable) and game/ (this playable ad) — mainLayout.json/endcardLayout.json live under the latter
 const LAYOUTS_DIR = path.join(UI_DIR, "layouts");
 const ACTIVE_FILES = { main: "mainLayout.json", endcard: "endcardLayout.json" };
@@ -863,7 +880,7 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/version") {
     res.setHeader("Content-Type", "application/json");
     res.writeHead(200);
-    res.end(JSON.stringify({ version: PACKAGE_VERSION, ...readGitInfo() }));
+    res.end(JSON.stringify({ version: ION_VERSION, projectVersion: PACKAGE_VERSION, ...readGitInfo() }));
     return;
   }
 

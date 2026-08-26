@@ -27,7 +27,8 @@ import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { stdin, stdout } from "node:process";
 
-const ION_VERSION = "0.1.0";
+/** Fallback only. When packages are resolved locally the real version is read from them — see ionVersionOf(). */
+const ION_VERSION_FALLBACK = "0.0.0";
 const MIN_NODE = 20;
 
 // ─────────────────────────────────────────────────────────────── arguments ──
@@ -139,6 +140,16 @@ function resolveIonPackages(explicit) {
   if (fs.existsSync(path.join(adjacent, "runtime", "package.json"))) return check(adjacent, "the ION checkout beside this script");
 
   return { mode: "registry", dir: null, problem: null };
+}
+
+/** The version of the ION packages actually being installed, so ion.config.json pins something real. */
+function ionVersionOf(source) {
+  if (source.mode !== "local") return ION_VERSION_FALLBACK;
+  try {
+    return JSON.parse(fs.readFileSync(path.join(source.dir, "runtime", "package.json"), "utf8")).version ?? ION_VERSION_FALLBACK;
+  } catch {
+    return ION_VERSION_FALLBACK;
+  }
 }
 
 function preflight() {
@@ -421,13 +432,14 @@ async function main() {
   const source = resolveIonPackages(flag("ion-packages", null));
   if (source.problem) die(source.problem);
   const local = source.mode === "local" ? source.dir : null;
-  const dep = (pkg) => (local ? `file:${path.resolve(local, pkg)}` : `^${ION_VERSION}`);
+  const ionVersion = ionVersionOf(source);
+  const dep = (pkg) => (local ? `file:${path.resolve(local, pkg)}` : `^${ionVersion}`);
 
   const files = {
     "ion.config.json": JSON.stringify({
       name: config.name,
       version: "0.1.0",
-      ionVersion: ION_VERSION,
+      ionVersion,
       target: config.template,
       orientation: template.orientation,
       resolution: template.resolution,
@@ -495,7 +507,7 @@ async function main() {
   const where = targetDir === process.cwd() ? "." : path.relative(process.cwd(), targetDir);
   say(`  ✓ ${config.name} — ${template.label}, ${template.orientation}, ${template.resolution.width}×${template.resolution.height}`);
   say(`    ${Object.keys(files).length} files in ${where}`);
-  say(`    ION ${ION_VERSION}${local ? `  (from ${shortPath(local)})` : "  (from the npm registry)"}`);
+  say(`    ION ${ionVersion}${local ? `  (from ${shortPath(local)})` : "  (from the npm registry)"}`);
   if (!local) {
     say("");
     say("  ⚠ The @ion-engine packages are not on the public npm registry.");

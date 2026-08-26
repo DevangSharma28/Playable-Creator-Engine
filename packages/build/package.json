@@ -1,7 +1,7 @@
 {
   "name": "@ion-engine/build",
-  "version": "0.1.0",
-  "description": "ION production build pipeline \u2014 single-file output, asset compression, ad-network compatibility gate.",
+  "version": "4.0.2",
+  "description": "ION production build pipeline — single-file output, asset compression, ad-network compatibility gate.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",
   "exports": {

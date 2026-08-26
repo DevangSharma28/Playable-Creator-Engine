@@ -27,6 +27,30 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const PKGS = path.join(ROOT, "packages");
 const withTypes = !process.argv.includes("--no-types");
 
+/**
+ * One version for the whole engine, taken from the repo's own package.json.
+ *
+ * Stamped into every package at build time rather than maintained by hand in
+ * four manifests. Hand-maintained copies had already drifted — the packages
+ * said 0.1.0 while the engine was 4.0.1 — which made the Studio's version pill
+ * in a generated project report a number that corresponded to nothing.
+ */
+const ION_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, "package.json"), "utf8")).version;
+
+function stampVersions() {
+  for (const pkg of ["runtime", "editor", "build", "project"]) {
+    const file = path.join(PKGS, pkg, "package.json");
+    const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+    manifest.version = ION_VERSION;
+    for (const field of ["peerDependencies", "dependencies"]) {
+      for (const dep of Object.keys(manifest[field] ?? {})) {
+        if (dep.startsWith("@ion-engine/")) manifest[field][dep] = ION_VERSION;
+      }
+    }
+    fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
+  }
+}
+
 const BUNDLED = [
   {
     name: "runtime",
@@ -154,7 +178,8 @@ function copyTree(from, to) {
   }
 }
 
-log("\nBuilding ION packages\n");
+stampVersions();
+log(`\nBuilding ION packages — v${ION_VERSION}\n`);
 
 for (const spec of BUNDLED) {
   rmDist(spec.name);
