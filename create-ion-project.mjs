@@ -247,6 +247,7 @@ import manifest from "./game/assets";
 import environment from "./game/environment.json";
 import colliders from "./game/colliders.json";
 import particles from "./game/particles.json";
+import scene from "./game/scene.json";
 import sceneBindings from "./game/sceneBindings.json";
 import mainLayout from "./game/ui/mainLayout.json";
 import endcardLayout from "./game/ui/endcardLayout.json";
@@ -281,7 +282,7 @@ async function start() {
     createGame: (c) =>
       MyGame.create.call(MyGame, c, {
         manifest,
-        data: { environment, colliders, particles, sceneBindings, mainLayout, endcardLayout },
+        data: { environment, colliders, particles, scene, sceneBindings, mainLayout, endcardLayout },
       }),
   });
 }
@@ -571,6 +572,9 @@ async function main() {
     "src/game/environment.json": JSON.stringify({ version: 1 }, null, 2) + "\n",
     "src/game/colliders.json": JSON.stringify({ version: 1, colliders: [] }, null, 2) + "\n",
     "src/game/particles.json": JSON.stringify({ version: 1, systems: [] }, null, 2) + "\n",
+    // What the 3D editor changes about the scene graph — transforms,
+    // visibility, names, parenting. Empty until something is moved.
+    "src/game/scene.json": JSON.stringify({ version: 1, objects: [] }, null, 2) + "\n",
     "src/game/sceneBindings.json": JSON.stringify({ version: 1, bindings: [] }, null, 2) + "\n",
     "src/game/ui/bindings.json": JSON.stringify({ version: 1, bindings: [] }, null, 2) + "\n",
     "src/game/ui/mainLayout.json": JSON.stringify({ version: 1, canvasWidth: template.resolution.width / 2.7 | 0, canvasHeight: template.resolution.height / 2.7 | 0, elements: [] }, null, 2) + "\n",

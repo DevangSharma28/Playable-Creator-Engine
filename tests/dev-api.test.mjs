@@ -41,6 +41,7 @@ function makeProject() {
   const game = path.join(dir, "src", "game");
   fs.writeFileSync(path.join(game, "colliders.json"), JSON.stringify({ version: 1, colliders: [] }, null, 2));
   fs.writeFileSync(path.join(game, "particles.json"), JSON.stringify({ version: 1, systems: [] }, null, 2));
+  fs.writeFileSync(path.join(game, "scene.json"), JSON.stringify({ version: 1, objects: [] }, null, 2));
   fs.writeFileSync(path.join(game, "environment.json"), JSON.stringify({ version: 1 }, null, 2));
   fs.writeFileSync(path.join(game, "sceneBindings.json"), JSON.stringify({ version: 1, bindings: [] }, null, 2));
   fs.writeFileSync(path.join(game, "ui", "bindings.json"), JSON.stringify({ version: 1, bindings: [] }, null, 2));
@@ -103,7 +104,7 @@ test("basics", async (t) => {
   await t.test("every endpoint the editors call answers", async () => {
     for (const route of [
       "/list-layouts", "/list-scripts", "/list-logic-scripts", "/list-bindings",
-      "/list-scene-bindings", "/list-colliders", "/list-particles", "/list-environment",
+      "/list-scene-bindings", "/list-colliders", "/list-particles", "/list-environment", "/list-scene",
     ]) {
       const response = await get(route);
       assert.equal(response.status, 200, `${route} answered ${response.status}`);
@@ -168,6 +169,24 @@ test("saving", async (t) => {
     const badEnvironment = await post("/save-environment", { camera: { fov: 1 } });
     assert.equal(badEnvironment.status, 400, "an environment with no world block was accepted");
     assert.equal(readProjectJson("src/game/environment.json").camera.fov, 55, "a rejected save modified the file");
+  });
+
+  await t.test("scene overrides round-trip and reject a record with no path", async () => {
+    // The file behind the gizmo. Without it, moving an object in the editor
+    // updated the running game and vanished on the next reload.
+    const objects = [
+      { objectPath: "Level/Crate", objectName: "Crate", position: [5, 2, -3], visible: true },
+      { objectPath: "Level/Lamp", objectName: "Lamp", visible: false, name: "Lantern" },
+    ];
+    const saved = await (await post("/save-scene", { objects })).json();
+    assert.equal(saved.ok, true);
+    assert.equal(saved.saved, 2);
+    assert.deepEqual(readProjectJson("src/game/scene.json").objects, objects);
+    assert.deepEqual((await (await get("/list-scene")).json()).objects, objects);
+
+    const rejected = await post("/save-scene", { objects: [{ objectName: "no path" }] });
+    assert.equal(rejected.status, 400);
+    assert.deepEqual(readProjectJson("src/game/scene.json").objects, objects, "a rejected save modified the file");
   });
 
   await t.test("scene bindings round-trip", async () => {

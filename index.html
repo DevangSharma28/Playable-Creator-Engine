@@ -5050,6 +5050,16 @@
      */
     let environmentDirty = false;
 
+    /**
+     * Whether anything about the *scene graph* changed this session — an
+     * object moved with the gizmo, hidden, renamed, or re-parented.
+     *
+     * One flag for the same reason the three above are one: /save-scene
+     * replaces src/game/scene.json wholesale with the complete diff against
+     * the model, so there is nothing to accumulate here.
+     */
+    let sceneDirty = false;
+
     function queueSceneBinding(edit) {
       pendingSceneBindings.set(edit.className + "." + edit.fieldName, edit);
       updateExitButtonPending();
@@ -5057,7 +5067,7 @@
 
     function updateExitButtonPending() {
       const bindings = pendingSceneBindings.size;
-      const n = bindings + (colliderDirty ? 1 : 0) + (particleDirty ? 1 : 0) + (environmentDirty ? 1 : 0);
+      const n = bindings + (colliderDirty ? 1 : 0) + (particleDirty ? 1 : 0) + (environmentDirty ? 1 : 0) + (sceneDirty ? 1 : 0);
       const btn = document.getElementById("er-exit-3d");
       btn.textContent = n > 0 ? "\u2715 Exit & Save (" + n + ")" : "\u2715 Exit Editor";
       btn.classList.toggle("has-pending", n > 0);
@@ -5066,6 +5076,7 @@
       if (colliderDirty) parts.push("collider changes \u2192 src/game/colliders.json");
       if (particleDirty) parts.push("particle changes \u2192 src/game/particles.json");
       if (environmentDirty) parts.push("environment changes \u2192 src/game/environment.json");
+      if (sceneDirty) parts.push("scene changes \u2192 src/game/scene.json");
       btn.title = parts.length ? "Written on exit: " + parts.join("; ") : "Exit 3D Viewer/Editor";
     }
 
@@ -5190,6 +5201,41 @@
       }
     }
 
+    /**
+     * Writes what the editor did to the scene graph — object transforms,
+     * visibility, names, parenting — to src/game/scene.json.
+     *
+     * This is the write that was missing. Every other editor surface had a
+     * file behind it; moving an object with the gizmo was a live mutation of
+     * a THREE.Object3D and nothing more, so the change survived Exit Editor
+     * (the object really had moved) and vanished on a browser reload (the
+     * next boot rebuilt it from the GLB). See src/engine/scene/SceneOverrides.ts.
+     *
+     * Must run while the editor is still open, for the same reason
+     * flushEnvironment must: __serializeScene reads the live EditorRoot.
+     */
+    async function flushScene() {
+      if (!window.__hasSceneChanges || !window.__hasSceneChanges()) return true;
+      const objects = window.__serializeScene && window.__serializeScene();
+      if (!objects) return false;
+      try {
+        const res = await fetch(ION_API_ORIGIN + "/save-scene", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ objects: objects }),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || "save-scene failed");
+        window.__markSceneSaved && window.__markSceneSaved();
+        sceneDirty = false;
+        updateExitButtonPending();
+        return true;
+      } catch (err) {
+        console.error("3D Editor: couldn't persist scene changes — the edits stay in this session only.", err);
+        return false;
+      }
+    }
+
     /* ============================================================
        Undo / Redo / Save — shared by the collider and particle toolbars.
 
@@ -5292,7 +5338,12 @@
 
     envSaveBtn.addEventListener("click", async () => {
       envSaveBtn.disabled = true;
-      const ok = await flushEnvironment();
+      // The scene graph rides along with the Environment dock's Save. It has
+      // no dock of its own — the gizmo and the Hierarchy are the whole of its
+      // UI — so without this the only way to persist a moved object would be
+      // Exit Editor, and a Save button that leaves your transforms unsaved is
+      // worse than no Save button.
+      const ok = (await flushEnvironment()) && (await flushScene());
       envSaveBtn.disabled = false;
       if (ok) flashSaved(envSaveBtn);
       paintHistoryButtons();
@@ -5304,6 +5355,15 @@
        the panel's own rows, which this script never sees. */
     window.__onEnvironmentDirty = () => {
       environmentDirty = true;
+      updateExitButtonPending();
+    };
+
+    /* The engine's signal that the scene graph changed — a gizmo drag ending,
+       an Inspector transform field, a Hierarchy rename or re-parent, an undo
+       or a redo. Same reverse direction, same reason: none of those happen in
+       this script. */
+    window.__onSceneDirty = () => {
+      sceneDirty = true;
       updateExitButtonPending();
     };
 
@@ -5437,6 +5497,7 @@
       await flushColliders();
       await flushParticles();
       await flushEnvironment();
+      await flushScene();
       await flushSceneBindings();
       exitViewerBtn.disabled = false;
       setFreecamUI(false);

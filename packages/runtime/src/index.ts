@@ -50,6 +50,12 @@ export type { AssetKind, AssetEntry } from "../../../src/engine/AssetLoader";
 // ── Camera, lighting, world ────────────────────────────────────────────────
 export { CameraHandler } from "../../../src/engine/core/CameraHandler";
 export { SceneEnvironment, loadSceneEnv, serializeSceneEnv, defaultSceneEnv, cloneSceneEnv } from "../../../src/engine/scene";
+// Scene-graph persistence — what the 3D editor's gizmo and Hierarchy change.
+// Exported for the same reason the collider and particle serializers are: a
+// project that wants to author or inspect its own scene.json needs them, and
+// the alternative is reaching past this file.
+export { snapshotScene, captureSceneOverrides, applySceneOverrides, EMPTY_SCENE_OVERRIDES } from "../../../src/engine/scene";
+export type { SceneObjectOverride, SceneOverridesFileData, SceneSnapshot } from "../../../src/engine/scene";
 export type {
   CameraRig, CameraEnvConfig, CameraProjection,
   AmbientLightConfig, AmbientMode, DirectionalLightConfig,

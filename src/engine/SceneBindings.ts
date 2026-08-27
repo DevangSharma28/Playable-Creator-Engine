@@ -134,12 +134,16 @@ function resolveCollider(binding: SceneFieldBinding): Collider | undefined {
  * end of the constructor, so any class registered there gets persisted
  * scene assignments for free without naming itself here.
  */
-export function applySceneBindings(instance: object, className: string, data: SceneBindingsData, scene: THREE.Scene): void {
+export function applySceneBindings(instance: object, className: string, data: unknown, scene: THREE.Scene): void {
   // A sceneBindings.json that is `{}`, `{"version":1}`, or truncated mid-write
   // used to throw "data.bindings is not iterable" out of the game constructor
   // — a blank screen at boot, from a file the client never edits by hand and
   // whose only purpose is to restore editor assignments.
-  const bindings = Array.isArray(data?.bindings) ? data.bindings : [];
+  // `unknown` in, validated here — same reasoning as loadColliders: the
+  // caller's value is a raw `.json` import, and every entry is checked below.
+  const bindings = Array.isArray((data as SceneBindingsData | undefined)?.bindings)
+    ? (data as SceneBindingsData).bindings
+    : [];
   for (const binding of bindings) {
     if (!binding || typeof binding !== "object") continue;
     if (binding.className !== className) continue;

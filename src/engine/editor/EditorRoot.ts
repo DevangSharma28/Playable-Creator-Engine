@@ -19,6 +19,8 @@ import type { ParticleVisuals } from "./ParticleVisuals";
 import type { ParticleManager } from "../particles/ParticleManager";
 import type { ParticleSystemConfig } from "../particles/ParticleTypes";
 import { serializeParticles } from "../particles/ParticleSerialization";
+import { captureSceneOverrides, snapshotScene } from "../scene/SceneOverrides";
+import type { SceneObjectOverride, SceneSnapshot } from "../scene/SceneOverrides";
 import type { ColliderManager } from "../collision/ColliderManager";
 import type { ColliderData, ColliderShape } from "../collision/ColliderTypes";
 import type { SceneEnvironment } from "../scene/SceneEnvironment";
@@ -45,6 +47,23 @@ export interface EditorRootOptions {
   inspectorEl: HTMLElement;
   /** The Environment dock's pane. Its own element, not the Inspector's — the environment isn't a property of the selected object. */
   environmentEl: HTMLElement;
+  /**
+   * The scene as the game built it, before any authored override was applied.
+   *
+   * The editor's scene Save diffs the live graph against this, so what it
+   * writes is the full set of deviations from the model rather than only this
+   * session's edits. Undefined only when a host opens the editor without a
+   * game having taken one, in which case scene overrides simply cannot be
+   * saved — better than saving an empty file over the user's work.
+   */
+  sceneBaseline?: SceneSnapshot;
+  /**
+   * The overrides the game booted with, so a session that does not touch an
+   * object still writes the record the file already had for it.
+   */
+  sceneOverridesOnLoad?: readonly { objectPath: string }[];
+  /** Fired the first time a scene-graph edit happens, so the Exit button can count it. */
+  onSceneDirty?: () => void;
   /** Where to point the orbit camera on entry (typically the player). */
   initialTarget?: THREE.Vector3;
   /** The live ION Collider registry — the editor edits the same colliders gameplay runs against, never a copy. */
@@ -146,6 +165,22 @@ export class EditorRoot {
   private readonly editorParticles: EditorParticles;
   /** The Environment dock: Camera, Lighting, World. Always present while the editor is open — unlike the two modes above, it isn't something you switch into. */
   private readonly editorEnvironment: EditorEnvironment;
+  /** The pre-override scene a scene Save diffs against. See EditorRootOptions.sceneBaseline. */
+  private readonly sceneBaseline: SceneSnapshot | undefined;
+  /** Serialized form as of the last write, for hasSceneChanges(). */
+  private savedSceneSignature = "[]";
+  /**
+   * The scene as this editor session found it.
+   *
+   * Diffed against, so a game's own animation — a spinning coin, a walking
+   * character — is not mistaken for authoring. Gameplay is paused for the
+   * whole session, so anything that moves after this point moved because
+   * someone moved it.
+   */
+  private readonly sessionBaseline: SceneSnapshot;
+  /** Baseline paths the loaded scene.json already covered. */
+  private readonly loadedScenePaths: Set<string>;
+  private unsubscribeSceneHistory: (() => void) | undefined;
   private onPickStateChange: ((pending: boolean) => void) | undefined;
   private readonly rendererRef: THREE.WebGLRenderer;
   private readonly scene: THREE.Scene;
@@ -283,12 +318,30 @@ export class EditorRoot {
       getViewCamera: () => this.editorCamera,
     });
 
+    this.sceneBaseline = opts.sceneBaseline;
+    this.sessionBaseline = snapshotScene(opts.scene);
+    this.loadedScenePaths = new Set((opts.sceneOverridesOnLoad ?? []).map((record) => record.objectPath));
+    // What is already on disk, so a session that changes nothing reports
+    // clean. Anything the model was loaded with is a deviation the file
+    // already records, not an unsaved edit.
+    this.savedSceneSignature = JSON.stringify(this.serializeScene());
+
     // One gizmo drag = one undo entry. Both editors get the begin/end
     // edge; each ignores it unless the drag is actually on something it
     // owns, so there's no need to know which mode is active here.
     this.unsubscribeDrag = this.sceneInspector.onGizmoDrag((dragging) => {
       this.editorColliders.onGizmoDrag(dragging);
       this.editorParticles.onGizmoDrag(dragging);
+      // A finished drag is the moment a scene transform becomes worth saving.
+      // Fired on the end edge only — the Exit button counts sessions, not
+      // frames of a gesture.
+      if (!dragging && this.hasSceneChanges()) opts.onSceneDirty?.();
+    });
+    // Every other route to a scene edit — an Inspector field, a Hierarchy
+    // rename or re-parent, an undo, a redo — lands in the shared history, so
+    // one subscription covers all of them without each call site remembering.
+    this.unsubscribeSceneHistory = this.history.subscribe(() => {
+      if (this.hasSceneChanges()) opts.onSceneDirty?.();
     });
 
     this.hierarchy = new EditorHierarchy({
@@ -365,6 +418,45 @@ export class EditorRoot {
   // -----------------------------------------------------------------------
   // Scene environment — thin passthroughs; the behavior is EditorEnvironment's.
   // -----------------------------------------------------------------------
+
+  // -----------------------------------------------------------------------
+  // Scene graph — transforms, visibility, names, parenting.
+  //
+  // The fourth editor-authored file, and the one that was missing. Everything
+  // the gizmo and the Hierarchy do is a direct mutation of a live Object3D,
+  // and every one of those is rebuilt from the model on the next boot — so
+  // without this the edits survived Exit (the objects really had moved) and
+  // vanished on reload (they were parsed fresh). See SceneOverrides.ts.
+  // -----------------------------------------------------------------------
+
+  /** Everything that differs from the model, as records for src/game/scene.json. */
+  serializeScene(): SceneObjectOverride[] {
+    if (!this.sceneBaseline) return [];
+    return captureSceneOverrides(this.scene, this.sceneBaseline, {
+      touchedSince: this.sessionBaseline,
+      alsoKeep: this.loadedScenePaths,
+    });
+  }
+
+  /**
+   * True when the live scene differs from what was last written.
+   *
+   * Computed by comparing serialized forms rather than tracked with a flag:
+   * a gizmo drag, an Inspector field, an undo and a redo all mutate the same
+   * objects through different code paths, and a flag would have to be set
+   * correctly in every one of them. Comparing the output cannot miss one, and
+   * it correctly reports *clean* after an undo returns the scene to where it
+   * started.
+   */
+  hasSceneChanges(): boolean {
+    if (!this.sceneBaseline) return false;
+    return JSON.stringify(this.serializeScene()) !== this.savedSceneSignature;
+  }
+
+  /** Called after a successful write — see the note above getHistoryState on why each file marks only itself. */
+  markSceneSaved(): void {
+    this.savedSceneSignature = JSON.stringify(this.serializeScene());
+  }
 
   /** The whole authored environment, as JSON-ready records for src/game/environment.json. */
   serializeEnvironment(): SceneEnvData {
@@ -666,6 +758,7 @@ export class EditorRoot {
     // the last word on those objects: a detached collider or emitter that
     // no command can ever restore has nothing else keeping it reachable.
     this.history.clear();
+    this.unsubscribeSceneHistory?.();
     this.resizeManager.dispose();
     // Before sceneInspector: the collider wireframes live in that class's
     // `ownedHelpers` set, and removing them after it has cleared the set

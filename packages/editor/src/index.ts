@@ -102,6 +102,10 @@ class Session implements EditorSession {
   hasEnvironmentChanges(): boolean { return this.root.hasEnvironmentChanges(); }
   markEnvironmentSaved(): void { this.root.markEnvironmentSaved(); }
   onEnvironmentDirty(_cb: () => void): void { /* wired at construction */ }
+  serializeScene(): unknown[] { return this.root.serializeScene(); }
+  hasSceneChanges(): boolean { return this.root.hasSceneChanges(); }
+  markSceneSaved(): void { this.root.markSceneSaved(); }
+  onSceneDirty(_cb: () => void): void { /* wired at construction */ }
 
   editorUndo(): boolean { return this.root.undo(); }
   editorRedo(): boolean { return this.root.redo(); }
@@ -119,7 +123,12 @@ class Session implements EditorSession {
 }
 
 /** Fires the dev page's dirty callbacks. Held per host so the Session's on*Dirty methods can stay simple. */
-const dirtyListeners = { collider: [] as (() => void)[], particle: [] as (() => void)[], environment: [] as (() => void)[] };
+const dirtyListeners = {
+  collider: [] as (() => void)[],
+  particle: [] as (() => void)[],
+  environment: [] as (() => void)[],
+  scene: [] as (() => void)[],
+};
 
 const host: EditorHost = {
   createDebugLayer() {
@@ -150,10 +159,13 @@ const host: EditorHost = {
       particleManager: Ion.particles,
       particleVisuals: new ParticleVisuals(Ion.particles),
       environment: options.environment as SceneEnvironment,
+      sceneBaseline: options.sceneBaseline as ConstructorParameters<typeof EditorRoot>[0]["sceneBaseline"],
+      sceneOverridesOnLoad: options.sceneOverridesOnLoad,
       resolveTexture: options.resolveTexture,
       onColliderDirty: () => dirtyListeners.collider.forEach((f) => f()),
       onParticleDirty: () => dirtyListeners.particle.forEach((f) => f()),
       onEnvironmentDirty: () => dirtyListeners.environment.forEach((f) => f()),
+      onSceneDirty: () => dirtyListeners.scene.forEach((f) => f()),
     });
 
     return new Session(root, document.getElementById("er-viewhelper") as HTMLCanvasElement | null);
@@ -171,6 +183,6 @@ export function uninstallEditor(): void {
 }
 
 /** Subscribed by the Engine Room so its Exit button can count unsaved work. */
-export function onDirty(kind: "collider" | "particle" | "environment", cb: () => void): void {
+export function onDirty(kind: "collider" | "particle" | "environment" | "scene", cb: () => void): void {
   dirtyListeners[kind].push(cb);
 }

@@ -17,3 +17,8 @@ export type {
   ToneMappingName,
   WorldEnvConfig,
 } from "./SceneEnvTypes";
+
+export {
+  snapshotScene, captureSceneOverrides, applySceneOverrides, EMPTY_SCENE_OVERRIDES,
+} from "./SceneOverrides";
+export type { SceneObjectOverride, SceneOverridesFileData, SceneSnapshot } from "./SceneOverrides";

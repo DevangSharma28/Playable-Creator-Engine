@@ -60,6 +60,13 @@ jobs:
       - name: Performance baselines
         run: npm run test:perf
 
+      # A real browser: edit a 3D object, Save, Exit, then reload the page and
+      # assert the object is still where the editor left it. The in-process
+      # suites prove the serializer and the loader agree; only an actual reload
+      # proves the thing that was broken.
+      - name: 3D editor persistence across a browser reload
+        run: npm run verify:persistence
+
   build:
     name: Production build
     runs-on: ubuntu-latest

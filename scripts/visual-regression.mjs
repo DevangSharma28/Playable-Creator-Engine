@@ -25,6 +25,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import path from "node:path";
 import { launchChrome } from "./verify-bundle.mjs";
 
@@ -79,6 +80,23 @@ async function waitForServer(url, timeoutMs = 60_000) {
 }
 
 /**
+ * A throwaway mirror of the project's authored data, for the build API to own.
+ *
+ * The API this script starts is the one every ION editor *saves* through. A
+ * layout test has no business writing to anyone's `colliders.json`, and
+ * loading the Engine Room repeatedly is exactly the sort of thing that can
+ * provoke a save. Pointing it at a copy means the worst case is a modified
+ * temp directory. The Vite server still serves the real project — the thing
+ * under test — because only the API writes.
+ */
+function mirrorProjectData() {
+  const mirror = fs.mkdtempSync(path.join(os.tmpdir(), "ion-vr-project-"));
+  fs.cpSync(path.join(ROOT, "src", "game"), path.join(mirror, "src", "game"), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "package.json"), path.join(mirror, "package.json"));
+  return mirror;
+}
+
+/**
  * Starts the dev server and the build API on ports nobody else is using.
  *
  * Never the configured 8000/8001: a developer running this almost certainly
@@ -88,6 +106,7 @@ async function waitForServer(url, timeoutMs = 60_000) {
 async function startDevServer({ port, apiPort }) {
   const origin = `http://127.0.0.1:${port}`;
   spawnSyncQuiet(process.execPath, [path.join(ROOT, "scripts", "sync-assets.js")]);
+  const mirror = mirrorProjectData();
 
   const vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
     cwd: ROOT,
@@ -96,16 +115,18 @@ async function startDevServer({ port, apiPort }) {
   const api = spawn(process.execPath, [path.join(ROOT, "scripts", "dev-build-api.js")], {
     cwd: ROOT,
     stdio: "ignore",
-    env: { ...process.env, ION_API_PORT: String(apiPort), ION_DEV_ORIGINS: origin },
+    env: { ...process.env, ION_PROJECT_ROOT: mirror, ION_API_PORT: String(apiPort), ION_DEV_ORIGINS: origin },
   });
 
   await waitForServer(origin);
   return {
     origin,
     apiOrigin: `http://127.0.0.1:${apiPort}`,
+    mirror,
     stop() {
       vite.kill("SIGTERM");
       api.kill("SIGTERM");
+      fs.rmSync(mirror, { recursive: true, force: true });
     },
   };
 }

@@ -1,6 +1,6 @@
 {
   "name": "cube-joystick-ad",
-  "version": "4.3.0",
+  "version": "4.4.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -14,7 +14,7 @@
     "test": "npm run typecheck && npm run test:unit && npm run test:ui-editor-smoke",
     "test:unit": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:runtime": "node --test tests/runtime-lifecycle.test.mjs tests/simple-api.test.mjs",
-    "test:serialization": "node --test tests/serialization.test.mjs tests/editor-history.test.mjs",
+    "test:serialization": "node --test tests/serialization.test.mjs tests/editor-history.test.mjs tests/scene-persistence.test.mjs",
     "test:project": "node --test tests/project-generator.test.mjs tests/dev-api.test.mjs tests/compat-scan.test.mjs",
     "test:geometry": "node --test tests/geometry-parity.test.mjs",
     "test:environment": "node --test tests/scene-environment.test.mjs",
@@ -25,7 +25,9 @@
     "test:e2e": "ION_E2E=1 node --test --test-timeout=1800000 tests/build-regression.test.mjs",
     "test:visual": "node scripts/visual-regression.mjs",
     "verify:bundle": "node scripts/verify-bundle.mjs dist",
-    "test:all": "npm run test && npm run test:perf && npm run test:e2e"
+    "test:all": "npm run test && npm run test:perf && npm run test:e2e",
+    "test:persistence": "node --test tests/scene-persistence.test.mjs tests/dev-server-data.test.mjs",
+    "verify:persistence": "node scripts/verify-scene-persistence.mjs"
   },
   "keywords": [],
   "author": "",

@@ -19,23 +19,27 @@ import { MraidAdapter } from "../engine/MraidAdapter";
 import { MindworksAdapter } from "../engine/MindworksAdapter";
 import { Cta } from "../engine/Cta";
 import { setCrashRecoveryUrl } from "../engine/core/CrashOverlay";
-import { applySceneBindings, type SceneBindingsData } from "../engine/SceneBindings";
+import { applySceneBindings } from "../engine/SceneBindings";
 import sceneBindingsRaw from "./sceneBindings.json";
 import { Ion } from "../engine/Ion";
 import { loadColliders } from "../engine/collision";
-import type { ColliderData, ColliderShape, CollidersFileData } from "../engine/collision";
+import type { ColliderData, ColliderShape } from "../engine/collision";
 import collidersRaw from "./colliders.json";
 import { ParticleVisuals } from "../engine/editor/ParticleVisuals";
 import { loadParticles } from "../engine/particles";
-import type { ParticlesFileData, ParticleSystemConfig } from "../engine/particles";
+import type { ParticleSystemConfig } from "../engine/particles";
 import particlesRaw from "./particles.json";
 import { AreaDemo } from "./AreaDemo";
 import { SoundHandler } from "./SoundHandler";
 import { manifest, libGlb, libAudio } from "./assets";
 import { Environment } from "./entities/Environment";
-import { SceneEnvironment, loadSceneEnv } from "../engine/scene";
-import type { SceneEnvData } from "../engine/scene";
+import { SceneEnvironment, loadSceneEnv, snapshotScene, applySceneOverrides } from "../engine/scene";
+import type { SceneEnvData, SceneSnapshot } from "../engine/scene";
 import environmentRaw from "./environment.json";
+// What the 3D editor changed about the scene graph — object transforms,
+// visibility, names, parenting. A real import, so it ships: what you move in
+// the editor is where it is in the production build.
+import sceneRaw from "./scene.json";
 
 const mainLayoutData = mainLayoutRaw as UILayoutData;
 const endcardLayoutData = endcardLayoutRaw as UILayoutData;
@@ -122,6 +126,10 @@ export class Game {
    * dead code the production bundle can drop.
    */
   private editor: EditorRoot | undefined;
+  /** The scene as built, before scene.json applied. Handed to each editor session — see SceneOverrides.ts. */
+  private sceneBaseline: SceneSnapshot | undefined;
+  private sceneDirtyCallback: (() => void) | undefined;
+
   /** Set via onGizmoModeChange(); re-attached to each new EditorRoot since one is (re)created per editor session — see setFreecam(). */
   private gizmoModeChangeCallback: ((mode: GizmoMode) => void) | undefined;
   /** Same reasoning as gizmoModeChangeCallback, for grid/helpers/snap/space instead of gizmo mode — see onInspectorStateChange(). */
@@ -239,7 +247,15 @@ export class Game {
     // until `new Player(...)` above has added its model. Loading these
     // earlier silently dropped every collider attached to anything the
     // entities build, which read as "the editor forgot my attachment".
-    loadColliders(Ion.colliders, collidersRaw as CollidersFileData, this.scene);
+    // Before the colliders and particles below, both of which attach by scene
+    // path and read world matrices — they have to see the final transforms.
+    // And before them rather than after `sceneModel` is added, because the
+    // baseline these diff against is taken at the same moment (see
+    // IonGame.finishCreate for the packaged path).
+    this.sceneBaseline = snapshotScene(this.scene);
+    applySceneOverrides(this.scene, sceneRaw);
+
+    loadColliders(Ion.colliders, collidersRaw, this.scene);
 
     // The ION Particle registry's own PARTICLES group joins the scene, then
     // the editor-authored effects load into it.
@@ -252,7 +268,7 @@ export class Game {
     // src/game/particles.json is a real import, so these ship: what's
     // authored in the Particle Editor is what runs in the production build.
     Ion.particles.attachToScene(this.scene);
-    loadParticles(Ion.particles, particlesRaw as ParticlesFileData, this.scene);
+    loadParticles(Ion.particles, particlesRaw, this.scene);
 
     // Both halves of the collider example now exist — the zone from
     // colliders.json above, and the Player's own cylinder from its
@@ -279,7 +295,7 @@ export class Game {
     // JSON is a real import, so the assignment holds in the production
     // build exactly as it does in the editor.
     for (const [className, instance] of this.inspectables) {
-      applySceneBindings(instance, className, sceneBindingsRaw as SceneBindingsData, this.scene);
+      applySceneBindings(instance, className, sceneBindingsRaw, this.scene);
     }
 
     // After that pass, never inside AreaDemo's own constructor: its `zone`
@@ -292,10 +308,24 @@ export class Game {
     this.mainUI = new UILayout(this.mainLayer, mainLayoutData);
     this.endcardUI = new UILayout(endcardLayer, endcardLayoutData);
 
-    let wa = this.scene.getObjectByName("walkablearea") as THREE.Object3D
-    (this.scene.getObjectByName("cinemafloor") as THREE.Mesh).visible = false;
-    (this.scene.getObjectByName("Colliders") as THREE.Object3D).visible = false;
-    wa.visible = false
+    // Authoring aids inside Cinema_World.glb that exist to be *read*, not
+    // seen: "walkablearea" is four flat polygons describing where the player
+    // may walk, and "Colliders" (a GLB node — not the engine's own COLLIDERS
+    // group) is the blocking geometry the artist modelled. "cinemafloor" is
+    // hidden because the walkable polygons sit a hair above it and z-fight.
+    //
+    // Looked up rather than cast. `getObjectByName` returns
+    // `Object3D | undefined`, and asserting it away with `as THREE.Object3D`
+    // meant that renaming one node in Blender — or dropping in a different
+    // environment GLB, which is the first thing anyone building on this does
+    // — threw "Cannot set properties of undefined (reading 'visible')" from
+    // inside Game.create(), i.e. a blank screen at boot with a stack trace
+    // pointing at a line that looks like it just hides a mesh.
+    for (const name of ["walkablearea", "cinemafloor", "Colliders"]) {
+      const node = this.scene.getObjectByName(name);
+      if (node) node.visible = false;
+      else console.warn(`Game: "${name}" is not in the environment model — nothing to hide. Rename it in the GLB or drop it from this list.`);
+    }
     // HUD wires up its own editor-assigned fields (e.g. moneyIcon) in its
     // own constructor — see src/game/ui/HUD.ts and src/engine/Bindings.ts.
     this.hud = new HUD(this.mainUI, this.endcardUI);
@@ -494,6 +524,11 @@ export class Game {
         hierarchyEl,
         inspectorEl,
         initialTarget: this.player.position,
+        // The pre-override scene, so the editor's Save writes the full set of
+        // deviations from the model rather than only this session's edits.
+        sceneBaseline: this.sceneBaseline,
+        sceneOverridesOnLoad: (sceneRaw as { objects?: { objectPath: string }[] }).objects ?? [],
+        onSceneDirty: () => this.sceneDirtyCallback?.(),
         // The live registry, not a copy — colliders arranged in the editor
         // are the same objects gameplay resumes running against on exit.
         colliderManager: Ion.colliders,
@@ -776,6 +811,21 @@ export class Game {
   /** Same per-session re-attach contract as onColliderDirty — see its own note. */
   onEnvironmentDirty(cb: () => void): void {
     this.environmentDirtyCallback = cb;
+  }
+
+  /** What the gizmo and the Hierarchy changed, as records for src/game/scene.json. */
+  serializeScene(): unknown[] | undefined {
+    return this.editor?.serializeScene();
+  }
+  hasSceneChanges(): boolean {
+    return this.editor?.hasSceneChanges() ?? false;
+  }
+  markSceneSaved(): void {
+    this.editor?.markSceneSaved();
+  }
+  /** Same per-session re-attach contract as onColliderDirty — see its own note. */
+  onSceneDirty(cb: () => void): void {
+    this.sceneDirtyCallback = cb;
   }
 
   // -----------------------------------------------------------------------

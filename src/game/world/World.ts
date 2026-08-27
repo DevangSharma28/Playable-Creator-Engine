@@ -3,6 +3,18 @@ import * as THREE from "three";
 /**
  * The static play environment's *gameplay* extents.
  *
+ * > **Known Limitation.** `bound` is a single half-extent measured from the
+ * > world origin, and Cinema_World.glb's floor is not centred there — it spans
+ * > roughly x ∈ [-5.2, 12.1], z ∈ [-12.8, 3.8]. With the default 10, CoinField
+ * > can scatter coins onto parts of the ±10 box that have no floor under them.
+ * >
+ * > The model already answers this properly: it carries a `walkablearea` node
+ * > holding four polygons describing exactly where the player may walk. Using
+ * > it would mean replacing this scalar with a real area test, which changes
+ * > where coins appear — a design decision for the game, not a bug fix, so it
+ * > has not been made here. `Player`'s own clamp against `bound` is commented
+ * > out, so today only `CoinField` reads this.
+ *
  * Lighting, fog, background, tone mapping, and shadow settings used to be
  * built here by hand. They now live in src/game/environment.json and are
  * applied by the engine's SceneEnvironment, so the 3D editor's Environment
@@ -17,43 +29,14 @@ export class World {
   /** Half-extent minus a small margin — the furthest an entity should travel from center. */
   readonly bound: number;
 
+  /**
+   * @param size Half-extent of the play area, in world units.
+   *
+   * The procedural ground and walls this class used to build are gone: the
+   * environment is a GLB now, and both call sites had been commented out for
+   * long enough that the methods were unreachable private code.
+   */
   constructor(_scene: THREE.Scene, size = 10) {
-    // this.addGround(_scene, size);
-    // this.addWalls(_scene, size);
     this.bound = size;
-  }
-
-  private addGround(scene: THREE.Scene, size: number): void {
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(size, size),
-      new THREE.MeshStandardMaterial({ color: 0x57c25c, roughness: 0.9 })
-    );
-    ground.name = "Ground";
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
-  }
-
-  private addWalls(scene: THREE.Scene, size: number): void {
-    const wallHeight = 0.4;
-    const wallGeo = new THREE.BoxGeometry(size + 0.4, wallHeight, 0.4);
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x3d8b40, roughness: 0.8 });
-
-    const wallPositions: [number, number, number, number][] = [
-      [0, wallHeight / 2, size / 2 + 0.2, 0],
-      [0, wallHeight / 2, -size / 2 - 0.2, 0],
-      [size / 2 + 0.2, wallHeight / 2, 0, Math.PI / 2],
-      [-size / 2 - 0.2, wallHeight / 2, 0, Math.PI / 2],
-    ];
-
-    wallPositions.forEach(([x, y, z, ry], i) => {
-      const wall = new THREE.Mesh(wallGeo, wallMat);
-      wall.name = `Wall ${i + 1}`;
-      wall.position.set(x, y, z);
-      wall.rotation.y = ry;
-      wall.castShadow = true;
-      wall.receiveShadow = true;
-      scene.add(wall);
-    });
   }
 }

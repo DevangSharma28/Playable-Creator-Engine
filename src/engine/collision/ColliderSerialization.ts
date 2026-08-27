@@ -34,9 +34,23 @@ import { resolveSceneObject, sceneObjectPath } from "../SceneBindings";
 /** The shapes a record may name. Anything else is a file that cannot be honoured. */
 const SHAPES: readonly string[] = ["box", "sphere", "cylinder"];
 
-export function loadColliders(manager: ColliderManager, data: CollidersFileData, scene: THREE.Scene): Collider[] {
+/**
+ * Loads an authored colliders file into a registry.
+ *
+ * `data` is `unknown` rather than `CollidersFileData`, and that is deliberate
+ * on two counts. It is honest — every record is validated below, so this does
+ * not trust the type it is given — and it is the only signature a caller can
+ * actually satisfy: TypeScript infers a JSON array literal as `number[]`,
+ * never as the `[number, number, number]` tuples this schema uses, so
+ * `import data from "./colliders.json"` followed by `as CollidersFileData`
+ * fails with TS2352 the moment the file contains a single real collider.
+ * A file with content is the normal case, so the loader accepts the raw
+ * import.
+ */
+export function loadColliders(manager: ColliderManager, data: unknown, scene: THREE.Scene): Collider[] {
   const built: Collider[] = [];
-  const records = Array.isArray(data?.colliders) ? data.colliders : [];
+  const file = data as CollidersFileData | undefined;
+  const records = Array.isArray(file?.colliders) ? file.colliders : [];
   for (const record of records) {
     // One bad record used to take the whole file with it — a truncated write
     // or a hand edit meant *every* collider in the project vanished, which

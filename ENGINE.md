@@ -36,7 +36,7 @@ Unmarked sections are **Implemented**.
 13. [Testing and verification](#13--testing-and-verification)
 14. [Known limitations and production readiness](#14--known-limitations-and-production-readiness)
 15. [The game layer, and building a new playable](#15--the-game-layer-and-building-a-new-playable)
-16. [Commercial distribution](#16--commercial-distribution) — packages, the client boundary, the public API, browser support
+16. [Commercial distribution](#16--commercial-distribution) — packages, the client boundary, the public API, browser support, editor persistence
 
 ---
 
@@ -1622,7 +1622,7 @@ Two scripts drive a real Chrome over the DevTools Protocol.
 - opening and closing a dock returns the canvas to **exactly** the size it started at,
 - nothing throws.
 
-Screenshots are still written to `.visual-regression/`, as evidence for a human rather than as the assertion. It starts its own dev server and build API on OS-assigned ports, never the configured 8000/8001 — taking those would either fail outright or, worse, measure whatever project the developer already had running.
+Screenshots are still written to `.visual-regression/`, as evidence for a human rather than as the assertion. The build API it starts is pointed at a **throwaway copy** of `src/game/`, not the real one — that API is what every editor saves through, and a layout test has no business writing to anyone's `colliders.json`. It also uses OS-assigned ports, never the configured 8000/8001 — taking those would either fail outright or, worse, measure whatever project the developer already had running.
 
 ### 13.6 What none of this covers
 
@@ -1915,9 +1915,103 @@ Every layer reports rather than fails silently.
 | A colour string is not a colour | Warns and falls back, rather than `parseInt` silently turning `"deepblue"` into a brown. |
 | `colliders.json` / `particles.json` / `sceneBindings.json` / `environment.json` is partial or malformed | The bad record is skipped with a warning and everything else loads. One truncated entry used to take the whole file, which reads as "the editor forgot my work". |
 | A UI element is missing its `anchor` | Defaults to `top-left`. It used to throw and take the entire HUD down with it. |
+| A `scene.json` entry names an object the model no longer has | Skipped with a warning naming the path. A re-export with a renamed node is normal; losing the boot over it is not. |
+| An authored `particles.json` / `colliders.json` reaches `tsc` | It typechecks. The loaders take `unknown` and validate, because TypeScript types a JSON array as `number[]` and these schemas use `[number, number, number]` — so `as ParticlesFileData` compiled while the file was empty and failed with TS2352 the moment anyone saved their first effect. See [§16.10](#1610-json-data-files-and-tuple-types). |
 | The dev server is interrupted mid-save | Nothing is lost: every save writes a sibling temp file and renames over the target, so a file is either its old content or its new one, never a prefix of either. |
 | The WebGL context is lost | Reported, and `ion:context-lost` / `ion:context-restored` are emitted so a game can pause. three.js re-initialises on restore; the scene environment is re-applied. |
 | `python3` is missing | The build stops immediately with install instructions per platform, rather than failing inside a heredoc several minutes in. |
 | The engine is not installed, or installed but unbuilt | `ion build` and `ion doctor` say which package and what to run. |
 
 Teardown is equally explicit, because a dev reload runs it on every save: the frame loop is retired by generation guard, timers and tweens are cancelled, colliders and particles are cleared, event listeners are removed, every geometry, material and texture in the scene is disposed, the asset loader releases its uploads, and every playing sound is stopped and disconnected. The `WebGLRenderer` is deliberately *kept*, one per canvas — `canvas.getContext()` returns the same context every time, so constructing a renderer per boot did not get a fresh context, it layered another set of three.js's own per-renderer allocations onto the one context, and `renderer.dispose()` does not release those. Six boots now hold exactly the GPU resources one boot holds; before, they held six times as many.
+
+### 16.10 JSON data files and tuple types
+
+`loadColliders`, `loadParticles` and `applySceneBindings` all take their data as **`unknown`**, and that signature is load-bearing rather than lazy.
+
+TypeScript infers a JSON array literal as `number[]`. It never infers a tuple. Every transform in these schemas is `[number, number, number]`. So:
+
+```ts
+import particlesRaw from "./particles.json";
+loadParticles(Ion.particles, particlesRaw as ParticlesFileData, scene);
+//                           ^ TS2352: neither type sufficiently overlaps
+```
+
+compiles perfectly while `particles.json` is `{"version":1,"systems":[]}` — there are no emitters, so there are no tuples to disagree about — and fails the moment the file holds one real emitter. The failure therefore arrives not when anyone changes code, but when someone authors their first effect in the Particle Editor and presses Save, and it takes `tsc --noEmit`, `npm test` and CI with it.
+
+Taking `unknown` is also the honest signature: each loader validates every record it is given (see [§16.9](#169-failure-handling)), so it does not in fact rely on the type. `tests/json-import-types.test.mjs` compiles a fixture that always contains populated tuples, and asserts the three signatures have not been narrowed back.
+
+### 16.11 Editor persistence — what is written, and when
+
+Five files, one shape. Each is a real `import` in the entry's module graph, so
+everything authored in an editor ships in the production build.
+
+| File | Written by | Contents |
+| --- | --- | --- |
+| `src/game/scene.json` | the gizmo and the Hierarchy | Object transforms, visibility, names, parenting |
+| `src/game/environment.json` | the Environment dock | Camera, ambient and directional lighting, world, fog, tone mapping, shadows |
+| `src/game/colliders.json` | Configure Colliders | Trigger volumes and solid geometry, with their attachments |
+| `src/game/particles.json` | Particle System mode | Effects, emitters and every module |
+| `src/game/sceneBindings.json` | ⊙ Pick | Which scene object a class field holds |
+
+`scene.json` was the one that did not exist. Everything the 3D editor's gizmo
+and Hierarchy did — moving an object, hiding it, renaming it, re-parenting it —
+was a direct mutation of a live `THREE.Object3D` and nothing more. Those
+objects are rebuilt from the model on every boot, so the edit updated the
+running game and was gone on the next load.
+
+**Diffed, not dumped, and twice over.** `captureSceneOverrides` compares the
+live scene against two snapshots:
+
+- the **load-time** baseline, taken before any override is applied, which
+  supplies the stable path keys and the original values. Writing every node
+  instead would freeze the artist's model — a later export with a moved prop
+  would be silently overridden back by data nobody remembers authoring.
+- the **session** baseline, taken when the editor opens, which decides what is
+  worth writing at all. A game animates things; a spinning coin differs from
+  the load baseline through nobody's authoring. Without this second snapshot a
+  single gizmo drag wrote 55 entries and froze the animation's last frame into
+  the next boot. Gameplay is paused for the whole session, so anything that
+  moves after the editor opens moved because someone moved it.
+
+Records the file already held are kept even when a session does not touch them,
+so saving after one small edit cannot delete an earlier session's work.
+
+Keys are **paths, not uuids** — three.js regenerates uuids on every GLB parse,
+so a uuid written in one session resolves to nothing in the next. The path
+recorded is always the object's path *at load*, which is what makes renaming
+and re-parenting survivable: the key does not move when the thing it names does.
+
+### 16.12 Why a save used to survive Exit and not a reload
+
+Two independent faults produced one symptom, and the second is the one that
+made it look like a caching problem — because it was one.
+
+**`server.watch.ignored` broke reload freshness.** The four editor-authored
+files were excluded from Vite's watcher so that saving one would not hot-reload
+the scene out from under the editor session editing it. That goal was right and
+the mechanism was wrong: Vite's module graph is invalidated *by* watcher events,
+so a file the watcher never sees is a module that never invalidates. The
+transformed JSON stayed in the dev server's cache and **a full browser reload
+re-served the old data**. Restarting `npm run dev` rebuilt the cache, which is
+precisely why the edits "came back" after a restart and why the problem read as
+in-memory state.
+
+It also hid the first fault. Camera, lighting and world settings *were* being
+written to disk correctly all along — they came back stale for this reason, not
+for want of a file.
+
+The fix is `ionEditorDataPlugin` in `vite.config.mts`: the files stay in the
+watcher, so they invalidate, and `handleHotUpdate` returns `[]` for them, so no
+update is propagated. Vite calls `moduleGraph.onFileChange()` before that hook
+runs, so declining the update costs nothing — the cache is already correct for
+the next request.
+
+`tests/dev-server-data.test.mjs` pins both halves against a real dev server: the
+module must come back fresh **and** the save must not trigger an HMR update,
+while an ordinary source file must still hot-update. Reverting to
+`watch.ignored` fails four of its five cases.
+
+> **Testing note.** The first attempt to reproduce this fetched
+> `/src/game/environment.json` and found it fresh, which appeared to rule the
+> theory out. The raw file always was fresh; it is the `?import` module form
+> that was cached. A test of this has to request the module.

@@ -83,6 +83,8 @@ const PARTICLES_FILE = path.join(ROOT, "src", "game", "particles.json");
 // this same file). Ships for the same reason the two above do: what the
 // panel authors is what the production playable renders.
 const ENVIRONMENT_FILE = path.join(ROOT, "src", "game", "environment.json");
+/** What the 3D editor changed about the scene graph itself — see src/engine/scene/SceneOverrides.ts. */
+const SCENE_FILE = path.join(ROOT, "src", "game", "scene.json");
 const SRC_DIR = path.join(ROOT, "src");
 /**
  * Where the Scripts panel and Control Desk look for classes.
@@ -891,6 +893,21 @@ function writeEnvironment(data) {
   writeJsonAtomic(ENVIRONMENT_FILE, data);
 }
 
+function readScene() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(SCENE_FILE, "utf8"));
+    if (!Array.isArray(parsed.objects)) throw new Error("malformed");
+    return parsed;
+  } catch {
+    // A project that has never moved anything in the editor has no file yet,
+    // and an empty override set is exactly what that means.
+    return { version: 1, objects: [] };
+  }
+}
+function writeScene(data) {
+  writeJsonAtomic(SCENE_FILE, data);
+}
+
 // Vite's dev server prints both of these as the "Local" URL depending on
 // platform/version, and either is a completely normal way to end up
 // browsing the page — the CORS origin allowed here has to match whichever
@@ -1469,6 +1486,46 @@ const server = http.createServer((req, res) => {
         res.writeHead(200);
         const emitters = body.systems.reduce((n, s) => n + s.emitters.length, 0);
         res.end(JSON.stringify({ ok: true, saved: body.systems.length, emitters }));
+      })
+      .catch((err) => {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(400);
+        res.end(JSON.stringify({ ok: false, error: err.message }));
+      });
+    return;
+  }
+
+  if (req.method === "GET" && req.url === "/list-scene") {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(200);
+    res.end(JSON.stringify(readScene()));
+    return;
+  }
+
+  /**
+   * The scene graph the 3D editor authored — transforms, visibility, names,
+   * parenting — written wholesale to src/game/scene.json.
+   *
+   * Wholesale, like colliders and particles, because the editor sends the
+   * complete diff against the model every time; there is nothing to merge.
+   * Batched to Exit for the same reason those two are: the file is a real
+   * import in the module graph, so writing it mid-session would hot-reload
+   * the scene out from under the editor that is editing it.
+   */
+  if (req.method === "POST" && req.url === "/save-scene") {
+    readRequestBody(req, 4 * 1024 * 1024)
+      .then((raw) => {
+        const body = JSON.parse(raw);
+        if (!Array.isArray(body.objects)) throw new Error("Missing objects array");
+        for (const object of body.objects) {
+          if (!object || typeof object.objectPath !== "string" || !object.objectPath) {
+            throw new Error("Every scene override needs an objectPath");
+          }
+        }
+        writeScene({ version: 1, objects: body.objects });
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ ok: true, saved: body.objects.length }));
       })
       .catch((err) => {
         res.setHeader("Content-Type", "application/json");

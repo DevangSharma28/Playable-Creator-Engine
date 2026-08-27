@@ -105,6 +105,14 @@ import type { EditorRoot, FieldPickCallbacks } from "./editor/EditorRoot";
  * __onColliderDirty is the reverse direction, so the Exit button can show
  * there's something to save.
  *
+ * __serializeScene / __hasSceneChanges / __markSceneSaved / __onSceneDirty:
+ * the same four hooks again, for src/game/scene.json — what the gizmo and the
+ * Hierarchy did to the scene graph (transforms, visibility, names, parenting).
+ * This was the one editor-authored surface with no file behind it, which is
+ * why moving an object survived Exit Editor and vanished on a browser reload:
+ * the change was a live mutation of an Object3D that the next boot rebuilt
+ * from the GLB. See src/engine/scene/SceneOverrides.ts.
+ *
  * __serializeEnvironment / __hasEnvironmentChanges /
  * __markEnvironmentSaved / __onEnvironmentDirty: the same four-hook shape
  * for the 3D editor's Environment dock (camera framing, lighting, world),
@@ -176,6 +184,10 @@ type EngineWindow = Window & {
   __hasEnvironmentChanges?: () => boolean;
   __markEnvironmentSaved?: () => void;
   __onEnvironmentDirty?: () => void;
+  __serializeScene?: () => unknown[] | undefined;
+  __hasSceneChanges?: () => boolean;
+  __markSceneSaved?: () => void;
+  __onSceneDirty?: () => void;
   __setColliderDebug?: (visible: boolean) => boolean | undefined;
   __toggleColliderDebug?: () => boolean | undefined;
   __setParticleMode?: (active: boolean) => boolean | undefined;
@@ -275,15 +287,18 @@ export interface GameDevFacade {
   hasParticleChanges?(): boolean;
   isMusicPlaying?(): boolean;
   isParticlePreviewPlaying?(): boolean;
+  hasSceneChanges?(): boolean;
   markCollidersSaved?(): void;
   markEnvironmentSaved?(): void;
   markParticlesSaved?(): void;
+  markSceneSaved?(): void;
   onColliderDirty?(cb: () => void): void;
   onEditorHistoryChange?(cb: () => void): void;
   onEnvironmentDirty?(cb: () => void): void;
   onGizmoModeChange?(cb: (mode: GizmoMode) => void): void;
   onInspectorStateChange?(cb: (state: InspectorToolState) => void): void;
   onParticleDirty?(cb: () => void): void;
+  onSceneDirty?(cb: () => void): void;
   particleClear?(): void;
   particlePause?(): void;
   particlePlay?(): void;
@@ -295,6 +310,8 @@ export interface GameDevFacade {
   serializeColliders?(): ColliderData[] | undefined;
   serializeEnvironment?(): SceneEnvData | undefined;
   serializeParticles?(): ParticleSystemConfig[] | undefined;
+  /** What the gizmo and the Hierarchy changed about the scene graph — see src/game/scene.json. */
+  serializeScene?(): unknown[] | undefined;
   setColliderDebug?(visible: boolean): boolean | undefined;
   setColliderMode?(active: boolean): boolean | undefined;
   setFreecam?(active: boolean): void;
@@ -711,6 +728,10 @@ export class IonEngine {
     this.win.__hasEnvironmentChanges = () => dev.hasEnvironmentChanges?.() ?? false;
     this.win.__markEnvironmentSaved = () => dev.markEnvironmentSaved?.();
     dev.onEnvironmentDirty?.(() => this.win.__onEnvironmentDirty?.());
+    this.win.__serializeScene = () => dev.serializeScene?.();
+    this.win.__hasSceneChanges = () => dev.hasSceneChanges?.() ?? false;
+    this.win.__markSceneSaved = () => dev.markSceneSaved?.();
+    dev.onSceneDirty?.(() => this.win.__onSceneDirty?.());
 
     // The 3D editor's "Particle System" mode — same passthrough shape as
     // the collider toolbar above, and only meaningful while the editor is

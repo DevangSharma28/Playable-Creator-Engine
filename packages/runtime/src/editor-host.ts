@@ -26,6 +26,10 @@ export interface EditorOpenOptions {
   getGameplayCamera: () => THREE.PerspectiveCamera | THREE.OrthographicCamera;
   /** The live scene environment — the editor edits this instance, never a copy. */
   environment: unknown;
+  /** The scene as the game built it, before authored overrides. The editor's Save diffs against this. */
+  sceneBaseline?: unknown;
+  /** The records scene.json held at boot, so an untouched override is not dropped by the next save. */
+  sceneOverridesOnLoad?: readonly { objectPath: string }[];
   /** Where to point the orbit camera on entry. */
   initialTarget?: THREE.Vector3;
   /** Resolves a texture path through the project's own AssetLoader — the editor never loads assets itself. */
@@ -91,6 +95,19 @@ export interface EditorSession {
   hasEnvironmentChanges(): boolean;
   markEnvironmentSaved(): void;
   onEnvironmentDirty(cb: () => void): void;
+  /**
+   * What the editor changed about the scene graph, as records for
+   * src/game/scene.json — transforms, visibility, names, parenting.
+   *
+   * The fourth of the same four-hook shape colliders, particles and the
+   * environment already use, and the last one that was missing: until it
+   * existed, moving an object in the editor was a live mutation with nowhere
+   * to be written, so it survived Exit and vanished on reload.
+   */
+  serializeScene(): unknown[];
+  hasSceneChanges(): boolean;
+  markSceneSaved(): void;
+  onSceneDirty(cb: () => void): void;
 
   editorUndo(): boolean;
   editorRedo(): boolean;

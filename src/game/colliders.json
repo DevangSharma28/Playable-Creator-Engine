@@ -494,6 +494,39 @@
         4.978699207305908,
         1.5196786278216208
       ]
+    },
+    {
+      "id": "col_brmjoux6hr",
+      "name": "Box Collider 10",
+      "shape": "box",
+      "isTrigger": false,
+      "enabled": true,
+      "tag": "Untagged",
+      "mask": [],
+      "attachPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/chairs/chair_1/chairmesh011",
+      "attachName": "chairmesh011",
+      "offset": {
+        "position": [
+          0.0063,
+          0.5605,
+          0.0977
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "size": [
+        0.8138866424560547,
+        1.1210961937904358,
+        0.8304753303527832
+      ]
     }
   ]
 }

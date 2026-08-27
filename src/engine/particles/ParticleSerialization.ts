@@ -43,9 +43,22 @@ import { resolveSceneObject, sceneObjectPath } from "../SceneBindings";
  * silently dropping it would make a renamed GLB node look like the VFX
  * system had stopped working.
  */
-export function loadParticles(manager: ParticleManager, data: ParticlesFileData, scene: THREE.Scene): ParticleSystem[] {
+/**
+ * Loads an authored particles file into a registry.
+ *
+ * `unknown` rather than `ParticlesFileData`, for the same two reasons
+ * `loadColliders` takes `unknown`: every record is validated below, and a
+ * `.json` import cannot be cast to this schema anyway — TypeScript types a
+ * JSON array as `number[]` and an emitter's `position`/`rotation`/`scale` are
+ * `[number, number, number]`, so `particlesRaw as ParticlesFileData` fails
+ * with TS2352 as soon as the file holds one emitter. Authoring a single effect
+ * in the Particle Editor therefore used to break `tsc --noEmit`, and with it
+ * `npm test` and CI, in this repository and in every generated project.
+ */
+export function loadParticles(manager: ParticleManager, data: unknown, scene: THREE.Scene): ParticleSystem[] {
   const built: ParticleSystem[] = [];
-  const records = Array.isArray(data?.systems) ? data.systems : [];
+  const file = data as ParticlesFileData | undefined;
+  const records = Array.isArray(file?.systems) ? file.systems : [];
   for (const record of records) {
     // Same reasoning as loadColliders: a malformed entry costs that entry, not
     // every effect in the project.

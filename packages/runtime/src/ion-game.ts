@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { CameraHandler } from "../../../src/engine/core/CameraHandler";
-import { SceneEnvironment, loadSceneEnv } from "../../../src/engine/scene";
+import { SceneEnvironment, loadSceneEnv, snapshotScene, applySceneOverrides } from "../../../src/engine/scene";
+import type { SceneSnapshot } from "../../../src/engine/scene";
 import type { SceneEnvData } from "../../../src/engine/scene";
 import { AssetLoader } from "../../../src/engine/AssetLoader";
 import type { AssetEntry } from "../../../src/engine/AssetLoader";
@@ -8,10 +9,8 @@ import { UILayout } from "../../../src/engine/ui/UILayout";
 import type { UILayoutData } from "../../../src/engine/ui/UILayoutTypes";
 import { Ion } from "../../../src/engine/Ion";
 import { loadColliders } from "../../../src/engine/collision";
-import type { CollidersFileData } from "../../../src/engine/collision";
 import { loadParticles } from "../../../src/engine/particles";
-import type { ParticlesFileData } from "../../../src/engine/particles";
-import { applySceneBindings, type SceneBindingsData } from "../../../src/engine/SceneBindings";
+import { applySceneBindings } from "../../../src/engine/SceneBindings";
 import { getEditorHost, type DebugLayer, type EditorSession } from "./editor-host";
 import { InputManager } from "../../../src/engine/core/InputManager";
 import { DynamicJoystick } from "../../../src/engine/core/DynamicJoystick";
@@ -68,6 +67,8 @@ function requireLayer(id: string): HTMLElement {
 /** The authored data files a project ships. All optional — a missing one just means that system has nothing to load. */
 export interface IonProjectData {
   environment?: unknown;
+  /** What the 3D editor changed about the scene graph itself — transforms, visibility, names, parenting. */
+  scene?: unknown;
   colliders?: unknown;
   particles?: unknown;
   sceneBindings?: unknown;
@@ -169,6 +170,10 @@ export abstract class IonGame {
   private lastManualHeight = 0;
   /** Class-name → instance, for Control Desk. Subclasses add to it via `inspect()`. */
   private readonly inspectables = new Map<string, object>();
+  /** The pre-override scene, handed to an editor session so its Save can diff against the model rather than against itself. */
+  private sceneBaseline: SceneSnapshot | undefined;
+  /** The records scene.json held at boot — kept so a session that touches nothing still re-writes them. */
+  private sceneOverridesOnLoad: readonly { objectPath: string }[] = [];
 
   /**
    * Public because `IonGame.create()` constructs `new this(options)` and
@@ -252,10 +257,22 @@ export abstract class IonGame {
    */
   private finishCreate(data: IonProjectData): void {
     this.onCreate();
-    loadColliders(Ion.colliders, (data.colliders as CollidersFileData) ?? { version: 1, colliders: [] }, this.scene);
-    loadParticles(Ion.particles, (data.particles as ParticlesFileData) ?? { version: 1, systems: [] }, this.scene);
+    // The scene exactly as the game built it, captured before anything
+    // authored is applied. This is what a later save diffs against, and taking
+    // it after the overrides would make every save write an empty file over
+    // the user's work.
+    this.sceneBaseline = snapshotScene(this.scene);
+    this.sceneOverridesOnLoad = (data.scene as { objects?: { objectPath: string }[] } | undefined)?.objects ?? [];
+    // Applied before colliders and particles: both attach by scene path and
+    // read world matrices, so they have to see the final transforms.
+    applySceneOverrides(this.scene, data.scene);
+    // Passed straight through. Each loader takes `unknown` and validates what
+    // it is given, so there is nothing to assert here and nothing to default:
+    // a missing file is one of the shapes they already handle.
+    loadColliders(Ion.colliders, data.colliders, this.scene);
+    loadParticles(Ion.particles, data.particles, this.scene);
     for (const [className, instance] of this.inspectables) {
-      applySceneBindings(instance, className, (data.sceneBindings as SceneBindingsData) ?? { version: 1, bindings: [] }, this.scene);
+      applySceneBindings(instance, className, data.sceneBindings, this.scene);
     }
     this.onReady();
   }
@@ -461,6 +478,8 @@ export abstract class IonGame {
         renderer: this.renderer,
         getGameplayCamera: () => this.camera.camera,
         environment: this.environment,
+        sceneBaseline: this.sceneBaseline,
+        sceneOverridesOnLoad: this.sceneOverridesOnLoad,
         initialTarget: this.getCameraFocus(),
         resolveTexture: (p) => {
           try {
@@ -543,6 +562,10 @@ export abstract class IonGame {
   hasEnvironmentChanges(): boolean { return this.editorSession?.hasEnvironmentChanges() ?? false; }
   markEnvironmentSaved(): void { this.editorSession?.markEnvironmentSaved(); }
   onEnvironmentDirty(cb: () => void): void { this.editorSession?.onEnvironmentDirty(cb); }
+  serializeScene(): unknown[] | undefined { return this.editorSession?.serializeScene(); }
+  hasSceneChanges(): boolean { return this.editorSession?.hasSceneChanges() ?? false; }
+  markSceneSaved(): void { this.editorSession?.markSceneSaved(); }
+  onSceneDirty(cb: () => void): void { this.editorSession?.onSceneDirty(cb); }
   editorUndo(): boolean { return this.editorSession?.editorUndo() ?? false; }
   editorRedo(): boolean { return this.editorSession?.editorRedo() ?? false; }
   getEditorHistory(): unknown | undefined { return this.editorSession?.getEditorHistory(); }
