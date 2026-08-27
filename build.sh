@@ -17,6 +17,21 @@
 # HTML instead of esbuild's intermediate bundle.js.
 set -e
 
+# The two external programs this pipeline needs beyond Node. Checked up front
+# with a message that says what to install, because the alternative is
+# "python3: command not found" arriving several minutes into a build, from a
+# heredoc, with no indication that it was a prerequisite. (`zip` is checked at
+# the point of use instead — it is a packaging nicety and its absence only
+# skips one optional artifact.)
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "✖ python3 is required to build an ION project but was not found on PATH." >&2
+  echo "  It performs the asset-inlining and build-report steps." >&2
+  echo "  macOS:  it ships with the Xcode command line tools (xcode-select --install)" >&2
+  echo "  Linux:  apt install python3   /   dnf install python3" >&2
+  echo "  Windows: install Python 3 from python.org and build from Git Bash or WSL" >&2
+  exit 1
+fi
+
 # Bash's own auto-incrementing elapsed-seconds counter — read again near the
 # end for the Build Report's "how long did this take" figure. Reset to 0
 # here (not relied on being 0 already) so a re-sourced/nested invocation
@@ -204,51 +219,37 @@ html_bytes = pathlib.Path("dist/index.html").read_bytes()
 dist_bytes = len(html_bytes)
 gzip_bytes = len(gzip.compress(html_bytes, compresslevel=9))
 
-# Automated pre-flight for the exact failure class that cost real manual
-# debugging time to find once already: an ad-network review WebView (or
-# file://'s own CORS restriction) rejecting the build over ES-module syntax
-# or ES2019+ syntax vite.config.prod.mts's format:"iife"/target:"es2015"
-# are supposed to eliminate. Both settings *should* make every one of these
-# patterns impossible — this scan exists so a regression (someone loosens
-# build.target, a new Vite/dependency version changes what it emits, ...)
-# gets caught the moment it's built, not the next time a submission bounces
-# with a cryptic "SyntaxError: Unexpected token '{'" and no other clue.
-import re
+# The ad-network compatibility gate lives in scripts/compat-scan.mjs (shipped
+# as @ion-engine/build's lib/compat-scan.mjs) rather than inline here, so its
+# rules can be unit tested against the patterns they claim to catch — see
+# tests/compat-scan.test.mjs. It also strips inlined base64 asset payloads
+# before matching, which the inline version did not: the base64 alphabet
+# produces sequences like "16n" freely, and a gate that reports imaginary
+# BigInt literals in a clean bundle is a gate people learn to ignore.
+import subprocess
 
-def scan_compat_warnings(html):
-    checks = [
-        ('ES module <script> tag (type="module")', r'type="module"',
-         "Some ad-network review WebViews reject this outright, and file:// blocks module script loading via CORS regardless. Check vite.config.prod.mts's rollupOptions.output.format."),
-        ("crossorigin attribute", r'\bcrossorigin\b',
-         "Left over from Vite's default module script tag — should have been stripped by this same build step's own HTML post-processing above. If this fires, that step didn't run or the tag it targets changed shape."),
-        ("import statement", r'\bimport[ ({]',
-         "Real ES import syntax survived into the bundle. Check rollupOptions.output.format is still \"iife\" and nothing new uses a dynamic import()."),
-        ("export statement", r'\bexport[ ({]',
-         "Real ES export syntax survived into the bundle — same check as above."),
-        ("class static {} block (ES2022)", r'static\{',
-         "Throws \"SyntaxError: Unexpected token '{'\" on any review engine without static-block support — this exact pattern is what caused that error the first time. Check vite.config.prod.mts's build.target."),
-        ("optional catch binding — catch {} (ES2019)", r'catch\{',
-         "Same fix as above: build.target."),
-        ("optional chaining — ?. (ES2020)", r'\?\.[a-zA-Z_$(]',
-         "Same fix as above: build.target."),
-        ("nullish coalescing — ?? (ES2020)", r'[^?]\?\?[^?]',
-         "Same fix as above: build.target."),
-    ]
-    warnings = []
-    for label, pattern, hint in checks:
-        n = len(re.findall(pattern, html))
-        if n:
-            warnings.append(f"{label}: {n} occurrence(s). {hint}")
-    return warnings
+scan = subprocess.run(
+    ["node", os.path.join(os.environ.get("ION_BUILD_LIB", "scripts"), "compat-scan.mjs"), "dist/index.html", "--json"],
+    capture_output=True,
+    text=True,
+)
+try:
+    findings = json.loads(scan.stdout or "[]")
+except json.JSONDecodeError:
+    findings = []
+    print(f"\u26a0 The compatibility scan could not be run ({scan.stderr.strip() or 'no output'}) \u2014 treating the build as unscanned.")
 
-compatibility_warnings = scan_compat_warnings(html_bytes.decode("utf-8", errors="ignore"))
+compatibility_warnings = [
+    f"{f['label']}: {f['count']} occurrence(s) [{f['since']}]. {f['breaks']} {f['hint']}"
+    for f in findings
+]
 if compatibility_warnings:
-    print("\n⚠ Ad-network compatibility warnings found in dist/index.html:")
+    print("\n\u26a0 Ad-network compatibility warnings found in dist/index.html:")
     for w in compatibility_warnings:
         print(f"  - {w}")
-    print("These patterns are known to fail ad-network review (Mintegral's Mindworks among them) — see dist/build-report.json's compatibilityWarnings.\n")
+    print("These patterns are known to fail ad-network review (Mintegral's Mindworks among them) \u2014 see dist/build-report.json's compatibilityWarnings.\n")
 else:
-    print("✓ No known ad-network compatibility issues found (no ES-module syntax, no ES2019+ syntax).")
+    print("\u2713 No known ad-network compatibility issues found (no ES-module syntax, no ES2019+ syntax, no post-ES2018 runtime APIs).")
 
 report = {
     "generatedAt": compress_report.get("generatedAt"),

@@ -31,9 +31,20 @@ import { resolveSceneObject, sceneObjectPath } from "../SceneBindings";
  * warns in dev: dropping it silently would make a renamed GLB node look
  * like a collision system that stopped working for no reason.
  */
+/** The shapes a record may name. Anything else is a file that cannot be honoured. */
+const SHAPES: readonly string[] = ["box", "sphere", "cylinder"];
+
 export function loadColliders(manager: ColliderManager, data: CollidersFileData, scene: THREE.Scene): Collider[] {
   const built: Collider[] = [];
-  for (const record of data.colliders ?? []) {
+  const records = Array.isArray(data?.colliders) ? data.colliders : [];
+  for (const record of records) {
+    // One bad record used to take the whole file with it — a truncated write
+    // or a hand edit meant *every* collider in the project vanished, which
+    // reads as "the editor forgot my work" rather than as a broken file.
+    if (!record || typeof record !== "object" || !SHAPES.includes(record.shape)) {
+      console.warn("Colliders: skipping a malformed record in colliders.json", record);
+      continue;
+    }
     const attachTo = record.attachPath || record.attachName ? resolveSceneObject(scene, { className: "", fieldName: "", objectPath: record.attachPath, objectName: record.attachName }) : undefined;
     if (!attachTo && (record.attachPath || record.attachName) && import.meta.env.DEV) {
       console.warn(`Colliders: "${record.name}" is attached to "${record.attachPath || record.attachName}", which no longer resolves — loading it as a world-space collider instead.`);
@@ -45,17 +56,22 @@ export function loadColliders(manager: ColliderManager, data: CollidersFileData,
 
 /** One record -> one live collider (not yet registered). Exported for the editor, which builds colliders one at a time as you click. */
 export function colliderFromData(record: ColliderData, attachTo: THREE.Object3D | undefined): Collider {
+  // Every field is defaulted rather than assumed. A file written by an older
+  // ION, truncated mid-save, or edited by hand is a normal thing to be handed,
+  // and reading `record.offset.position` off a record with no offset threw a
+  // TypeError that took the whole boot with it.
+  const offset = record.offset ?? { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] };
   const common = {
     id: record.id,
     name: record.name,
-    isTrigger: record.isTrigger,
-    enabled: record.enabled,
-    tag: record.tag,
-    mask: record.mask,
+    isTrigger: record.isTrigger ?? false,
+    enabled: record.enabled ?? true,
+    tag: record.tag ?? record.name ?? "",
+    mask: Array.isArray(record.mask) ? record.mask : [],
     attachTo,
-    position: record.offset.position,
-    rotation: record.offset.rotation,
-    scale: record.offset.scale,
+    position: offset.position ?? [0, 0, 0],
+    rotation: offset.rotation ?? [0, 0, 0],
+    scale: offset.scale ?? [1, 1, 1],
   };
   const collider =
     record.shape === "sphere"

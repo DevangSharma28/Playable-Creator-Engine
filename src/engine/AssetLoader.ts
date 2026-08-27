@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { GLTFLoader, GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
+import { disposeObject3D } from "./core/disposeScene";
 
 /** Which loader (see AssetLoader.preload below) a manifest entry needs. Generic — lives here, not in a specific game's assets.ts, since it describes the loader's own shape, not any particular game's content. */
 export type AssetKind = "texture" | "glb" | "audio";
@@ -149,5 +150,39 @@ export class AssetLoader {
   /** Returns the animation clips for a preloaded GLB. */
   getAnimations(path: string): THREE.AnimationClip[] {
     return this.getGlb(path).animations;
+  }
+
+  /** Paths this loader has resolved, by kind. Used by the doctor/report tooling and by tests asserting a preload actually happened. */
+  get cached(): { textures: string[]; models: string[]; audio: string[] } {
+    return {
+      textures: [...this.textures.keys()],
+      models: [...this.glbs.keys()],
+      audio: [...this.audioBuffers.keys()],
+    };
+  }
+
+  /**
+   * Releases every GPU resource this loader is holding and empties the caches.
+   *
+   * A cached texture is an uploaded GPU texture, and a cached GLB holds the
+   * geometry and materials every `instantiateGlb()` clone shares. Dropping the
+   * reference to the loader does not free any of that — only `dispose()` does.
+   * Without this, each dev hot reload built a fresh loader and re-uploaded the
+   * whole manifest while the previous copy stayed resident, so GPU memory grew
+   * once per save until the tab lost its context.
+   *
+   * Not called during normal gameplay: this retires the loader. IonGame's own
+   * dispose() is the caller.
+   */
+  dispose(): void {
+    for (const texture of this.textures.values()) texture.dispose();
+    this.textures.clear();
+    // The clones handed out by instantiateGlb() share this geometry, so this
+    // is the one release that covers all of them.
+    for (const gltf of this.glbs.values()) disposeObject3D(gltf.scene, true);
+    this.glbs.clear();
+    // AudioBuffers are plain CPU memory owned by the WebAudio context; there
+    // is nothing to release beyond dropping the references.
+    this.audioBuffers.clear();
   }
 }

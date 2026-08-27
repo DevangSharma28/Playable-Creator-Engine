@@ -437,7 +437,13 @@ export class IonEngine {
    * through the DOM or the dev hooks above.
    */
   static boot(canvas: HTMLCanvasElement, options?: IonEngineOptions): void {
-    new IonEngine(canvas, options).start();
+    // `start()` handles its own failures and never rejects, so this is a
+    // deliberate fire-and-forget rather than a dropped promise. It used to be
+    // a genuinely dropped one: anything that threw while the game was being
+    // built — a bad asset path, a page missing the UI layers, a typo in
+    // start() — surfaced only as "Uncaught (in promise)" over a blank canvas,
+    // with no indication that it came from ION at all.
+    void new IonEngine(canvas, options).start();
   }
 
   /** Access designed sprites/text from mainLayout.json by the name given in tools/ui-editor.html. Undefined only before Game.create() resolves — not meaningfully useful to callers until then anyway. */
@@ -475,12 +481,21 @@ export class IonEngine {
     bindIon(this.ionContext);
     const createGame = this.options.createGame;
     if (!createGame) {
-      throw new Error(
-        "IonEngine.boot() needs a game to run: pass { createGame }.\n" +
-          "  e.g. IonEngine.boot(canvas, { createGame: (c) => Game.create(c) })"
+      this.reportBootFailure(
+        new Error(
+          "IonEngine.boot() needs a game to run: pass { createGame }.\n" +
+            "  e.g. IonEngine.boot(canvas, { createGame: (c) => Game.create(c) })"
+        )
       );
+      return;
     }
-    const activeGame = await createGame(this.canvas);
+    let activeGame: IonGameLike;
+    try {
+      activeGame = await createGame(this.canvas);
+    } catch (err) {
+      this.reportBootFailure(err);
+      return;
+    }
     this.game = activeGame;
     this.installDevHooks(activeGame);
 
@@ -558,6 +573,28 @@ export class IonEngine {
       requestAnimationFrame(loop);
     };
     requestAnimationFrame(loop);
+  }
+
+  /**
+   * Reports a failure that happened before the first frame.
+   *
+   * Handled exactly like a gameplay crash — same recovery overlay, same
+   * `onCrash` hook — because from a player's point of view they are the same
+   * event: the playable did not run. The only difference is that there is no
+   * loop to stop, since one was never started.
+   */
+  private reportBootFailure(err: unknown): void {
+    console.error("IonEngine: the game failed to start — showing the fallback CTA instead of a blank canvas.", err);
+    // Nothing was created, so nothing can be torn down; but the Ion binding
+    // was taken before createGame ran and would otherwise outlive this
+    // attempt and make the next boot's staleness check meaningless.
+    unbindIon(this.ionContext);
+    try {
+      this.options.onCrash?.(err);
+    } catch (hookErr) {
+      console.error("IonEngine: onCrash itself threw (ignored, recovery UI still shows):", hookErr);
+    }
+    showCrashOverlay();
   }
 
   private installDevHooks(activeGame: IonGameLike): void {

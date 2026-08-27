@@ -74,15 +74,32 @@ export abstract class Game extends IonGame implements SimpleGameHost {
     for (const entity of [...this.entities]) {
       if (!entity.isDestroyed) entity.update(dt);
     }
+  }
+
+  /**
+   * Camera shake, applied after the rig has already placed the camera.
+   *
+   * It cannot run in onUpdate: the follow lerp writes an absolute position, so
+   * an offset added beforehand is overwritten before anything is drawn — which
+   * is exactly why `ION.camera.shake()` did nothing whenever the camera was
+   * following the player.
+   */
+  protected onLateUpdate(dt: number): void {
     this.applyShake(dt);
   }
 
   protected onDispose(): void {
+    // The subclass's own teardown runs first and while `ION` is still bound:
+    // stopping music or cancelling a timer from stop() is the obvious thing to
+    // write there, and unbinding first made every one of those throw
+    // "ION was used before the game started".
+    this.stop();
     for (const entity of [...this.entities]) entity.destroy();
     this.entities.length = 0;
+    this.pendingStart.length = 0;
+    this.stopAllSounds();
     bindActiveGame(undefined);
     bindIonFacade(undefined);
-    this.stop();
   }
 
   protected getCameraFocus(): THREE.Vector3 | undefined {
@@ -138,6 +155,8 @@ export abstract class Game extends IonGame implements SimpleGameHost {
   }
 
   private applyShake(dt: number): void {
+    // Read per frame, never cached: the rig swaps camera identity when the
+    // environment config switches between perspective and orthographic.
     const camera = this.camera.camera;
     // Always undo last frame's offset first, so shakes can't accumulate into
     // a permanent displacement of the rig.
@@ -156,6 +175,16 @@ export abstract class Game extends IonGame implements SimpleGameHost {
 
   private music: THREE.Audio | undefined;
   private masterVolume = 1;
+  /**
+   * Every sound still holding WebAudio nodes.
+   *
+   * A `THREE.Audio` connects a gain node into the listener on play() and does
+   * not take it back off when the buffer runs out — so a coin sound fired a
+   * few hundred times over a playable left a few hundred live nodes attached,
+   * and nothing stopped when the game was torn down. Tracked here so a
+   * finished one-shot disconnects itself and teardown can stop the rest.
+   */
+  private readonly liveSounds = new Set<THREE.Audio>();
 
   /** @internal — ION.audio.play / .music */
   playSound(path: string, opts: { volume?: number; loop?: boolean; music?: boolean } = {}): void {
@@ -170,7 +199,24 @@ export abstract class Game extends IonGame implements SimpleGameHost {
     const sound = new THREE.Audio(this.audioListener);
     sound.setBuffer(buffer);
     sound.setLoop(opts.loop ?? false);
-    sound.setVolume((opts.volume ?? 1) * this.masterVolume);
+    // The per-sound volume only. Master is the listener's job — multiplying it
+    // in here as well applied it twice, so `ION.audio.volume = 0.5` actually
+    // played new sounds at a quarter, while sounds already playing were only
+    // halved.
+    sound.setVolume(opts.volume ?? 1);
+    this.liveSounds.add(sound);
+    // A looping sound never ends on its own; a one-shot releases its nodes the
+    // moment the buffer finishes.
+    if (!(opts.loop ?? false)) {
+      // three.js's own onEnded is what clears `isPlaying`; replacing it
+      // outright rather than wrapping it would leave every finished sound
+      // claiming to still be playing.
+      const whenThreeIsDone = sound.onEnded.bind(sound);
+      sound.onEnded = () => {
+        whenThreeIsDone();
+        this.releaseSound(sound);
+      };
+    }
     sound.play();
     if (opts.music) this.music = sound;
   }
@@ -178,7 +224,24 @@ export abstract class Game extends IonGame implements SimpleGameHost {
   /** @internal */
   stopMusic(): void {
     if (!this.music) return;
-    if (this.music.isPlaying) this.music.stop();
+    this.releaseSound(this.music);
+    this.music = undefined;
+  }
+
+  /** Stops a sound if it is playing and takes its nodes back off the graph. */
+  private releaseSound(sound: THREE.Audio): void {
+    if (!this.liveSounds.delete(sound)) return;
+    try {
+      if (sound.isPlaying) sound.stop();
+      sound.disconnect();
+    } catch {
+      // A source already ended cannot be stopped twice; nothing to recover.
+    }
+  }
+
+  /** Silences everything this game started. Part of teardown — see onDispose. */
+  private stopAllSounds(): void {
+    for (const sound of [...this.liveSounds]) this.releaseSound(sound);
     this.music = undefined;
   }
 
@@ -186,6 +249,11 @@ export abstract class Game extends IonGame implements SimpleGameHost {
   setMasterVolume(value: number): void {
     this.masterVolume = Math.max(0, Math.min(1, value));
     this.audioListener.setMasterVolume(this.masterVolume);
+  }
+
+  /** @internal — ION.audio.volume reads this back. */
+  get volume(): number {
+    return this.masterVolume;
   }
 
   /** @internal — ION.ui.showEndcard */

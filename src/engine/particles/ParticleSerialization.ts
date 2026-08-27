@@ -45,11 +45,18 @@ import { resolveSceneObject, sceneObjectPath } from "../SceneBindings";
  */
 export function loadParticles(manager: ParticleManager, data: ParticlesFileData, scene: THREE.Scene): ParticleSystem[] {
   const built: ParticleSystem[] = [];
-  for (const record of data.systems ?? []) {
+  const records = Array.isArray(data?.systems) ? data.systems : [];
+  for (const record of records) {
+    // Same reasoning as loadColliders: a malformed entry costs that entry, not
+    // every effect in the project.
+    if (!record || typeof record !== "object") {
+      console.warn("Particles: skipping a malformed system in particles.json", record);
+      continue;
+    }
     const config: ParticleSystemConfig = {
       id: record.id,
       name: record.name,
-      emitters: (record.emitters ?? []).map((emitter, index) => normalizeEmitterConfig(emitter as PartialEmitterConfig, emitter?.name ?? `Emitter ${index + 1}`)),
+      emitters: (Array.isArray(record.emitters) ? record.emitters : []).map((emitter, index) => normalizeEmitterConfig(emitter as PartialEmitterConfig, emitter?.name ?? `Emitter ${index + 1}`)),
     };
     const system = manager.create(config);
 

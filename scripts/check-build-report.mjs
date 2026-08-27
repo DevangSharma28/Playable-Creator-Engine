@@ -31,7 +31,10 @@
 import fs from "node:fs";
 import path from "node:path";
 
-const REPORT = path.join(process.cwd(), "dist", "build-report.json");
+// ION_PROJECT_ROOT when `ion build` set it, cwd otherwise — build.sh already
+// runs from the project root, so this only removes a hidden dependency on that
+// staying true.
+const REPORT = path.join(process.env.ION_PROJECT_ROOT || process.cwd(), "dist", "build-report.json");
 // The env var is the escape hatch build.sh forwards, so `ALLOW_COMPAT_WARNINGS=1
 // npm run build` works without anyone having to know this script exists.
 const allowWarnings =

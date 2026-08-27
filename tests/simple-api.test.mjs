@@ -1,0 +1,586 @@
+/**
+ * The client-facing API: `Game`, `Entity` and `ION`.
+ *
+ * This is the surface a project is actually written against, so it is tested
+ * the way a project uses it — a real game booted through the real engine,
+ * driven a frame at a time — rather than against stand-ins for the host it
+ * talks to. Several of the cases here exist because the behaviour they check
+ * was silently wrong: shake did nothing while the camera followed, master
+ * volume was applied twice, and every one-shot sound left its WebAudio nodes
+ * connected for the life of the page.
+ */
+
+import test from "node:test";
+import assert from "node:assert/strict";
+import * as THREE from "three";
+import { bootGame } from "./lib/boot.mjs";
+import { loadRuntime } from "./lib/runtime-bundle.mjs";
+
+const runtime = await loadRuntime();
+const { ION } = runtime;
+
+class SeededLoader extends runtime.AssetLoader {
+  getAudio() { return { duration: 1, sampleRate: 44100, numberOfChannels: 1, length: 1024 }; }
+}
+
+/** Boots a game whose start() is supplied by the test. */
+function scene(body, options = {}) {
+  return bootGame({
+    ...options,
+    game: ({ Game }) => class Scratch extends Game {
+      start() { body?.(this); }
+    },
+  });
+}
+
+test("Entity", async (t) => {
+  await t.test("registers itself and receives start() then update()", async () => {
+    const log = [];
+    const harness = await bootGame({
+      game: ({ Game, Entity }) => {
+        class Tracked extends Entity {
+          start() { log.push("start"); }
+          update() { log.push("update"); }
+          stop() { log.push("stop"); }
+        }
+        return class G extends Game { start() { this.tracked = new Tracked("T"); } };
+      },
+    });
+    // start() is deferred rather than called from registerEntity — the
+    // subclass constructor has not finished at that point, so its own fields
+    // are still undefined. It is flushed at the end of creation, so it has
+    // already run by the time the first frame arrives.
+    assert.deepEqual(log, ["start"]);
+    harness.frames(1);
+    assert.deepEqual(log, ["start", "update"]);
+    harness.frames(2);
+    assert.deepEqual(log, ["start", "update", "update", "update"]);
+    harness.game.tracked.destroy();
+    harness.frames(1);
+    assert.deepEqual(log.at(-1), "stop", "no update after destroy");
+    harness.dispose();
+  });
+
+  await t.test("an entity created at module top level says what to do", async () => {
+    const { Entity } = runtime;
+    assert.throws(() => new Entity("Orphan"), /before the game existed/);
+  });
+
+  await t.test("position and scale are live views, rotation is degrees", async () => {
+    const harness = await scene();
+    const entity = new runtime.Entity("E");
+    entity.position.y = 3;
+    assert.equal(entity.object3D.position.y, 3);
+    entity.rotation.y = 90;
+    assert.ok(Math.abs(entity.object3D.rotation.y - Math.PI / 2) < 1e-9);
+    assert.ok(Math.abs(entity.rotation.y - 90) < 1e-9, "reads back in degrees");
+    entity.scale.set(2, 2, 2);
+    assert.equal(entity.object3D.scale.x, 2);
+    harness.dispose();
+  });
+
+  await t.test("the rotation view is the same object every read", async () => {
+    // Rebuilding it per access allocated an object and seven closures on every
+    // frame for anything that spins, which is a GC pause a playable cannot pay.
+    const harness = await scene();
+    const entity = new runtime.Entity("E");
+    assert.equal(entity.rotation, entity.rotation);
+    harness.dispose();
+  });
+
+  await t.test("moveTo/moveBy/rotateBy/lookAt/distanceTo behave and chain", async () => {
+    const harness = await scene();
+    const a = new runtime.Entity("A");
+    const b = new runtime.Entity("B");
+    assert.equal(a.moveTo(1, 2, 3), a, "chainable");
+    assert.deepEqual([a.position.x, a.position.y, a.position.z], [1, 2, 3]);
+    a.moveBy(1, 0, 0);
+    assert.equal(a.position.x, 2);
+    b.moveTo(2, 2, 3);
+    assert.equal(a.distanceTo(b), 0);
+    assert.equal(a.distanceTo({ x: 2, y: 2, z: 0 }), 3);
+    a.rotateBy(0, 180, 0);
+    assert.ok(Math.abs(a.rotation.y - 180) < 1e-9);
+    harness.dispose();
+  });
+
+  await t.test("destroy is idempotent and unregisters exactly once", async () => {
+    const harness = await scene();
+    const entity = new runtime.Entity("Once");
+    let stops = 0;
+    entity.stop = () => { stops++; };
+    entity.destroy();
+    entity.destroy();
+    assert.equal(stops, 1);
+    assert.equal(entity.isDestroyed, true);
+    harness.frames(1);
+    harness.dispose();
+  });
+
+  await t.test("destroy frees the geometry and material of shapes it owns", async () => {
+    // Asserted on the dispose calls rather than on live GL objects, because
+    // whether a mesh was ever uploaded depends on frustum culling. The
+    // end-to-end GL count is covered in tests/runtime-lifecycle.test.mjs.
+    const harness = await scene();
+    const entity = new runtime.Entity("Coin");
+    const mesh = ION.scene.box({ size: 0.4 });
+    entity.shape = mesh;
+    let geometryDisposed = 0;
+    let materialDisposed = 0;
+    mesh.geometry.addEventListener("dispose", () => geometryDisposed++);
+    mesh.material.addEventListener("dispose", () => materialDisposed++);
+    entity.destroy();
+    assert.equal(geometryDisposed, 1);
+    assert.equal(materialDisposed, 1);
+    harness.dispose();
+  });
+
+  await t.test("destroy leaves a model's shared geometry alone", async () => {
+    // Clones from the asset manifest share geometry with the loader's cache
+    // and with every other clone. Freeing it on one destroy() would blank the
+    // rest of the model in the scene.
+    const harness = await scene();
+    const shared = new THREE.BoxGeometry();
+    let disposed = 0;
+    shared.addEventListener("dispose", () => disposed++);
+    const clone = new THREE.Mesh(shared, new THREE.MeshBasicMaterial());
+    const entity = new runtime.Entity("Model");
+    entity.add(clone);
+    entity.destroy();
+    assert.equal(disposed, 0, "an entity freed geometry it did not own");
+    assert.ok(shared.attributes.position, "geometry still usable");
+    harness.dispose();
+  });
+
+  await t.test("a throwing stop() does not abort a game-wide teardown", async () => {
+    const harness = await bootGame({
+      game: ({ Game, Entity }) => {
+        class Bad extends Entity { stop() { throw new Error("bad teardown"); } }
+        class Good extends Entity { constructor() { super("Good"); this.stopped = false; } stop() { this.stopped = true; } }
+        return class G extends Game {
+          start() { this.bad = new Bad("Bad"); this.good = new Good(); }
+        };
+      },
+    });
+    harness.frames(1);
+    const realError = console.error;
+    console.error = () => {};
+    try {
+      harness.env.window.__disposeGame();
+    } finally {
+      console.error = realError;
+    }
+    assert.equal(harness.game.good.stopped, true, "the entity after the throwing one still ran");
+    harness.env.restore();
+  });
+});
+
+test("ION.scene", async (t) => {
+  await t.test("primitives land in the world with the requested size and place", async () => {
+    const harness = await scene();
+    const box = ION.scene.box({ width: 2, height: 3, depth: 4, x: 1, y: 2, z: 3, name: "Crate" });
+    assert.equal(box.name, "Crate");
+    assert.deepEqual([box.position.x, box.position.y, box.position.z], [1, 2, 3]);
+    assert.equal(box.geometry.parameters.width, 2);
+    assert.equal(box.geometry.parameters.height, 3);
+    assert.equal(box.geometry.parameters.depth, 4);
+    assert.equal(ION.scene.sphere({ radius: 5 }).geometry.parameters.radius, 5);
+    assert.equal(ION.scene.cylinder({ radius: 2, height: 7 }).geometry.parameters.height, 7);
+    const ground = ION.scene.ground({ size: 50 });
+    assert.equal(ground.geometry.parameters.width, 50);
+    assert.ok(Math.abs(ground.rotation.x + Math.PI / 2) < 1e-9, "ground is lying down");
+    assert.equal(ground.receiveShadow, true);
+    harness.dispose();
+  });
+
+  await t.test("find() reaches anything by name, including editor-placed objects", async () => {
+    const harness = await scene();
+    ION.scene.box({ name: "Findable" });
+    assert.equal(ION.scene.find("Findable")?.name, "Findable");
+    assert.equal(ION.scene.find("Nope"), undefined);
+    harness.dispose();
+  });
+
+  await t.test("colours accept names, hex strings, short hex and numbers", async () => {
+    const harness = await scene();
+    assert.equal(ION.scene.box({ color: "orange" }).material.color.getHex(), 0xe8961e);
+    assert.equal(ION.scene.box({ color: "#123456" }).material.color.getHex(), 0x123456);
+    assert.equal(ION.scene.box({ color: "#abc" }).material.color.getHex(), 0xaabbcc);
+    assert.equal(ION.scene.box({ color: 0x00ff00 }).material.color.getHex(), 0x00ff00);
+    harness.dispose();
+  });
+
+  await t.test("an unrecognised colour warns instead of parsing into a wrong one", async () => {
+    // parseInt stops at the first character it cannot read, so "deepblue" used
+    // to come out as 0xde — a plausible brown, and no indication of a typo.
+    const harness = await scene();
+    const warnings = [];
+    const realWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      const mesh = ION.scene.box({ color: "deepblue" });
+      assert.equal(mesh.material.color.getHex(), 0xcccccc, "fell back rather than guessed");
+    } finally {
+      console.warn = realWarn;
+    }
+    assert.match(warnings.join("\n"), /isn't a colour/);
+    harness.dispose();
+  });
+
+  await t.test("a model that isn't in the manifest says which ones are", async () => {
+    const harness = await scene();
+    assert.throws(() => ION.scene.model("./assets/models/missing.glb"), /asset manifest/);
+    harness.dispose();
+  });
+
+  await t.test("remove() detaches without destroying", async () => {
+    const harness = await scene();
+    const box = ION.scene.box({ name: "Temp" });
+    ION.scene.remove(box);
+    assert.equal(ION.scene.find("Temp"), undefined);
+    assert.equal(box.parent, null);
+    harness.dispose();
+  });
+});
+
+test("ION.camera", async (t) => {
+  await t.test("follow() moves the rig toward the target", async () => {
+    const harness = await bootGame({
+      data: { environment: { version: 1, camera: { follow: true } } },
+      game: ({ Game, Entity }) => class G extends Game {
+        start() { this.hero = new Entity("Hero"); this.hero.moveTo(20, 0, 20); ION.camera.follow(this.hero); }
+      },
+    });
+    const start = harness.game.rig.camera.position.clone();
+    harness.frames(30);
+    const moved = harness.game.rig.camera.position.distanceTo(start);
+    assert.ok(moved > 1, `the camera should have chased the target, moved ${moved}`);
+    harness.dispose();
+  });
+
+  await t.test("stopFollow() leaves the camera where it is", async () => {
+    const harness = await bootGame({
+      data: { environment: { version: 1, camera: { follow: true } } },
+      game: ({ Game, Entity }) => class G extends Game {
+        start() { this.hero = new Entity("Hero"); this.hero.moveTo(30, 0, 30); ION.camera.follow(this.hero); }
+      },
+    });
+    harness.frames(20);
+    ION.camera.stopFollow();
+    const parked = harness.game.rig.camera.position.clone();
+    harness.game.hero.moveTo(-40, 0, -40);
+    harness.frames(20);
+    assert.ok(harness.game.rig.camera.position.distanceTo(parked) < 1e-6);
+    harness.dispose();
+  });
+
+  await t.test("shake() displaces the camera even while following", async () => {
+    // The follow lerp writes an absolute position, so a shake applied during
+    // onUpdate — before the rig runs — was overwritten every frame and never
+    // visible. This is the regression guard for that.
+    const harness = await bootGame({
+      data: { environment: { version: 1, camera: { follow: true } } },
+      game: ({ Game, Entity }) => class G extends Game {
+        start() { this.hero = new Entity("Hero"); ION.camera.follow(this.hero); }
+      },
+    });
+    harness.frames(60); // let the follow settle so any movement is the shake
+    const settled = harness.game.rig.camera.position.clone();
+    harness.frames(1);
+    const drift = harness.game.rig.camera.position.distanceTo(settled);
+
+    ION.camera.shake(4, 1);
+    harness.frames(1);
+    const shaken = harness.game.rig.camera.position.distanceTo(settled);
+    assert.ok(shaken > drift * 10 && shaken > 0.1, `shake was invisible: drift ${drift}, shaken ${shaken}`);
+    harness.dispose();
+  });
+
+  await t.test("shake decays back to no displacement", async () => {
+    const harness = await scene();
+    const rest = harness.game.rig.camera.position.clone();
+    ION.camera.shake(2, 0.2);
+    harness.frames(60);
+    assert.ok(harness.game.rig.camera.position.distanceTo(rest) < 1e-9, "shake left a permanent offset");
+    harness.dispose();
+  });
+});
+
+test("ION.audio", async (t) => {
+  await t.test("master volume is applied once, by the listener", async () => {
+    // It used to be multiplied into each sound as well, so 0.5 played new
+    // sounds at 0.25 while already-playing ones were at 0.5.
+    const harness = await scene(undefined, { assets: new SeededLoader() });
+    ION.audio.volume = 0.5;
+    assert.equal(ION.audio.volume, 0.5, "readable, not write-only");
+    assert.equal(harness.game.audioListener.getMasterVolume(), 0.5);
+    harness.dispose();
+  });
+
+  await t.test("a one-shot releases its WebAudio nodes when it ends", async () => {
+    const harness = await scene(undefined, { assets: new SeededLoader() });
+    const before = harness.env.audio.disconnected;
+    ION.audio.play("./sfx.ogg");
+    assert.ok(harness.env.audio.live.size > 0, "the sound built nodes");
+    harness.game.stopMusic();
+    // Ending a source is asynchronous, the way a real BufferSource is.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    harness.dispose();
+    assert.ok(harness.env.audio.disconnected > before, "nodes were taken back off the graph");
+  });
+
+  await t.test("teardown silences everything the game started", async () => {
+    const harness = await scene(undefined, { assets: new SeededLoader() });
+    ION.audio.music("./music.ogg");
+    for (let i = 0; i < 25; i++) ION.audio.play("./sfx.ogg");
+    const beforeStops = harness.env.audio.stopped;
+    harness.env.window.__disposeGame();
+    assert.ok(harness.env.audio.stopped > beforeStops, "sounds were stopped on teardown");
+    harness.env.restore();
+  });
+
+  await t.test("music() replaces the previous track rather than layering", async () => {
+    const harness = await scene(undefined, { assets: new SeededLoader() });
+    ION.audio.music("./one.ogg");
+    const afterFirst = harness.env.audio.stopped;
+    ION.audio.music("./two.ogg");
+    assert.ok(harness.env.audio.stopped > afterFirst, "the first track was stopped");
+    harness.dispose();
+  });
+
+  await t.test("a sound that isn't in the manifest warns and keeps playing the game", async () => {
+    const harness = await scene();
+    const warnings = [];
+    const realWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      assert.doesNotThrow(() => ION.audio.play("./nope.ogg"));
+    } finally {
+      console.warn = realWarn;
+    }
+    assert.match(warnings.join("\n"), /asset manifest/);
+    harness.dispose();
+  });
+});
+
+test("ION timing and events", async (t) => {
+  await t.test("after() fires once, on game time", async () => {
+    const harness = await scene();
+    let fired = 0;
+    ION.after(0.5, () => fired++);
+    harness.frames(10, 16); // 0.16s
+    assert.equal(fired, 0);
+    harness.frames(30, 16); // past 0.5s
+    assert.equal(fired, 1);
+    harness.frames(60, 16);
+    assert.equal(fired, 1, "one-shot did not repeat");
+    harness.dispose();
+  });
+
+  await t.test("every() repeats and cancels", async () => {
+    const harness = await scene();
+    let ticks = 0;
+    const handle = ION.every(0.1, () => ticks++);
+    harness.frames(40, 16);
+    assert.ok(ticks >= 4, `expected repeats, got ${ticks}`);
+    const atCancel = ticks;
+    handle.cancel();
+    harness.frames(40, 16);
+    assert.equal(ticks, atCancel);
+    assert.equal(handle.done, true);
+    harness.dispose();
+  });
+
+  await t.test("tween moves a value and completes", async () => {
+    const harness = await scene();
+    const box = ION.scene.box();
+    let completed = false;
+    ION.tween(box.scale, { x: 2, y: 2, z: 2 }, 0.2, { easing: ION.ease.smooth, onComplete: () => { completed = true; } });
+    harness.frames(30, 16);
+    assert.ok(Math.abs(box.scale.x - 2) < 1e-6, `scale reached ${box.scale.x}`);
+    assert.equal(completed, true);
+    harness.dispose();
+  });
+
+  await t.test("timers freeze while the editor pauses gameplay", async () => {
+    const harness = await scene();
+    let fired = 0;
+    ION.after(0.3, () => fired++);
+    harness.env.window.__setUIEditorPaused(true);
+    harness.frames(60, 16);
+    assert.equal(fired, 0, "game time advanced behind a paused editor");
+    harness.env.window.__setUIEditorPaused(false);
+    harness.frames(30, 16);
+    assert.equal(fired, 1);
+    harness.dispose();
+  });
+
+  await t.test("emit/on carry a payload", async () => {
+    const harness = await scene();
+    const seen = [];
+    ION.on("scored", (payload) => seen.push(payload.total));
+    ION.emit("scored", { total: 7 });
+    ION.emit("scored", { total: 8 });
+    assert.deepEqual(seen, [7, 8]);
+    harness.dispose();
+  });
+
+  await t.test("listeners from a retired game do not survive into the next one", async () => {
+    const harness = await scene();
+    let fired = 0;
+    ION.on("stale", () => fired++);
+    harness.dispose();
+
+    const second = await scene();
+    ION.emit("stale", undefined);
+    assert.equal(fired, 0, "a listener from the previous game fired into the new one");
+    second.dispose();
+  });
+});
+
+test("ION.random", async (t) => {
+  await t.test("random() stays inside its range and randomInt() is inclusive", async () => {
+    const harness = await scene();
+    for (let i = 0; i < 500; i++) {
+      const value = ION.random(-3, 5);
+      assert.ok(value >= -3 && value < 5);
+    }
+    const seen = new Set();
+    for (let i = 0; i < 500; i++) seen.add(ION.randomInt(1, 3));
+    assert.deepEqual([...seen].sort(), [1, 2, 3], "both endpoints reachable");
+    harness.dispose();
+  });
+});
+
+test("ION.colliders", async (t) => {
+  await t.test("a zone fires enter and exit exactly once per crossing", async () => {
+    const harness = await bootGame({
+      game: ({ Game, Entity }) => class G extends Game {
+        start() {
+          this.hero = new Entity("Hero");
+          this.hero.shape = ION.scene.box({ size: 1 });
+          ION.colliders.attach(this.hero, { size: 1 });
+          this.enters = 0;
+          this.exits = 0;
+          ION.colliders.zone({ name: "Goal", size: 4 }).onEnter(() => this.enters++).onExit(() => this.exits++);
+          this.hero.moveTo(10, 0, 0);
+        }
+        update() { this.hero.moveBy(-0.4, 0, 0); }
+      },
+    });
+    harness.frames(60);
+    assert.equal(harness.game.enters, 1, "entered once");
+    assert.equal(harness.game.exits, 1, "exited once");
+    harness.dispose();
+  });
+
+  await t.test("a disabled zone stops reporting", async () => {
+    const harness = await bootGame({
+      game: ({ Game, Entity }) => class G extends Game {
+        start() {
+          this.hero = new Entity("Hero");
+          ION.colliders.attach(this.hero, { size: 1 });
+          this.enters = 0;
+          this.zone = ION.colliders.zone({ name: "Off", size: 4 }).onEnter(() => this.enters++);
+          this.zone.enabled = false;
+          this.hero.moveTo(6, 0, 0);
+        }
+        update() { this.hero.moveBy(-0.3, 0, 0); }
+      },
+    });
+    harness.frames(60);
+    assert.equal(harness.game.enters, 0);
+    harness.dispose();
+  });
+
+  await t.test("a body is retired with the entity it belongs to", async () => {
+    const harness = await bootGame({
+      game: ({ Game, Entity }) => class G extends Game {
+        start() {
+          this.hero = new Entity("Hero");
+          ION.colliders.attach(this.hero, { size: 1 });
+          this.enters = 0;
+          ION.colliders.zone({ name: "Goal", size: 4 }).onEnter(() => this.enters++);
+          this.hero.moveTo(10, 0, 0);
+        }
+      },
+    });
+    harness.frames(2);
+    harness.game.hero.destroy();
+    harness.game.hero.moveTo(0, 0, 0);
+    harness.frames(10);
+    assert.equal(harness.game.enters, 0, "a destroyed entity's collider still triggered");
+    assert.equal(ION.colliders.find("Hero"), undefined);
+    harness.dispose();
+  });
+
+  await t.test("find() reaches a zone by name", async () => {
+    const harness = await scene(() => { ION.colliders.zone({ name: "Named" }); });
+    assert.ok(ION.colliders.find("Named"));
+    assert.equal(ION.colliders.find("Absent"), undefined);
+    harness.dispose();
+  });
+});
+
+test("ION.ui", async (t) => {
+  const layout = {
+    version: 1,
+    canvasWidth: 400,
+    canvasHeight: 711,
+    elements: [
+      { id: "s", name: "Score", type: "text", x: 10, y: 10, width: 100, height: 30, text: "0", visible: true, opacity: 1 },
+      { id: "b", name: "Play", type: "button", x: 10, y: 60, width: 120, height: 40, text: "Play", visible: true, opacity: 1 },
+    ],
+  };
+
+  await t.test("text/show/hide reach the designed elements", async () => {
+    const harness = await bootGame({
+      data: { mainLayout: layout },
+      game: ({ Game }) => class G extends Game { start() {} },
+    });
+    ION.ui.text("Score", 42);
+    assert.match(harness.env.document.getElementById("custom-ui-layer").textContent, /42/);
+    assert.doesNotThrow(() => ION.ui.hide("Score"));
+    assert.doesNotThrow(() => ION.ui.show("Score"));
+    harness.dispose();
+  });
+
+  await t.test("onClick wires a designed button", async () => {
+    const harness = await bootGame({
+      data: { mainLayout: layout },
+      game: ({ Game }) => class G extends Game { start() {} },
+    });
+    let clicks = 0;
+    ION.ui.onClick("Play", () => clicks++);
+    const node = [...harness.env.document.querySelectorAll("*")].find((el) => el.textContent === "Play" && el.style.cursor === "pointer");
+    assert.ok(node, "the button rendered as an interactive node");
+    node.dispatchEvent(new harness.env.window.MouseEvent("click", { bubbles: true }));
+    assert.equal(clicks, 1);
+    harness.dispose();
+  });
+
+  await t.test("naming an element that doesn't exist does not crash the game", async () => {
+    const harness = await bootGame({
+      data: { mainLayout: layout },
+      game: ({ Game }) => class G extends Game { start() {} },
+    });
+    assert.doesNotThrow(() => ION.ui.text("Nope", 1));
+    assert.doesNotThrow(() => ION.ui.value("Nope", 0.5));
+    harness.dispose();
+  });
+
+  await t.test("showEndcard reveals the endcard layer", async () => {
+    const harness = await scene();
+    ION.ui.showEndcard();
+    assert.notEqual(harness.env.document.getElementById("endcard-layer").style.display, "none");
+    harness.dispose();
+  });
+});
+
+test("ION used before a game exists", async (t) => {
+  await t.test("says where to move the call", async () => {
+    assert.throws(() => ION.scene.box(), /before the game started/);
+    assert.throws(() => ION.camera.shake(), /before the game started/);
+    assert.throws(() => ION.ui.text("x", 1), /before the game started/);
+  });
+});

@@ -29,7 +29,13 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 const runtimeEntry = process.env.ION_RUNTIME_ENTRY;
 
 export default defineConfig({
-  resolve: runtimeEntry ? { alias: { ion: runtimeEntry } } : undefined,
+  // Both specifiers, one file. A project imports the runtime as "ion" and the
+  // generated entry used to import it as "@ion-engine/runtime"; those resolve
+  // to different paths (IONEngine/ versus node_modules/), so the bundle got two
+  // copies of the engine. Two copies means two `Ion` facades — one bound by
+  // boot(), the other read by the game — and the game threw "Ion used before
+  // IonEngine.boot() finished" on a boot that had already finished.
+  resolve: runtimeEntry ? { alias: { ion: runtimeEntry, "@ion-engine/runtime": runtimeEntry }, dedupe: ["three"] } : undefined,
   // ION's own repo when unset; the customer's project when `ion build` sets
   // it. Without this the config would resolve "src" relative to its own
   // installed location inside node_modules and build the package, not the game.

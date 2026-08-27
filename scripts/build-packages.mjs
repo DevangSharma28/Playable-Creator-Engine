@@ -155,7 +155,10 @@ function emitTypes(pkg) {
       "--declaration", "--emitDeclarationOnly",
       "--declarationDir", path.join(out, ".types"),
     ],
-    { cwd: ROOT, stdio: ["ignore", "ignore", "pipe"] }
+    // tsc reports diagnostics on *stdout*, not stderr. Discarding it meant a
+    // type-emit failure printed "FAILED" followed by a blank line, with the
+    // actual error nowhere to be seen.
+    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }
   );
   // tsc mirrors the rootDir tree, so the real entry lands nested. Re-point a
   // flat index.d.ts at it rather than trying to flatten the tree — the nested
@@ -186,6 +189,7 @@ for (const spec of BUNDLED) {
   await bundle(spec);
 }
 
+const typeFailures = [];
 if (withTypes) {
   log("");
   for (const pkg of ["runtime", "editor"]) {
@@ -195,7 +199,9 @@ if (withTypes) {
       log("ok");
     } catch (err) {
       log("FAILED");
-      log(String(err.stderr ?? err.message).slice(0, 800));
+      const detail = [err.stdout, err.stderr].map((part) => String(part ?? "")).join("").trim();
+      log(detail ? detail.slice(0, 2000) : String(err.message));
+      typeFailures.push(pkg);
       process.exitCode = 1;
     }
   }
@@ -226,6 +232,9 @@ copyTree(path.join(ROOT, "scripts", "compress-assets.mjs"), path.join(buildLib, 
 // server that works.
 copyTree(path.join(ROOT, "scripts", "dev-build-api.js"), path.join(buildLib, "dev-build-api.cjs"));
 copyTree(path.join(ROOT, "scripts", "check-build-report.mjs"), path.join(buildLib, "check-build-report.mjs"));
+// build.sh shells this by name out of ION_BUILD_LIB, so it has to travel with
+// the pipeline rather than staying behind in the ION repository.
+copyTree(path.join(ROOT, "scripts", "compat-scan.mjs"), path.join(buildLib, "compat-scan.mjs"));
 copyTree(path.join(ROOT, "vite.config.prod.mts"), path.join(buildLib, "vite.config.prod.mts"));
 copyTree(path.join(ROOT, "src", "index.template.html"), path.join(buildLib, "index.template.html"));
 // Written here rather than kept as a source file: this directory is wiped and
@@ -265,4 +274,13 @@ for (const [pkg, dirs] of [
   log(`  integrity: @ion-engine/${pkg.padEnd(8)} ${String(n).padStart(4)} files hashed`);
 }
 
-log("\n✓ Packages built into packages/*/dist\n");
+// A partial build reporting success is worse than no build: the packages are
+// on disk, so everything downstream carries on against a runtime that ships no
+// type declarations at all.
+if (typeFailures.length) {
+  log(`\n✖ Type declarations failed for: ${typeFailures.join(", ")}`);
+  log("  The bundles were written, but these packages would publish without types.");
+  log("  Fix the errors above and re-run.\n");
+} else {
+  log("\n✓ Packages built into packages/*/dist\n");
+}

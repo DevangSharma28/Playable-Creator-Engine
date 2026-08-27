@@ -97,8 +97,19 @@ export abstract class Collider {
   /** The scene object this collider follows, if any. Never modified by the collider. */
   attached: THREE.Object3D | undefined;
 
-  /** Set by ColliderManager.add — the collider needs it to emit exits when it's disabled or destroyed mid-overlap. */
-  manager: { onColliderDeactivated(collider: Collider): void } | undefined;
+  /**
+   * Set by ColliderManager.add.
+   *
+   * Structural rather than a `ColliderManager` import, to keep the dependency
+   * one-way: the manager knows about colliders, not the other way round. The
+   * two methods named here are the whole of what a collider asks of it —
+   * emitting exits when it is disabled mid-overlap, and unregistering itself
+   * when it is destroyed.
+   */
+  manager: {
+    onColliderDeactivated(collider: Collider): void;
+    remove(collider: Collider, keepAlive?: boolean): void;
+  } | undefined;
 
   /**
    * True for colliders that came from (and belong in) src/game/colliders.json.
@@ -381,7 +392,14 @@ export abstract class Collider {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
-    this.manager?.onColliderDeactivated(this);
+    // Unregister, not just deactivate. Retiring a collider used to clear its
+    // overlap bookkeeping and leave it in the registry, so a destroyed
+    // collider was still returned by getByName/getByTag/all and still walked
+    // every frame — `ION.colliders.find()` handed back dead objects, and a
+    // pickup destroyed while standing in a trigger kept the zone occupied.
+    // `keepAlive` stops this from recursing: remove() would otherwise call
+    // destroy() straight back.
+    this.manager?.remove(this, true);
     this.node.removeFromParent();
     this.attached = undefined;
     this.triggerEnter.length = 0;

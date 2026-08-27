@@ -45,11 +45,20 @@ jobs:
       # one anyone tested against.
       - run: npm ci
 
-      # typecheck + particles + shaders + geometry parity + scene environment
-      # + UI layout/editor + render-defaults parity + the editor smoke pass.
-      # No browser needed: every suite is node:test over jsdom or plain
-      # typed-array maths (see ENGINE.md §13).
+      # typecheck + the whole node:test suite: runtime lifecycle, the simple
+      # API, serialization round-trips, undo/redo, the project generator, the
+      # dev API, the compatibility gate, particles, shaders, geometry parity,
+      # scene environment, UI layout/editor, render-defaults parity, and the
+      # editor smoke pass. No browser needed: every suite runs over jsdom plus
+      # the stub WebGL context in tests/lib/dom-env.mjs (see ENGINE.md §13).
       - run: npm test
+
+      # Separate step so a performance regression is reported as a performance
+      # regression rather than as "the tests failed". --expose-gc is what makes
+      # the heap-growth baselines mean anything; without it they measure
+      # whatever V8 happened to collect.
+      - name: Performance baselines
+        run: npm run test:perf
 
   build:
     name: Production build
@@ -93,6 +102,15 @@ jobs:
         continue-on-error: true
         run: node scripts/check-build-report.mjs
 
+      # The whole client workflow, from an empty directory: generate a project,
+      # npm install it, build it, and run the result in headless Chrome. This
+      # is the only step that exercises the packages the way a customer does —
+      # everything above tests the repository, which is not the same artifact.
+      - name: End-to-end client workflow
+        run: |
+          node scripts/build-packages.mjs
+          npm run test:e2e
+
       - name: Upload build output
         if: always()
         uses: actions/upload-artifact@v4
@@ -101,5 +119,6 @@ jobs:
           path: |
             dist/index.html
             dist/build-report.json
+            dist/index.zip
           if-no-files-found: error
           retention-days: 14

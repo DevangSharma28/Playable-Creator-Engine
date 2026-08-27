@@ -5,6 +5,7 @@ import path from "node:path";
 import { loadConfig } from "./config.mjs";
 import { verifyInstall } from "./integrity.mjs";
 import { enginePackageDir, sync, ENGINE_DIR } from "./sync.mjs";
+import { buildInvocation } from "./build.mjs";
 
 /**
  * Resolves an installed ION package's own directory from the project.
@@ -175,7 +176,20 @@ export async function dev(projectRoot, opts = {}) {
     }
   }
 
-  const apiScript = path.join(packageDir(projectRoot, "@ion-engine/build") ?? "", "lib", "dev-build-api.cjs");
+  // The Builder button in Studio shells out to the same pipeline `ion build`
+  // uses, so the API is given the same script and environment. Resolved here
+  // rather than in the API because this is where the project's packages are
+  // already located, and a failure to resolve should surface as a dev-server
+  // error rather than a mysterious 500 on the first click of Build.
+  let buildEnv = {};
+  try {
+    const invocation = buildInvocation(projectRoot);
+    buildEnv = { ION_BUILD_SCRIPT: invocation.script, ...invocation.env };
+  } catch (err) {
+    console.warn(`  ⚠ Builder unavailable: ${err.message.split("\n")[0]}`);
+  }
+
+  const apiScript = path.join(enginePackageDir(projectRoot, "@ion-engine/build", "executed") ?? "", "lib", "dev-build-api.cjs");
   let api;
   if (fs.existsSync(apiScript)) {
     api = spawn(process.execPath, [apiScript], {
@@ -186,6 +200,7 @@ export async function dev(projectRoot, opts = {}) {
         ION_PROJECT_ROOT: projectRoot,
         ION_API_PORT: String(apiPort),
         ION_DEV_ORIGINS: `http://localhost:${port},http://127.0.0.1:${port}`,
+        ...buildEnv,
       },
     });
   }

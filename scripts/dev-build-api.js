@@ -8,7 +8,7 @@
 // alongside Vite's dev server (see scripts/dev.js) — never part of the
 // production build, never listens on anything but 127.0.0.1.
 const http = require("http");
-const { exec, execSync } = require("child_process");
+const { exec, execFile, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 
@@ -120,8 +120,23 @@ const REPORTED_CATEGORIES = ["engine", "game"];
  * below), so there's no folder to get wrong and no browser permission to
  * grant — it's exactly as reliable as the Build button already is.
  */
+/**
+ * Reduces a client-supplied layout name to a single safe filename.
+ *
+ * `path.basename` alone is not enough: on POSIX a backslash is an ordinary
+ * filename character, so `..\..\escape.json` survives it intact and is then
+ * a real traversal the moment the same request is made on Windows. Both
+ * separators are normalised first, and anything that still looks like a path
+ * or a dot-segment is refused outright rather than silently rewritten into
+ * some other file's name.
+ */
 function sanitizeLayoutFilename(name) {
-  const base = path.basename(String(name || "")); // strips any directory components — the only defense this needs against path traversal
+  const raw = String(name || "").trim();
+  if (!raw) throw new Error("A layout needs a filename.");
+  // Both separators, plus NUL, which truncates a path in some syscalls.
+  const base = path.basename(raw.replace(/\\/g, "/").replace(/\0/g, "")).replace(/^\.+/, "");
+  if (!base || base === "." || base === "..") throw new Error(`"${raw}" is not a usable layout name.`);
+  if (/[/\\]/.test(base)) throw new Error(`"${raw}" is not a usable layout name.`);
   return /\.json$/i.test(base) ? base : base + ".json";
 }
 
@@ -783,9 +798,41 @@ function readBindings() {
   }
 }
 
+/**
+ * Writes a file the way a save should be written: all of it, or none of it.
+ *
+ * Every one of these targets is a real source file in the client's repository
+ * — colliders.json, the UI layouts, a .ts the Control Desk is patching. A
+ * plain writeFileSync truncates first and writes second, so a process killed
+ * between the two (Ctrl+C on the dev server, a full disk, a crash) leaves a
+ * zero-length or half-written file where the client's work used to be, and the
+ * next boot fails to parse it.
+ *
+ * Writing a sibling temp file and renaming over the target is atomic on every
+ * platform this runs on: the target is either the old content or the new one,
+ * never a prefix of either. The temp file is a sibling specifically because
+ * rename is only atomic within one filesystem.
+ */
+function writeFileAtomic(targetPath, contents) {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const temp = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    fs.writeFileSync(temp, contents);
+    fs.renameSync(temp, targetPath);
+  } catch (err) {
+    // Never leave the temp file behind to be mistaken for a real one.
+    try { fs.rmSync(temp, { force: true }); } catch { /* nothing more to do */ }
+    throw err;
+  }
+}
+
+/** The same, for the JSON every editor saves. */
+function writeJsonAtomic(targetPath, data) {
+  writeFileAtomic(targetPath, JSON.stringify(data, null, 2) + "\n");
+}
+
 function writeBindings(data) {
-  fs.mkdirSync(UI_DIR, { recursive: true });
-  fs.writeFileSync(BINDINGS_FILE, JSON.stringify(data, null, 2));
+  writeJsonAtomic(BINDINGS_FILE, data);
 }
 
 function readSceneBindings() {
@@ -798,7 +845,7 @@ function readSceneBindings() {
   }
 }
 function writeSceneBindings(data) {
-  fs.writeFileSync(SCENE_BINDINGS_FILE, JSON.stringify(data, null, 2));
+  writeJsonAtomic(SCENE_BINDINGS_FILE, data);
 }
 
 function readColliders() {
@@ -811,7 +858,7 @@ function readColliders() {
   }
 }
 function writeColliders(data) {
-  fs.writeFileSync(COLLIDERS_FILE, JSON.stringify(data, null, 2));
+  writeJsonAtomic(COLLIDERS_FILE, data);
 }
 
 function readParticles() {
@@ -824,7 +871,7 @@ function readParticles() {
   }
 }
 function writeParticles(data) {
-  fs.writeFileSync(PARTICLES_FILE, JSON.stringify(data, null, 2));
+  writeJsonAtomic(PARTICLES_FILE, data);
 }
 
 function readEnvironment() {
@@ -841,7 +888,7 @@ function readEnvironment() {
   }
 }
 function writeEnvironment(data) {
-  fs.writeFileSync(ENVIRONMENT_FILE, JSON.stringify(data, null, 2));
+  writeJsonAtomic(ENVIRONMENT_FILE, data);
 }
 
 // Vite's dev server prints both of these as the "Local" URL depending on
@@ -954,8 +1001,23 @@ const server = http.createServer((req, res) => {
         } catch {
           // malformed/absent body — keep the default rather than failing the build over it
         }
-        exec(
-          "bash build.sh",
+        // ION_BUILD_SCRIPT is set by `ion dev` and points into the installed
+        // @ion-engine/build. Without it — ION's own repo — the pipeline is
+        // right here, which is what the fallback covers. A generated project
+        // has no build.sh of its own, so assuming one is what made the
+        // Builder button fail there while `npm run build` worked.
+        const buildScript = process.env.ION_BUILD_SCRIPT || path.join(ROOT, "build.sh");
+        if (!fs.existsSync(buildScript)) {
+          res.setHeader("Content-Type", "application/json");
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, error: `Build pipeline not found at ${buildScript}. Start the dev server with \`npm run dev\` so it can locate @ion-engine/build.` }));
+          return;
+        }
+        // execFile, not exec: the path is a real filesystem path that may
+        // contain spaces, and there is no reason to hand it to a shell.
+        execFile(
+          "bash",
+          [buildScript],
           { cwd: ROOT, timeout: 120000, maxBuffer: 10 * 1024 * 1024, env: { ...process.env, HALF_FLOAT: halfFloat ? "1" : "0" } },
           (err, stdout, stderr) => {
             res.setHeader("Content-Type", "application/json");
@@ -1030,7 +1092,7 @@ const server = http.createServer((req, res) => {
           throw new Error('kind must be "main", "endcard", or "layout"');
         }
 
-        fs.writeFileSync(targetPath, JSON.stringify(data, null, 2));
+        writeJsonAtomic(targetPath, data);
         res.setHeader("Content-Type", "application/json");
         res.writeHead(200);
         res.end(JSON.stringify({ ok: true, path: path.relative(ROOT, targetPath) }));
@@ -1220,7 +1282,7 @@ const server = http.createServer((req, res) => {
           source = source.slice(0, span.start) + bodyText + source.slice(span.end);
         }
 
-        if (applied.length) fs.writeFileSync(fullPath, source, "utf8");
+        if (applied.length) writeFileAtomic(fullPath, source);
         res.setHeader("Content-Type", "application/json");
         res.writeHead(200);
         res.end(JSON.stringify({ ok: true, applied, failed }));

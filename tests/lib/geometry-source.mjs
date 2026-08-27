@@ -130,6 +130,9 @@ export function loadEditorGeometry(htmlPath) {
   const src = readFileSync(htmlPath, "utf8");
   const block = extractGeometryBlock(htmlPath);
   const anchorFrac = extractDeclaration(src, "ANCHOR_FRAC");
+  // Defaults a missing anchor. Lives beside ANCHOR_FRAC rather than inside the
+  // fence, so like ANCHOR_FRAC it has to be re-supplied here.
+  const anchorOf = extractDeclaration(src, "anchorOf");
   const needsLockedAspect = extractDeclaration(src, "needsLockedAspect");
   const visualAspectRatio = extractDeclaration(src, "visualAspectRatio");
 
@@ -138,6 +141,7 @@ export function loadEditorGeometry(htmlPath) {
 
   const body = [
     anchorFrac,
+    anchorOf,
     needsLockedAspect,
     visualAspectRatio,
     "const canvasWidth = containerW, canvasHeight = containerH;",

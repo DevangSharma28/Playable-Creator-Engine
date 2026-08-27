@@ -3184,6 +3184,19 @@
         "bottom-right": { x: 1, y: 1 },
       };
 
+      /**
+       * Mirrors UILayout.ts's anchorOf() exactly.
+       *
+       * An element with no anchor — an older layout, one written by hand, one
+       * built in code — used to make `ANCHOR_FRAC[d.anchor].x` throw, taking
+       * the whole layout down with it on both sides of this pair. Kept outside
+       * the GEOMETRY fence for the same reason ANCHOR_FRAC is: the fence is
+       * evaluated standalone and the harness re-supplies this.
+       */
+      function anchorOf(d) {
+        return d.anchor && d.anchor in ANCHOR_FRAC ? d.anchor : "top-left";
+      }
+
       function needsLockedAspect(d) {
         // Mirrors UILayout.ts's needsLockedAspect() exactly — a joystick is
         // always locked (a stretched knob/base never makes sense); anything
@@ -3295,16 +3308,16 @@
       // edge (right/bottom, frac 1) needs its offset sign flipped to move
       // inward the same way.
       function pxSignX(d) {
-        return ANCHOR_FRAC[d.anchor].x === 1 ? -1 : 1;
+        return ANCHOR_FRAC[anchorOf(d)].x === 1 ? -1 : 1;
       }
       function pxSignY(d) {
-        return ANCHOR_FRAC[d.anchor].y === 1 ? -1 : 1;
+        return ANCHOR_FRAC[anchorOf(d)].y === 1 ? -1 : 1;
       }
       function elemScreenX(d, rectW) {
-        return d.xUnit === "px" ? ANCHOR_FRAC[d.anchor].x * rectW + pxSignX(d) * (d.xPx ?? 0) * pxScale() : (d.xPct / 100) * rectW;
+        return d.xUnit === "px" ? ANCHOR_FRAC[anchorOf(d)].x * rectW + pxSignX(d) * (d.xPx ?? 0) * pxScale() : ((d.xPct ?? 0) / 100) * rectW;
       }
       function elemScreenY(d, rectH) {
-        return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + pxSignY(d) * (d.yPx ?? 0) * pxScale() : (d.yPct / 100) * rectH;
+        return d.yUnit === "px" ? ANCHOR_FRAC[anchorOf(d)].y * rectH + pxSignY(d) * (d.yPx ?? 0) * pxScale() : ((d.yPct ?? 0) / 100) * rectH;
       }
       /**
        * Text font-size, in live on-screen px — identical to UILayout.ts's

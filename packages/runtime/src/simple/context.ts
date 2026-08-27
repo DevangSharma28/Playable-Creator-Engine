@@ -36,6 +36,7 @@ export interface SimpleGameHost {
   playSound(path: string, opts?: { volume?: number; loop?: boolean; music?: boolean }): void;
   stopMusic(): void;
   setMasterVolume(value: number): void;
+  readonly volume: number;
   showEndcard(): void;
 }
 

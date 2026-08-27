@@ -54,12 +54,37 @@ import { dedup, weld, resample, sparse, prune, textureCompress, quantize, meshop
 import { MeshoptEncoder, MeshoptDecoder } from "meshoptimizer";
 import sharp from "sharp";
 
-const ROOT = fileURLToPath(new URL("..", import.meta.url));
+/**
+ * The project being built.
+ *
+ * `ION_PROJECT_ROOT` is set by `ion build` (see packages/project/lib/build.mjs)
+ * and is the only correct answer for a customer project: this script is
+ * installed at node_modules/@ion-engine/build/lib/, so resolving relative to
+ * its own location pointed at the *package* and every path below missed by a
+ * mile. The result was an ENOENT on the very first read, a warning, and a
+ * build that silently shipped uncompressed textures and un-quantized meshes.
+ *
+ * The script-relative fallback is ION's own repository, where this file lives
+ * in scripts/ and the project root really is one level up.
+ */
+const ROOT = process.env.ION_PROJECT_ROOT || fileURLToPath(new URL("..", import.meta.url));
 const MODELS_SRC = path.join(ROOT, "assets", "models");
 const SOUNDS_SRC = path.join(ROOT, "assets", "sounds");
 const CACHE = path.join(ROOT, ".build-cache");
 const ASSETS_TS = path.join(ROOT, "src", "game", "assets.ts");
 const halfFloat = process.env.HALF_FLOAT !== "0";
+
+// A project with no assets is a perfectly normal project — the generated
+// starter has none. Say so and stop, rather than failing on a missing
+// directory and leaving "compression failed" in the log of a clean build.
+if (!fs.existsSync(ASSETS_TS)) {
+  console.log(`  No ${path.relative(ROOT, ASSETS_TS)} — nothing to compress.`);
+  process.exit(0);
+}
+if (!fs.existsSync(MODELS_SRC) && !fs.existsSync(SOUNDS_SRC)) {
+  console.log("  No assets/models or assets/sounds — nothing to compress.");
+  process.exit(0);
+}
 
 /**
  * Which files under assets/ are actually loaded by the game — read straight

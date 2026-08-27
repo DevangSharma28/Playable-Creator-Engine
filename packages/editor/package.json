@@ -1,6 +1,6 @@
 {
   "name": "@ion-engine/editor",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "ION Studio — the 3D editor, Engine Room panel and UI editor. Development only; never present in a production build.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -18,7 +18,7 @@
     "LICENSE.md"
   ],
   "peerDependencies": {
-    "@ion-engine/runtime": "4.2.0",
+    "@ion-engine/runtime": "4.3.0",
     "three": "^0.185.1"
   },
   "main": "./dist/index.js",

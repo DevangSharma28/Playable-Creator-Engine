@@ -3,7 +3,7 @@ import { Ion as IonCore, Easing } from "../../../../src/engine/Ion";
 import { Cta } from "../../../../src/engine/Cta";
 import type { ScheduledHandle } from "../../../../src/engine/core/Scheduler";
 import type { Collider } from "../../../../src/engine/collision";
-import { Entity } from "./entity";
+import { Entity, ION_OWNED } from "./entity";
 import { requireGame, type SimpleGameHost } from "./context";
 
 /**
@@ -39,8 +39,20 @@ function toColor(value: string | number | undefined, fallback = 0xcccccc): numbe
   if (typeof value === "number") return value;
   const named = COLORS[value.toLowerCase()];
   if (named !== undefined) return named;
-  const hex = parseInt(value.replace("#", ""), 16);
-  return Number.isNaN(hex) ? fallback : hex;
+  const raw = value.replace("#", "");
+  // Checked rather than handed to parseInt, which stops at the first character
+  // it cannot read: "deepblue" parsed as 0xde and produced a plausible-looking
+  // brown, so a typo'd colour name came out as a colour instead of a warning.
+  if (/^[0-9a-f]{3}$/i.test(raw)) {
+    const [r, g, b] = raw;
+    return parseInt(`${r}${r}${g}${g}${b}${b}`, 16);
+  }
+  if (/^[0-9a-f]{6}$/i.test(raw)) return parseInt(raw, 16);
+  console.warn(
+    `ION: "${value}" isn't a colour. Use a name (${Object.keys(COLORS).slice(0, 6).join(", ")}, …), ` +
+      "a hex string like \"#e8961e\", or a number like 0xe8961e."
+  );
+  return fallback;
 }
 
 export interface ShapeOptions {
@@ -77,6 +89,9 @@ function place(mesh: THREE.Mesh, o: ShapeOptions, defaultName: string): THREE.Me
   mesh.position.set(o.x ?? 0, o.y ?? 0, o.z ?? 0);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+  // This geometry and material were built for this mesh alone, so whoever ends
+  // up owning it is allowed to free them. See ION_OWNED.
+  mesh.userData[ION_OWNED] = true;
   game().world.add(mesh);
   return mesh;
 }
@@ -113,6 +128,7 @@ const scene = {
     mesh.receiveShadow = true;
     mesh.name = options.name ?? "Ground";
     mesh.position.set(options.x ?? 0, options.y ?? 0, options.z ?? 0);
+    mesh.userData[ION_OWNED] = true;
     game().world.add(mesh);
     return mesh;
   },
@@ -124,7 +140,20 @@ const scene = {
    * everything in the manifest is preloaded before your game starts.
    */
   model(path: string, options: ShapeOptions = {}): THREE.Object3D {
-    const object = game().assetLoader.instantiateGlb(path);
+    const loader = game().assetLoader;
+    let object: THREE.Object3D;
+    try {
+      object = loader.instantiateGlb(path);
+    } catch {
+      // "Model not preloaded: ./x.glb" says what happened but not what to do,
+      // and this is the single most common first-day mistake.
+      const known = loader.cached.models;
+      throw new Error(
+        `ION.scene.model("${path}"): that model isn't in your asset manifest.\n` +
+          "  Add it to src/game/assets.ts so it is preloaded before the game starts.\n" +
+          (known.length ? `  Loaded models: ${known.join(", ")}` : "  No models are currently loaded.")
+      );
+    }
     object.name = options.name ?? path.split("/").pop() ?? "Model";
     object.position.set(options.x ?? 0, options.y ?? 0, options.z ?? 0);
     if (options.size) object.scale.setScalar(options.size);
@@ -220,7 +249,10 @@ const audio = {
   stopMusic(): void {
     game().stopMusic();
   },
-  /** 0 to 1, applies to everything. */
+  /** 0 to 1, applies to everything. Readable as well as writable. */
+  get volume(): number {
+    return game().volume;
+  },
   set volume(v: number) {
     game().setMasterVolume(v);
   },
@@ -275,6 +307,38 @@ const colliders = {
     });
     return new SimpleZone(collider);
   },
+  /**
+   * Give an entity a body, so it can enter zones and be found by queries.
+   *
+   * A zone with nothing to detect never fires, and until this existed the
+   * simple API had no way to put a collider on an entity at all — every
+   * `ION.colliders.zone(...).onEnter(...)` in a game written against it was
+   * silently dead code. The collider follows the entity and is retired with
+   * it.
+   *
+   * ```ts
+   * ION.colliders.attach(this.player, { size: 1 });
+   * ION.colliders.zone({ name: "Goal", size: 3 }).onEnter(() => ION.ui.showEndcard());
+   * ```
+   */
+  attach(entity: Entity, options: ZoneOptions & { solid?: boolean } = {}): SimpleZone {
+    const collider = IonCore.colliders.box({
+      name: options.name ?? entity.object3D.name,
+      tag: options.tag ?? options.name ?? entity.object3D.name,
+      // A body is a trigger by default: playables are overwhelmingly about
+      // "did the player touch this", and physical blocking is the rarer,
+      // opt-in case.
+      isTrigger: !options.solid,
+      size: [options.width ?? options.size ?? 1, options.height ?? options.size ?? 1, options.depth ?? options.size ?? 1],
+    });
+    collider.attachToObject(entity.object3D, false);
+    if (options.x !== undefined || options.y !== undefined || options.z !== undefined) {
+      collider.setOffsetPosition(options.x ?? 0, options.y ?? 0, options.z ?? 0);
+    }
+    entity.trackCollider(collider);
+    return new SimpleZone(collider);
+  },
+
   /** Find a zone placed in the editor. */
   find(name: string): SimpleZone | undefined {
     const collider = IonCore.colliders.getByName(name);

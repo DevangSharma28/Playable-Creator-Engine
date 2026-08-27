@@ -241,7 +241,7 @@ export class Player extends Entity {
 }
 `;
 
-const mainTs = `import { IonEngine } from "@ion-engine/runtime";
+const mainTs = `import { IonEngine } from "ion";
 import MyGame from "./game/Game";
 import manifest from "./game/assets";
 import environment from "./game/environment.json";
@@ -254,32 +254,39 @@ import endcardLayout from "./game/ui/endcardLayout.json";
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 
 /**
- * Development only: installs ION Studio.
- *
- * The engine never imports the editor — this is the one place it is named, and
- * it is behind a check the production build evaluates to false and removes.
- * That is what keeps editor code out of your shipped bundle entirely, rather
- * than merely unreachable inside it.
- */
-if (import.meta.env.DEV) {
-  (globalThis as Record<string, unknown>).__ION_DEV__ = true;
-  const { installEditor } = await import("@ion-engine/editor");
-  installEditor();
-}
-
-/**
  * Wiring. You should not need to change this file.
  *
- * It hands ION your game class and the files the editors write; ION does the
- * rest. Everything you actually work on lives in src/game/.
+ * It hands ION your game class and the files the ION editors write; ION does
+ * the rest. Everything you actually work on lives in src/game/.
+ *
+ * Wrapped in a function rather than awaited at the top level: the production
+ * build emits an ES2015, IIFE-format bundle, which has no way to express a
+ * top-level await. The bundler tolerates one with a warning — but that warning
+ * is a wall of red-and-yellow that reads exactly like a build failure, on a
+ * build that actually succeeded.
  */
-IonEngine.boot(canvas, {
-  createGame: (c) =>
-    MyGame.create.call(MyGame, c, {
-      manifest,
-      data: { environment, colliders, particles, sceneBindings, mainLayout, endcardLayout },
-    }),
-});
+async function start() {
+  // Development only: installs ION Studio. The engine never imports the
+  // editor — this is the one place it is named, and it sits behind a check the
+  // production build evaluates to false and removes, which is what keeps
+  // editor code out of a shipped bundle entirely rather than merely
+  // unreachable inside it.
+  if (import.meta.env.DEV) {
+    (globalThis as Record<string, unknown>).__ION_DEV__ = true;
+    const { installEditor } = await import("@ion-engine/editor");
+    installEditor();
+  }
+
+  IonEngine.boot(canvas, {
+    createGame: (c) =>
+      MyGame.create.call(MyGame, c, {
+        manifest,
+        data: { environment, colliders, particles, sceneBindings, mainLayout, endcardLayout },
+      }),
+  });
+}
+
+void start();
 
 if (import.meta.hot) import.meta.hot.accept();
 `;
@@ -572,6 +579,12 @@ async function main() {
     "src/game/systems/.gitkeep": "",
     "src/game/scenes/.gitkeep": "",
     "src/game/scripts/.gitkeep": "",
+    // Created empty so there is somewhere obvious to put a model or a sound.
+    // Without them, the first question after "add it to assets.ts" is "add it
+    // where?", and the answer is a directory that does not exist yet.
+    "assets/models/.gitkeep": "",
+    "assets/sounds/.gitkeep": "",
+    "assets/image/.gitkeep": "",
     "assets/README.md": "Source assets live here — `models/*.glb`, `sounds/*.ogg`, `image/*`.\n\nReference them from `src/game/assets.ts`; only what the manifest names is shipped.\n",
   };
 
@@ -600,7 +613,9 @@ async function main() {
   say("    node_modules/      ION engine, editor, build — git-ignored, not yours to edit");
   say("");
   say("  Next:\n");
-  if (where !== ".") say(`    cd ${where}`);
+  // Quoted when it needs to be: the instruction is meant to be copied into a
+  // shell, and `cd My Game` is not a command that works.
+  if (where !== ".") say(`    cd ${/[\s"'$`\\]/.test(where) ? JSON.stringify(where) : where}`);
   say("    npm install");
   say("    npm run dev\n");
 }

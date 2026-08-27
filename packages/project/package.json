@@ -1,6 +1,6 @@
 {
   "name": "@ion-engine/project",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "The `ion` command — dev server, build, preview, doctor — plus ion.config loading and validation.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",

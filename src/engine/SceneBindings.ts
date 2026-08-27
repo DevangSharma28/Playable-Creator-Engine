@@ -135,7 +135,13 @@ function resolveCollider(binding: SceneFieldBinding): Collider | undefined {
  * scene assignments for free without naming itself here.
  */
 export function applySceneBindings(instance: object, className: string, data: SceneBindingsData, scene: THREE.Scene): void {
-  for (const binding of data.bindings) {
+  // A sceneBindings.json that is `{}`, `{"version":1}`, or truncated mid-write
+  // used to throw "data.bindings is not iterable" out of the game constructor
+  // — a blank screen at boot, from a file the client never edits by hand and
+  // whose only purpose is to restore editor assignments.
+  const bindings = Array.isArray(data?.bindings) ? data.bindings : [];
+  for (const binding of bindings) {
+    if (!binding || typeof binding !== "object") continue;
     if (binding.className !== className) continue;
     const object = binding.colliderId ? resolveCollider(binding) : resolveSceneObject(scene, binding);
     if (object !== undefined) {

@@ -15,6 +15,55 @@ import { applySceneBindings, type SceneBindingsData } from "../../../src/engine/
 import { getEditorHost, type DebugLayer, type EditorSession } from "./editor-host";
 import { InputManager } from "../../../src/engine/core/InputManager";
 import { DynamicJoystick } from "../../../src/engine/core/DynamicJoystick";
+import { disposeScene } from "../../../src/engine/core/disposeScene";
+
+/**
+ * The two overlay divs every ION page provides, fetched with an error that
+ * says what to do.
+ *
+ * A project that edits its own index.html and drops one of these used to get
+ * `Cannot read properties of null (reading 'appendChild')` from inside
+ * UILayout's constructor, several frames from the cause.
+ */
+/**
+ * One `WebGLRenderer` per canvas, reused for the life of the page.
+ *
+ * A dev in-place reload boots a new game into the *same* canvas, and
+ * `canvas.getContext()` hands back the *same* WebGL context every time — so
+ * constructing a renderer per boot did not get a fresh context, it got another
+ * set of three.js's own per-renderer allocations (four placeholder textures
+ * and three framebuffers) layered onto the one context. `renderer.dispose()`
+ * does not release those, so a long editing session accumulated seven GL
+ * objects per save, forever. Reusing the renderer is also simply what the
+ * context wants: two renderers driving one context fight over its state.
+ *
+ * Keyed weakly so a canvas that goes out of scope takes its renderer with it.
+ */
+const renderersByCanvas = new WeakMap<HTMLCanvasElement, THREE.WebGLRenderer>();
+
+function acquireRenderer(canvas: HTMLCanvasElement): THREE.WebGLRenderer {
+  const existing = renderersByCanvas.get(canvas);
+  // A lost context cannot be rendered through and cannot be revived by us —
+  // three.js reinitialises on `webglcontextrestored`, but if we are booting
+  // into one that is still lost, a fresh renderer is the honest answer.
+  if (existing && !existing.getContext().isContextLost()) return existing;
+  const created = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderersByCanvas.set(canvas, created);
+  return created;
+}
+
+function requireLayer(id: string): HTMLElement {
+  const element = document.getElementById(id);
+  if (!element) {
+    throw new Error(
+      `ION: the page is missing <div id="${id}"></div>.\n` +
+        "  Both #custom-ui-layer and #endcard-layer must exist before the game boots —\n" +
+        "  they are where the UI editor's layouts are rendered. Restore them in your\n" +
+        "  index.html (see src/index.template.html for the expected markup)."
+    );
+  }
+  return element;
+}
 
 /** The authored data files a project ships. All optional — a missing one just means that system has nothing to load. */
 export interface IonProjectData {
@@ -34,6 +83,19 @@ export interface IonGameOptions {
   data?: IonProjectData;
   /** Class name this game registers under for ⊙ Pick scene bindings. Defaults to "Game". */
   bindingName?: string;
+  /**
+   * A loader that has already resolved `manifest`.
+   *
+   * `create()` passes the loader it preloaded with, so the constructor builds
+   * the scene environment against real assets. It used to construct an empty
+   * loader and have `create()` swap the warmed one in afterwards — by which
+   * point `environment.apply()` had already run and quietly resolved every
+   * background/skybox texture to `undefined`, so a project that authored a
+   * texture background silently rendered the fallback colour instead.
+   *
+   * Passing one explicitly is also how two games can share a warmed cache.
+   */
+  assets?: AssetLoader;
 }
 
 /**
@@ -101,6 +163,7 @@ export abstract class IonGame {
   private editorSession: EditorSession | undefined;
   /** The "Show Colliders" overlay. Exists only when a dev entry registered an editor host — undefined, and never drawn, in production. */
   private readonly debugLayer: DebugLayer | undefined;
+  private readonly canvas!: HTMLCanvasElement;
   private manualSize = false;
   private lastManualWidth = 0;
   private lastManualHeight = 0;
@@ -117,10 +180,10 @@ export abstract class IonGame {
     const data = options.data ?? {};
     const environmentData: SceneEnvData = loadSceneEnv(data.environment);
 
-    this.assets = new AssetLoader();
+    this.assets = options.assets ?? new AssetLoader();
     this.camera = new CameraHandler(environmentData.camera);
 
-    this.renderer = new THREE.WebGLRenderer({ canvas: options.canvas, antialias: true });
+    this.renderer = acquireRenderer(options.canvas);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.setSize(window.innerWidth, window.innerHeight);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -148,8 +211,8 @@ export abstract class IonGame {
 
     const layerOrEmpty = (raw: unknown): UILayoutData =>
       (raw as UILayoutData) ?? { version: 1, canvasWidth: 400, canvasHeight: 711, elements: [] };
-    this.mainLayer = document.getElementById("custom-ui-layer") as HTMLElement;
-    const endcardLayer = document.getElementById("endcard-layer") as HTMLElement;
+    this.mainLayer = requireLayer("custom-ui-layer");
+    const endcardLayer = requireLayer("endcard-layer");
     this.ui = new UILayout(this.mainLayer, layerOrEmpty(data.mainLayout));
     this.endcardUI = new UILayout(endcardLayer, layerOrEmpty(data.endcardLayout));
 
@@ -169,6 +232,13 @@ export abstract class IonGame {
     this.debugLayer = getEditorHost()?.createDebugLayer();
     this.inspectables.set(options.bindingName ?? "Game", this);
     window.addEventListener("resize", this.onWindowResize);
+    // three.js already prevents the default and re-initialises itself on
+    // restore. What it does not do is tell anyone — so a phone that dropped
+    // the context under memory pressure showed a frozen playable with nothing
+    // in the console. These make it visible and let a game pause on it.
+    options.canvas.addEventListener("webglcontextlost", this.onContextLost);
+    options.canvas.addEventListener("webglcontextrestored", this.onContextRestored);
+    this.canvas = options.canvas;
   }
 
   /**
@@ -202,13 +272,13 @@ export abstract class IonGame {
     canvas: HTMLCanvasElement,
     options: Omit<IonGameOptions, "canvas"> = {}
   ): Promise<T> {
-    const full: IonGameOptions = { ...options, canvas };
-    const loader = new AssetLoader();
-    await loader.preload(full.manifest ?? []);
+    const loader = options.assets ?? new AssetLoader();
+    await loader.preload(options.manifest ?? []);
+    // The warmed loader goes in through the constructor, not onto the instance
+    // afterwards: everything the constructor builds — the scene environment
+    // above all — resolves its textures through it while it runs.
+    const full: IonGameOptions = { ...options, canvas, assets: loader };
     const game = new this(full);
-    // The instance built its own loader; hand it the warmed cache rather than
-    // loading everything a second time.
-    (game as unknown as { assets: AssetLoader }).assets = loader;
     (game as unknown as { finishCreate(d: IonProjectData): void }).finishCreate(full.data ?? {});
     return game;
   }
@@ -223,6 +293,18 @@ export abstract class IonGame {
 
   /** Runs after all authored data has loaded and every binding is resolved. Read editor-assigned fields here, never in a constructor. */
   protected onReady(): void {}
+
+  /**
+   * Runs each frame *after* the camera rig has moved.
+   *
+   * Anything that adjusts the camera's own transform has to happen here rather
+   * than in `onUpdate`, because the rig's follow lerp writes an absolute
+   * position: an offset applied before it is simply overwritten and never
+   * seen. Camera shake is the case that proved it — `ION.camera.shake()` did
+   * nothing at all whenever the camera was following something, which is the
+   * usual configuration.
+   */
+  protected onLateUpdate(_dt: number): void {}
 
   /** Release anything your game created. The engine's own resources are handled for you. */
   protected onDispose(): void {}
@@ -252,6 +334,7 @@ export abstract class IonGame {
     this.onUpdate(dt, elapsed);
     const focus = this.getCameraFocus();
     if (focus) this.camera.update(focus, dt);
+    this.onLateUpdate(dt);
   }
 
   /** Called by IonEngine each frame. Do not override. */
@@ -268,7 +351,19 @@ export abstract class IonGame {
     this.editorSession?.afterRender(activeCamera);
   }
 
+  /**
+   * Retires the game and everything it allocated, including on the GPU.
+   *
+   * Called on every dev in-place reload as well as at real teardown, so a step
+   * missing here is a leak that compounds once per save. The ordering is
+   * deliberate: subclass teardown runs while the scene is still intact, the
+   * scene is released next, and the renderer last — releasing the renderer
+   * first would leave the scene's own disposals with no context to free
+   * against.
+   */
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
     window.removeEventListener("resize", this.onWindowResize);
     this.editorSession?.dispose();
     this.editorSession = undefined;
@@ -279,11 +374,44 @@ export abstract class IonGame {
     this.ui.dispose();
     this.endcardUI.dispose();
     this.environment.dispose();
-    this.renderer.dispose();
+    // Detached before the scene walk so the WebAudio graph doesn't stay
+    // parented to a camera that is about to be dropped.
+    this.audioListener.removeFromParent();
+    // Every geometry, material and texture the game built, then the manifest
+    // the loader uploaded. Neither is released by renderer.dispose(), which
+    // only knows about its own programs and render targets.
+    disposeScene(this.scene);
+    this.assets.dispose();
+    this.canvas.removeEventListener("webglcontextlost", this.onContextLost);
+    this.canvas.removeEventListener("webglcontextrestored", this.onContextRestored);
+    // The renderer itself is deliberately *not* disposed: it is shared per
+    // canvas and the next boot will reuse it (see acquireRenderer). What is
+    // released here is everything that belonged to this game — the render
+    // lists holding references to the scene just torn down, and any render
+    // target still bound.
+    this.renderer.setRenderTarget(null);
+    this.renderer.renderLists.dispose();
   }
+
+  /** Guards against a second teardown — the dev reload path and an explicit call can both land. */
+  private disposed = false;
 
   private readonly onWindowResize = (): void => {
     if (!this.manualSize) this.handleResize();
+  };
+
+  private readonly onContextLost = (): void => {
+    console.warn("ION: the WebGL context was lost. Rendering is paused until the browser restores it.");
+    Ion.emit("ion:context-lost", undefined);
+  };
+
+  private readonly onContextRestored = (): void => {
+    console.info("ION: the WebGL context was restored.");
+    // Everything three.js uploads is re-uploaded lazily on the next draw; the
+    // scene environment's own render targets are the exception, so they are
+    // rebuilt explicitly.
+    this.environment.apply();
+    Ion.emit("ion:context-restored", undefined);
   };
 
   private handleResize(): void {

@@ -1,6 +1,6 @@
 {
   "name": "cube-joystick-ad",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -8,13 +8,24 @@
     "dev": "node scripts/dev.js",
     "build": "bash build.sh",
     "check:build": "node scripts/check-build-report.mjs",
+    "check:compat": "node scripts/compat-scan.mjs dist/index.html",
     "typecheck": "tsc --noEmit",
+    "packages": "node scripts/build-packages.mjs",
+    "test": "npm run typecheck && npm run test:unit && npm run test:ui-editor-smoke",
+    "test:unit": "node --test --test-concurrency=1 tests/*.test.mjs",
+    "test:runtime": "node --test tests/runtime-lifecycle.test.mjs tests/simple-api.test.mjs",
+    "test:serialization": "node --test tests/serialization.test.mjs tests/editor-history.test.mjs",
+    "test:project": "node --test tests/project-generator.test.mjs tests/dev-api.test.mjs tests/compat-scan.test.mjs",
     "test:geometry": "node --test tests/geometry-parity.test.mjs",
     "test:environment": "node --test tests/scene-environment.test.mjs",
     "test:particles": "node --test tests/particles.test.mjs tests/particle-shader.test.mjs",
     "test:ui": "node --test tests/ui-layout.test.mjs tests/ui-editor.test.mjs tests/render-defaults-parity.test.mjs",
     "test:ui-editor-smoke": "node scripts/test-ui-editor.js",
-    "test": "npm run typecheck && npm run test:particles && npm run test:geometry && npm run test:environment && npm run test:ui && npm run test:ui-editor-smoke"
+    "test:perf": "node --test --expose-gc tests/performance.test.mjs",
+    "test:e2e": "ION_E2E=1 node --test --test-timeout=1800000 tests/build-regression.test.mjs",
+    "test:visual": "node scripts/visual-regression.mjs",
+    "verify:bundle": "node scripts/verify-bundle.mjs dist",
+    "test:all": "npm run test && npm run test:perf && npm run test:e2e"
   },
   "keywords": [],
   "author": "",

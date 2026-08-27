@@ -21,6 +21,21 @@ const ANCHOR_TRANSFORM: Record<AnchorPreset, string> = {
   "bottom-right": "translate(-100%, -100%)",
 };
 
+/** The anchor to fall back on. Matches the editor's own default for a newly placed element. */
+const DEFAULT_ANCHOR: AnchorPreset = "top-left";
+
+/**
+ * An element's anchor, defaulted rather than trusted.
+ *
+ * A layout written by an older ION, hand-edited, or assembled in code can be
+ * missing this field, and reading `ANCHOR_FRAC[undefined].x` threw a TypeError
+ * out of the constructor — which meant one under-specified element took down
+ * the entire HUD, and with it the boot.
+ */
+function anchorOf(data: { anchor?: AnchorPreset }): AnchorPreset {
+  return data.anchor && data.anchor in ANCHOR_FRAC ? data.anchor : DEFAULT_ANCHOR;
+}
+
 /** Where each anchor preset's own point sits in the container, as a fraction of its width/height — the origin PX position offsets from (see applyGeometry). */
 const ANCHOR_FRAC: Record<AnchorPreset, { x: number; y: number }> = {
   "top-left": { x: 0, y: 0 },
@@ -273,8 +288,9 @@ export class UILayout {
     // Two passes so a "group" element's own node exists before any child
     // that references it as `parentId` needs to be appended into it —
     // order in the JSON array isn't guaranteed to put parents first.
-    const sorted = [...data.elements].sort((a, b) => a.zIndex - b.zIndex);
-    const stackRanks = buildStackRanks(data.elements);
+    const elements = Array.isArray(data.elements) ? data.elements.filter((el) => el && typeof el === "object") : [];
+    const sorted = [...elements].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+    const stackRanks = buildStackRanks(elements);
     const nodesById = new Map<string, { wrapper: HTMLElement; content: HTMLElement }>();
     for (const el of sorted) {
       nodesById.set(el.id, this.buildElement(el, stackRanks.get(el.id) ?? 1));
@@ -285,7 +301,7 @@ export class UILayout {
     // stacking itself is unaffected either way: it's driven by the CSS
     // z-index buildElement already set from renderOrder, independent of
     // where in the DOM each node actually landed.
-    const appendOrder = [...data.elements].sort((a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0));
+    const appendOrder = [...elements].sort((a, b) => (a.zOrder ?? 0) - (b.zOrder ?? 0));
     for (const el of appendOrder) {
       const { wrapper, content } = nodesById.get(el.id)!;
       const parent = el.parentId ? nodesById.get(el.parentId)?.content : undefined;
@@ -354,12 +370,13 @@ export class UILayout {
     // directions). Since every anchor here is placed via `left`/`top`
     // specifically, an anchor on the far edge (right/bottom, frac 1) needs
     // its offset flipped to negative to move inward the same way.
-    const originX = ANCHOR_FRAC[data.anchor].x * 100;
-    const originY = ANCHOR_FRAC[data.anchor].y * 100;
-    const signX = ANCHOR_FRAC[data.anchor].x === 1 ? -1 : 1;
-    const signY = ANCHOR_FRAC[data.anchor].y === 1 ? -1 : 1;
-    wrapper.style.left = data.xUnit === "px" ? `calc(${originX}% + ${signX * (data.xPx ?? 0) * px}px)` : `${data.xPct}%`;
-    wrapper.style.top = data.yUnit === "px" ? `calc(${originY}% + ${signY * (data.yPx ?? 0) * px}px)` : `${data.yPct}%`;
+    const anchor = anchorOf(data);
+    const originX = ANCHOR_FRAC[anchor].x * 100;
+    const originY = ANCHOR_FRAC[anchor].y * 100;
+    const signX = ANCHOR_FRAC[anchor].x === 1 ? -1 : 1;
+    const signY = ANCHOR_FRAC[anchor].y === 1 ? -1 : 1;
+    wrapper.style.left = data.xUnit === "px" ? `calc(${originX}% + ${signX * (data.xPx ?? 0) * px}px)` : `${data.xPct ?? 0}%`;
+    wrapper.style.top = data.yUnit === "px" ? `calc(${originY}% + ${signY * (data.yPx ?? 0) * px}px)` : `${data.yPct ?? 0}%`;
     wrapper.style.width = data.widthUnit === "px" ? `${(data.widthPx ?? 0) * px}px` : `${data.widthPct}%`;
     if (needsLockedAspect(data)) {
       wrapper.style.aspectRatio = `${data.aspectRatio ?? 1}`;
@@ -369,7 +386,7 @@ export class UILayout {
     } else {
       wrapper.style.height = `${data.heightPct}%`;
     }
-    wrapper.style.transform = `${ANCHOR_TRANSFORM[data.anchor]} rotate(${data.rotation}deg)`;
+    wrapper.style.transform = `${ANCHOR_TRANSFORM[anchor]} rotate(${data.rotation ?? 0}deg)`;
   }
 
   /** `fontSizePct`% of the container's current real height, as a literal px value — mirrors tools/ui-editor.html's own text font-size formula exactly. */
@@ -457,22 +474,22 @@ export class UILayout {
 
   /** Mirrors tools/ui-editor.html's pxSignX() exactly. */
   private pxSignX(d: UIElementData): number {
-    return ANCHOR_FRAC[d.anchor].x === 1 ? -1 : 1;
+    return ANCHOR_FRAC[anchorOf(d)].x === 1 ? -1 : 1;
   }
 
   /** Mirrors tools/ui-editor.html's pxSignY() exactly. */
   private pxSignY(d: UIElementData): number {
-    return ANCHOR_FRAC[d.anchor].y === 1 ? -1 : 1;
+    return ANCHOR_FRAC[anchorOf(d)].y === 1 ? -1 : 1;
   }
 
   /** Mirrors tools/ui-editor.html's elemScreenX() exactly. */
   private elemScreenX(d: UIElementData, rectW: number): number {
-    return d.xUnit === "px" ? ANCHOR_FRAC[d.anchor].x * rectW + this.pxSignX(d) * (d.xPx ?? 0) * this.pxScale() : (d.xPct / 100) * rectW;
+    return d.xUnit === "px" ? ANCHOR_FRAC[anchorOf(d)].x * rectW + this.pxSignX(d) * (d.xPx ?? 0) * this.pxScale() : ((d.xPct ?? 0) / 100) * rectW;
   }
 
   /** Mirrors tools/ui-editor.html's elemScreenY() exactly. */
   private elemScreenY(d: UIElementData, rectH: number): number {
-    return d.yUnit === "px" ? ANCHOR_FRAC[d.anchor].y * rectH + this.pxSignY(d) * (d.yPx ?? 0) * this.pxScale() : (d.yPct / 100) * rectH;
+    return d.yUnit === "px" ? ANCHOR_FRAC[anchorOf(d)].y * rectH + this.pxSignY(d) * (d.yPx ?? 0) * this.pxScale() : ((d.yPct ?? 0) / 100) * rectH;
   }
 
   /**

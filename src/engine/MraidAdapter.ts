@@ -20,7 +20,23 @@ interface MraidApi {
 type MraidWindow = Window & { mraid?: MraidApi };
 
 export class MraidAdapter {
-  private static win = window as MraidWindow;
+  /**
+   * Resolved per call rather than captured once at module load.
+   *
+   * A `static win = window` field is evaluated the instant this module is
+   * imported, which made `import "@ion-engine/runtime"` throw
+   * `ReferenceError: window is not defined` anywhere there isn't a DOM yet —
+   * a Node test process, a prerender/SSR pass, a build script that only wants
+   * a type. Nothing here needs the identity of the window it saw first, so
+   * reading it at the point of use costs nothing and removes the whole class
+   * of failure. The `globalThis` guard is what makes an import in those
+   * environments succeed; every method below already behaves correctly when
+   * the host APIs are absent, and "no window" is simply the strongest form of
+   * absent.
+   */
+  private static get win(): MraidWindow {
+    return (typeof window === "undefined" ? ({} as MraidWindow) : (window as MraidWindow));
+  }
 
   /** True once window.mraid actually exists — the most reliable "are we inside an ad network's WebView" check available; every other method here only behaves differently because of this. */
   static get isPresent(): boolean {
@@ -39,7 +55,7 @@ export class MraidAdapter {
   static openStoreUrl(url: string): void {
     const mraid = MraidAdapter.win.mraid;
     if (!mraid) {
-      window.open(url, "_blank");
+      if (typeof window !== "undefined") window.open(url, "_blank");
       return;
     }
     MraidAdapter.onReady(() => mraid.open(url));

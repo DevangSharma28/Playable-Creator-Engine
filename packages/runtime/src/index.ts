@@ -74,13 +74,17 @@ export type {
 // ── Colliders and areas ────────────────────────────────────────────────────
 export {
   Collider, BoxCollider, SphereCollider, CylinderCollider,
-  ColliderManager, COLLIDERS_GROUP_NAME, loadColliders,
+  ColliderManager, COLLIDERS_GROUP_NAME,
+  // Both directions. `loadColliders` shipped without its counterpart, so
+  // colliders were the one editor-authored system a project could read but not
+  // write through the public API — every other one exports its serializer.
+  loadColliders, colliderFromData, colliderToData,
   shapesOverlap, shapeContainsPoint, penetration,
 } from "../../../src/engine/collision";
 export type {
   ColliderInit, BoxColliderInit, SphereColliderInit, CylinderColliderInit,
   ColliderEventHandler, ColliderEventHandle, ColliderStats, ResolveOptions,
-  ColliderData, CollidersFileData, ColliderShape, ShapeWorld,
+  ColliderData, CollidersFileData, ColliderShape, ColliderTransformData, ShapeWorld,
 } from "../../../src/engine/collision";
 
 // ── Particles and VFX ──────────────────────────────────────────────────────

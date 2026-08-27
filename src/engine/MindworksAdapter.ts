@@ -25,7 +25,10 @@ type MindworksWindow = Window & {
 };
 
 export class MindworksAdapter {
-  private static win = window as MindworksWindow;
+  /** Resolved per call, never captured at import — see MraidAdapter.win for why. */
+  private static get win(): MindworksWindow {
+    return (typeof window === "undefined" ? ({} as MindworksWindow) : (window as MindworksWindow));
+  }
 
   /** True once window.install exists — the review tool's own signal that this host is actually present, distinct from (and not implied by) MraidAdapter.isPresent. */
   static get isPresent(): boolean {
