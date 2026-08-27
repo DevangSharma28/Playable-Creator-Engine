@@ -14,6 +14,7 @@ const USAGE = `
     ion dev        Start ION Studio and the dev server
     ion build      Produce the production build
     ion preview    Serve the last production build
+    ion sync       Refresh IONEngine/ from the installed packages
     ion doctor     Check Node, config, packages and engine integrity
 
   Options
@@ -44,6 +45,11 @@ try {
       const { preview } = await import("../lib/preview.mjs");
       await preview(root, { port: Number(flag("port")) || undefined });
       break;
+    }
+    case "sync": {
+      const { sync } = await import("../lib/sync.mjs");
+      const result = sync(root);
+      process.exit(result.missing.length ? 1 : 0);
     }
     case "doctor": {
       const { doctor } = await import("../lib/doctor.mjs");

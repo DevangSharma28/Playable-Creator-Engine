@@ -3,16 +3,14 @@ import { createRequire } from "node:module";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.mjs";
+import { enginePackageDir } from "./sync.mjs";
 
 export function build(projectRoot, opts = {}) {
   const config = loadConfig(projectRoot);
   const require = createRequire(path.join(projectRoot, "package.json"));
-  let buildLib;
-  try {
-    buildLib = path.join(path.dirname(require.resolve("@ion-engine/build/package.json")), "lib");
-  } catch {
-    throw new Error("@ion-engine/build is not installed. Run `npm install`.");
-  }
+  const buildPkg = enginePackageDir(projectRoot, "@ion-engine/build", "executed");
+  if (!buildPkg) throw new Error("The ION build system isn't available.\n  Run `npm install` — that installs it and writes IONEngine/.");
+  const buildLib = path.join(buildPkg, "lib");
   const script = path.join(buildLib, "build.sh");
   if (!fs.existsSync(script)) throw new Error(`@ion-engine/build is installed but incomplete (${script} missing). Reinstall it.`);
 

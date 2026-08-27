@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.mjs";
 import { verifyInstall } from "./integrity.mjs";
+import { enginePackageDir, ENGINE_DIR } from "./sync.mjs";
 
 /**
  * Resolves an installed ION package's own directory from the project.
@@ -13,20 +14,29 @@ import { verifyInstall } from "./integrity.mjs";
  * `file:` links — all of which a customer may plausibly be using and none of
  * which put the package where a naive join would look.
  */
+/**
+ * Where an ION package lives for this project.
+ *
+ * IONEngine/ first: that folder is what the project is *told* it runs, so it
+ * has to be what actually runs — otherwise reading it tells you nothing and
+ * editing it to debug something changes nothing. node_modules is the fallback
+ * for a project that has not synced yet.
+ */
 function packageDir(projectRoot, name) {
-  const require = createRequire(path.join(projectRoot, "package.json"));
-  try {
-    return path.dirname(require.resolve(`${name}/package.json`));
-  } catch {
-    return null;
-  }
+  return enginePackageDir(projectRoot, name);
 }
 
 /** The file a bare specifier resolves to *from the project*, honouring the package's exports map. */
 function packageEntry(projectRoot, name) {
-  const require = createRequire(path.join(projectRoot, "package.json"));
+  const dir = enginePackageDir(projectRoot, name);
+  if (dir) {
+    // Honour the package's own exports map rather than assuming dist/index.js.
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    const main = manifest.exports?.["."]?.default ?? manifest.exports?.["."] ?? manifest.main;
+    if (typeof main === "string") return path.join(dir, main);
+  }
   try {
-    return require.resolve(name);
+    return createRequire(path.join(projectRoot, "package.json")).resolve(name);
   } catch {
     return null;
   }
@@ -107,9 +117,26 @@ export async function dev(projectRoot, opts = {}) {
 
   const editorDir = packageDir(projectRoot, "@ion-engine/editor");
   if (!editorDir) throw new Error("@ion-engine/editor is not installed.\n  Run `npm install` — ION Studio is a devDependency of this project.");
+  // Both halves of the editor package are checked, because a half-built
+  // package is a real state and its symptom is misleading: Vite reports
+  // "Failed to resolve import @ion-engine/editor" as if the dependency were
+  // absent, when it is installed and only its bundle is missing. Saying which
+  // half is missing turns a resolution mystery into one command.
   const studioDir = path.join(editorDir, "studio");
-  if (!fs.existsSync(path.join(studioDir, "engine-room.html"))) {
-    throw new Error(`@ion-engine/editor is installed but its studio payload is missing (${studioDir}).\n  Reinstall it: npm install --force @ion-engine/editor`);
+  const missing = [
+    !fs.existsSync(path.join(editorDir, "dist", "index.js")) && "dist/index.js (the editor bundle)",
+    !fs.existsSync(path.join(studioDir, "engine-room.html")) && "studio/engine-room.html (the Studio page)",
+  ].filter(Boolean);
+  if (missing.length) {
+    const linked = fs.lstatSync(editorDir).isSymbolicLink() || !editorDir.startsWith(projectRoot);
+    throw new Error(
+      `@ion-engine/editor is installed but incomplete — missing:\n` +
+        missing.map((m) => `    ${m}`).join("\n") +
+        `\n  at ${editorDir}\n\n` +
+        (linked
+          ? `  This package is linked to an ION checkout, so its build output has to exist there.\n  Rebuild it from that checkout:\n    node scripts/build-packages.mjs`
+          : `  Reinstall it:\n    npm install --force @ion-engine/editor`)
+    );
   }
 
   // Surfaced, never enforced: an edit inside node_modules is invisible to git
@@ -149,7 +176,7 @@ export async function dev(projectRoot, opts = {}) {
   // opaque: the editor's dynamic import 404s, main.ts's await throws, and the
   // game never boots at all, with only "Failed to fetch dynamically imported
   // module" to go on.
-  const allow = [projectRoot];
+  const allow = [projectRoot, path.join(projectRoot, ENGINE_DIR)];
   for (const name of ["@ion-engine/runtime", "@ion-engine/editor"]) {
     const dir = packageDir(projectRoot, name);
     if (dir) allow.push(dir);

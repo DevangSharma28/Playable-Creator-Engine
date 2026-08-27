@@ -35,7 +35,12 @@ export function doctor(projectRoot) {
         // migration step target the wrong release.
         notes.push(`${name} is ${installed} but ${CONFIG_NAME} says ionVersion ${config.ionVersion}. Update the config, or reinstall to match.`);
       }
-      ok.push(`${name} ${installed}`);
+      // An installed-but-unbuilt package resolves fine here and fails later
+      // as an opaque bundler error, so check the payload, not just presence.
+      const payload = { "@ion-engine/runtime": "dist/index.js", "@ion-engine/editor": "dist/index.js", "@ion-engine/build": "lib/build.sh", "@ion-engine/project": "bin/ion.mjs" }[name];
+      if (payload && !fs.existsSync(path.join(dir, payload))) {
+        problems.push(`${name} ${installed} is installed but not built — ${payload} is missing.\n    If it is linked to an ION checkout, rebuild there: node scripts/build-packages.mjs`);
+      } else ok.push(`${name} ${installed}`);
     } catch {
       problems.push(`${name} is not installed. Run \`npm install\`.`);
     }

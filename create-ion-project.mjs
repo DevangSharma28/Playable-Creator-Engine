@@ -297,10 +297,20 @@ public/assets/
 .DS_Store
 *.log
 
-# ION engine, editor and build system live in node_modules and are ignored
-# above. They are not part of this repository: editing them will not show up
-# in git, cannot be pushed, and is undone by the next install. Run
-# \`npx ion doctor\` if you suspect something has been changed in place.
+# ─────────────────────────────────────────────────────────────────────────────
+# The ION Engine.
+#
+# IONEngine/ is written by \`npm install\` from the @ion-engine/* packages this
+# project depends on. It is ours, not yours: it is regenerated on every
+# install, so an edit there cannot be committed, cannot be pushed, and does not
+# survive. That is what keeps this repository's history a record of *your game*
+# — every commit you make is src/game/ and project configuration, never engine
+# code.
+#
+# Update it with:  npm run engine:update
+# Check it with:   npm run doctor
+# ─────────────────────────────────────────────────────────────────────────────
+IONEngine/
 `;
 
 const tsconfig = `{
@@ -313,8 +323,20 @@ const tsconfig = `{
     "lib": ["ES2019", "DOM"],
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+
+    // The engine is resolved out of IONEngine/, which is where it actually
+    // lives for this project. Only the package roots are mapped, so
+    // "@ion-engine/runtime" resolves and a deep path into engine internals
+    // does not — the package's own exports map decides what is reachable.
+    "paths": {
+      "@ion-engine/runtime": ["./IONEngine/runtime"],
+      "@ion-engine/editor": ["./IONEngine/editor"]
+    }
   },
+  // IONEngine/ is deliberately not in this list: it is not your source, it is
+  // typechecked by ION before release, and including it would make every one
+  // of your builds pay for it.
   "include": ["src"]
 }
 `;
@@ -331,18 +353,35 @@ npm run preview   # serve the built file
 npm run doctor    # check Node, config, packages, engine integrity
 \`\`\`
 
-## What is yours, and what isn't
+## Layout
+
+\`\`\`
+IONEngine/        the engine, editor and build tooling   — ION's, generated, git-ignored
+src/game/         your game                              — yours, the only place you normally work
+src/main.ts       entry point                            — wired for you
+ion.config.json   project + engine configuration         — yours
+assets/           source assets                          — yours
+\`\`\`
 
 | | |
 | --- | --- |
 | \`src/game/\` | **Yours.** Gameplay, entities, systems, scenes, UI, and the files the ION editors write. |
-| \`ion.config.json\` | **Yours.** Project name, target, orientation, resolution, build settings, and the pinned ION version. |
+| \`ion.config.json\` | **Yours.** Name, target, orientation, resolution, build settings, and the pinned ION version. |
 | \`assets/\` | **Yours.** Only what \`src/game/assets.ts\` references is shipped. |
-| \`node_modules/@ion-engine/*\` | **ION's.** The engine, editor and build system. Git-ignored, not committable, replaced on install. |
+| \`IONEngine/\` | **ION's.** Written by \`npm install\`, git-ignored, regenerated every time. |
 
-Editing engine code inside \`node_modules\` does not persist. It will not show
-in \`git status\`, cannot be pushed, and disappears on the next \`npm install\`.
-\`npm run doctor\` reports it if it happens.
+Every commit in this repository is your game. \`IONEngine/\` is a build artifact
+of \`npm install\`, so an edit there cannot be committed, cannot be pushed, and
+does not survive the next install. \`npm run doctor\` says so if it happens.
+
+## Updating the engine
+
+\`\`\`bash
+npm run engine:update    # npm resolves new versions, IONEngine/ is rewritten
+\`\`\`
+
+\`src/game/\` is untouched. \`ionVersion\` in \`ion.config.json\` records what you
+were pinned to; \`npm run doctor\` reports a mismatch.
 
 ## Writing gameplay
 
@@ -458,10 +497,15 @@ async function main() {
       private: true,
       type: "module",
       scripts: {
+        // Writes IONEngine/ from whatever npm just resolved. Runs on every
+        // install and every update, so the folder is never stale and there is
+        // no setup step for anyone to miss.
+        postinstall: "ion sync",
         dev: "ion dev",
         build: "ion build",
         preview: "ion preview",
         doctor: "ion doctor",
+        "engine:update": "npm update @ion-engine/runtime @ion-engine/editor @ion-engine/build @ion-engine/project",
         typecheck: "tsc --noEmit",
       },
       dependencies: { "@ion-engine/runtime": dep("runtime"), three: "^0.185.1" },

@@ -1,6 +1,6 @@
 {
   "name": "@ion-engine/runtime",
-  "version": "4.0.2",
+  "version": "4.1.0",
   "description": "ION Engine runtime — the public API a game is written against. Ships in the production build.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",
@@ -18,5 +18,7 @@
   "peerDependencies": {
     "three": "^0.185.1"
   },
-  "sideEffects": false
+  "sideEffects": false,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts"
 }
