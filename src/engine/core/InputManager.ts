@@ -130,6 +130,11 @@ export class InputManager {
     }
   }
 
+  /** True while `key` is held. Case-insensitive; use `" "` for space, `"arrowup"` for arrows. */
+  isDown(key: string): boolean {
+    return this.heldKeys.has(key.toLowerCase());
+  }
+
   onTap(fn: (info: TapInfo) => void): InputHandle {
     this.tapListeners.add(fn);
     return { unsubscribe: () => this.tapListeners.delete(fn) };

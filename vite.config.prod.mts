@@ -20,7 +20,16 @@ import { viteSingleFile } from "vite-plugin-singlefile";
  * HTML, the same job the old esbuild-based build.sh always did, just
  * retargeted at Vite's output instead of esbuild's.
  */
+/**
+ * `ion` is the specifier generated projects import from. The dev server aliases
+ * it (see @ion-engine/project's dev.mjs); the production build needs the same
+ * mapping, passed in as an absolute path because this config runs from inside
+ * the installed package and cannot resolve the project's own node_modules.
+ */
+const runtimeEntry = process.env.ION_RUNTIME_ENTRY;
+
 export default defineConfig({
+  resolve: runtimeEntry ? { alias: { ion: runtimeEntry } } : undefined,
   // ION's own repo when unset; the customer's project when `ion build` sets
   // it. Without this the config would resolve "src" relative to its own
   // installed location inside node_modules and build the package, not the game.

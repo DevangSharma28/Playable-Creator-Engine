@@ -3785,8 +3785,13 @@
        ───────────────────────────────────────────────────────────────────── */
     const ION_API_ORIGIN = window.__ION_API_ORIGIN || "http://127.0.0.1:8001";
     const ION_STUDIO_BASE = window.__ION_STUDIO_BASE || "";
+    // The API origin travels with the iframe URL: the overlay is a separate
+    // document, so it cannot read this page's constants, and it needs to
+    // reach the same dev API this page does — which is not always :8001.
     document.getElementById("ui-editor-frame").src =
-      ION_STUDIO_BASE + document.getElementById("ui-editor-frame").dataset.ionSrc;
+      ION_STUDIO_BASE +
+      document.getElementById("ui-editor-frame").dataset.ionSrc +
+      "?api=" + encodeURIComponent(ION_API_ORIGIN);
 
     // Hot reload (dev only — not present in the production build): Vite's
     // own HMR replaces esbuild's old EventSource-based bundle-swap here —

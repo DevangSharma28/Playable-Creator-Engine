@@ -13,6 +13,8 @@ import { loadParticles } from "../../../src/engine/particles";
 import type { ParticlesFileData } from "../../../src/engine/particles";
 import { applySceneBindings, type SceneBindingsData } from "../../../src/engine/SceneBindings";
 import { getEditorHost, type DebugLayer, type EditorSession } from "./editor-host";
+import { InputManager } from "../../../src/engine/core/InputManager";
+import { DynamicJoystick } from "../../../src/engine/core/DynamicJoystick";
 
 /** The authored data files a project ships. All optional — a missing one just means that system has nothing to load. */
 export interface IonProjectData {
@@ -79,9 +81,23 @@ export abstract class IonGame {
   readonly ui: UILayout;
   /** The endcard UI layer, built from endcardLayout.json. */
   readonly endcardUI: UILayout;
+  /** Keyboard and pointer input. Reached through `ION.input` in game code. */
+  readonly input: InputManager;
+  /**
+   * The touch-anywhere virtual joystick, when the layout defines one.
+   *
+   * Built only if mainLayout.json contains a `joystick` element, because a
+   * joystick with no designed visuals would be invisible and a game that
+   * doesn't want one shouldn't get a full-screen input catcher it never asked
+   * for. `ION.input.axis` reads this when present and the keyboard otherwise,
+   * so game code does not branch on it.
+   */
+  readonly joystick: DynamicJoystick | undefined;
+  /** The audio listener every sound plays through. Parented to the perspective camera — see CameraHandler. */
+  readonly audioListener = new THREE.AudioListener();
 
   private readonly renderer: THREE.WebGLRenderer;
-  private readonly mainLayer: HTMLElement;
+  protected readonly mainLayer: HTMLElement;
   private editorSession: EditorSession | undefined;
   /** The "Show Colliders" overlay. Exists only when a dev entry registered an editor host — undefined, and never drawn, in production. */
   private readonly debugLayer: DebugLayer | undefined;
@@ -136,6 +152,19 @@ export abstract class IonGame {
     const endcardLayer = document.getElementById("endcard-layer") as HTMLElement;
     this.ui = new UILayout(this.mainLayer, layerOrEmpty(data.mainLayout));
     this.endcardUI = new UILayout(endcardLayer, layerOrEmpty(data.endcardLayout));
+
+    this.camera.perspective.add(this.audioListener);
+
+    // Both input paths share one "first gesture" callback: a browser
+    // AudioContext stays suspended, and every sound silently no-ops, until a
+    // real user gesture — and a keyboard-only tester needs to satisfy that
+    // too, or audio never starts for them.
+    const onFirstInput = () => this.onFirstInput();
+    this.input = new InputManager(window, onFirstInput);
+    const joystickElements = this.ui.getJoystick("joystick");
+    this.joystick = joystickElements
+      ? new DynamicJoystick(this.mainLayer, joystickElements.base, joystickElements.knob, 45, onFirstInput)
+      : undefined;
 
     this.debugLayer = getEditorHost()?.createDebugLayer();
     this.inspectables.set(options.bindingName ?? "Game", this);
@@ -198,6 +227,14 @@ export abstract class IonGame {
   /** Release anything your game created. The engine's own resources are handled for you. */
   protected onDispose(): void {}
 
+  /** The player's very first interaction. Unlocking audio hangs off this. */
+  protected onFirstInput(): void {
+    // three.js types AudioContext.getContext() loosely; the real object is a
+    // WebAudio AudioContext, which is suspended until a user gesture.
+    const context = THREE.AudioContext.getContext() as unknown as AudioContext;
+    if (context.state === "suspended") void context.resume();
+  }
+
   /** The point the camera rig follows while `follow` is on. Return undefined to leave the camera where the environment config put it. */
   protected getCameraFocus(): THREE.Vector3 | undefined {
     return undefined;
@@ -211,7 +248,7 @@ export abstract class IonGame {
   // -------------------------------------------------------------- engine --
 
   /** Called by IonEngine each frame. Do not override — implement `onUpdate`. */
-  update(dt: number, elapsed: number): void {
+  tick(dt: number, elapsed: number): void {
     this.onUpdate(dt, elapsed);
     const focus = this.getCameraFocus();
     if (focus) this.camera.update(focus, dt);
@@ -236,6 +273,8 @@ export abstract class IonGame {
     this.editorSession?.dispose();
     this.editorSession = undefined;
     this.debugLayer?.dispose();
+    this.input.dispose();
+    this.joystick?.dispose();
     this.onDispose();
     this.ui.dispose();
     this.endcardUI.dispose();
@@ -288,6 +327,7 @@ export abstract class IonGame {
       const host = getEditorHost();
       if (!host) return;
       this.mainLayer.style.display = "none";
+      this.input.setEnabled(false);
       this.editorSession = host.open({
         scene: this.scene,
         renderer: this.renderer,
@@ -307,6 +347,7 @@ export abstract class IonGame {
       this.editorSession?.dispose();
       this.editorSession = undefined;
       this.mainLayer.style.display = "";
+      this.input.setEnabled(true);
       if (this.manualSize) this.resizeTo(this.lastManualWidth, this.lastManualHeight);
       else this.handleResize();
     }

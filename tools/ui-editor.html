@@ -5031,7 +5031,11 @@
       function renderScriptList() {
         const countEl = document.getElementById("script-count");
         const listEl = document.getElementById("script-list");
-        const totalCount = scriptsList ? scriptsList.engine.length + scriptsList.game.length : 0;
+        // Defensive on purpose: this file is served from a package and can be
+        // older or newer than the API answering it, so a category it doesn't
+        // know about — or one the API stopped sending — must not take the
+        // panel down.
+        const totalCount = scriptsList ? Object.values(scriptsList).reduce((n, files) => n + (Array.isArray(files) ? files.length : 0), 0) : 0;
         if (countEl) countEl.textContent = String(totalCount);
 
         if (!scriptsList) {
@@ -5039,7 +5043,7 @@
           return;
         }
         if (totalCount === 0) {
-          listEl.innerHTML = '<div id="script-empty">No .ts files found under src/engine/ or src/game/.</div>';
+          listEl.innerHTML = '<div id="script-empty">No .ts files with assignable fields found under src/game/ui/.</div>';
           return;
         }
 
@@ -7660,7 +7664,24 @@
        * reads, with no error), and it works in every browser, not just
        * Chrome/Edge.
        */
-      const LOCAL_API = "http://127.0.0.1:8001";
+      /**
+       * The dev build API this editor talks to.
+       *
+       * Taken from the URL when the Engine Room embeds this page, because a
+       * project's API port is configurable (ion.config.json's server.apiPort)
+       * and two projects open at once cannot both have 8001. The literal
+       * remains the default so opening this file standalone — over file://
+       * or straight off the dev server — behaves exactly as it always did.
+       */
+      const LOCAL_API = (() => {
+        try {
+          const fromHost = new URLSearchParams(location.search).get("api");
+          if (fromHost) return decodeURIComponent(fromHost);
+        } catch {
+          /* no URL/search available — fall through to the default */
+        }
+        return "http://127.0.0.1:8001";
+      })();
       let localApiAvailable = false;
       /** Bound layouts/*.json filename when saving via the local API (kind === "layout") — its equivalent of currentFileHandle.name on the File System Access path, since there's no real handle object here. */
       let localLayoutFilename = null;

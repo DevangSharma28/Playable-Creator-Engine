@@ -228,6 +228,25 @@ copyTree(path.join(ROOT, "scripts", "dev-build-api.js"), path.join(buildLib, "de
 copyTree(path.join(ROOT, "scripts", "check-build-report.mjs"), path.join(buildLib, "check-build-report.mjs"));
 copyTree(path.join(ROOT, "vite.config.prod.mts"), path.join(buildLib, "vite.config.prod.mts"));
 copyTree(path.join(ROOT, "src", "index.template.html"), path.join(buildLib, "index.template.html"));
+// Written here rather than kept as a source file: this directory is wiped and
+// re-copied on every build, so anything hand-placed in it silently disappears
+// — which is exactly what happened to an earlier copy of this entry, leaving
+// the package's own `exports` pointing at a file that wasn't there.
+fs.writeFileSync(
+  path.join(buildLib, "index.mjs"),
+  `import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Absolute paths to this package's payload — the pipeline, the compressor, the gate, and the production Vite config. */
+export const BUILD_LIB = path.dirname(fileURLToPath(import.meta.url));
+export const BUILD_SCRIPT = path.join(BUILD_LIB, "build.sh");
+export const PROD_VITE_CONFIG = path.join(BUILD_LIB, "vite.config.prod.mts");
+export const CHECK_REPORT = path.join(BUILD_LIB, "check-build-report.mjs");
+export const COMPRESS_ASSETS = path.join(BUILD_LIB, "compress-assets.mjs");
+export const DEV_API = path.join(BUILD_LIB, "dev-build-api.cjs");
+export const INDEX_TEMPLATE = path.join(BUILD_LIB, "index.template.html");
+`
+);
 log(`  build payload:  ${fs.readdirSync(buildLib).length} files`);
 
 // ── Integrity manifests ────────────────────────────────────────────────────

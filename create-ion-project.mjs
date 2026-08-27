@@ -159,76 +159,97 @@ function preflight() {
 
 // ──────────────────────────────────────────────────────── generated files ──
 
-const gameTs = (template) => `import * as THREE from "three";
-import { IonGame } from "@ion-engine/runtime";
-
-import manifest from "./assets";
-import environment from "./environment.json";
-import colliders from "./colliders.json";
-import particles from "./particles.json";
-import sceneBindings from "./sceneBindings.json";
-import mainLayout from "./ui/mainLayout.json";
-import endcardLayout from "./ui/endcardLayout.json";
+const gameTs = (template) => `import { Game, ION } from "ion";
+import { Player } from "./Player";
 
 /**
  * Your game.
  *
- * ION requires four things of this class and nothing else: \`create\`,
- * \`onCreate\`, \`onUpdate\`, and — if the camera should follow something —
- * \`getCameraFocus\`. Everything underneath (renderer, camera rig, lighting,
- * colliders, particles, UI, the editor) belongs to the engine and is reached
- * through the public API, never imported from inside it.
+ * Two methods and you have a game. Everything underneath — renderer, camera,
+ * lighting, physics, particles, UI, input, audio, the editor connection, and
+ * every file the ION editors write — is already running before start() is
+ * called. You never wire any of it up.
  */
-export class Game extends IonGame {
-  private cube!: THREE.Mesh;
+export default class MyGame extends Game {
+  player!: Player;
+  score = 0;
 
-  static async createGame(canvas: HTMLCanvasElement): Promise<Game> {
-    return Game.create.call(Game, canvas, {
-      manifest,
-      data: { environment, colliders, particles, sceneBindings, mainLayout, endcardLayout },
-    }) as Promise<Game>;
+  /** Build your world. Runs once. */
+  start() {
+    ION.scene.ground({ color: "green", size: 40 });
+
+    this.player = new Player();
+    ION.camera.follow(this.player);
+
+    // Something to collect.
+    for (let i = 0; i < 5; i++) {
+      ION.scene.box({
+        color: "yellow",
+        size: 0.6,
+        // Kept close: a portrait playable sees roughly ±4 units across at
+        // the default camera distance, so a wider spread just puts them
+        // off-screen at startup.
+        x: ION.random(-3.5, 3.5),
+        y: 0.3,
+        z: ION.random(-6, 2),
+        name: \`Coin\${i}\`,
+      });
+    }
   }
 
-  /** Build your scene. Runs before authored collider/particle/binding data loads. */
-  protected onCreate(): void {
-    const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(40, 40),
-      new THREE.MeshStandardMaterial({ color: 0x4c9a52, roughness: 0.95 })
-    );
-    ground.name = "Ground";
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    this.scene.add(ground);
+  /** Runs every frame. dt is seconds since the last one. */
+  update(dt: number) {
+    // Spin every coin. Entities update themselves — this is for loose props.
+    for (let i = 0; i < 5; i++) {
+      const coin = ION.scene.find(\`Coin\${i}\`);
+      if (coin) coin.rotation.y += dt * 2;
+    }
+  }
+${template === "playable-ad" ? `
+  /** Runs once everything the editors authored has loaded. */
+  ready() {
+    ION.ui.text("score", "0");
+    // A playable ad must reach an end. Wire yours, then show the endcard.
+    // ION.ui.showEndcard();
+  }
+` : ""}}
+`;
 
-    this.cube = new THREE.Mesh(
-      new THREE.BoxGeometry(1.5, 1.5, 1.5),
-      new THREE.MeshStandardMaterial({ color: 0xe8961e, roughness: 0.4 })
-    );
-    this.cube.name = "Cube";
-    this.cube.position.set(0, 0.75, 0);
-    this.cube.castShadow = true;
-    this.scene.add(this.cube);
+const playerTs = `import { Entity, ION } from "ion";
+
+/**
+ * A thing in your world.
+ *
+ * \`new Player()\` puts it in the scene and starts updating it — there is no
+ * register step and nothing to add to a list.
+ */
+export class Player extends Entity {
+  speed = 6;
+
+  /** Runs once, when the entity is created. */
+  start() {
+    this.shape = ION.scene.box({ color: "orange", size: 1, y: 0.5 });
+    this.moveTo(0, 0, 0);
   }
 
-  /** One tick. \`dt\` is seconds; \`elapsed\` is game time and pauses with the editor. */
-  protected onUpdate(dt: number): void {
-    this.cube.rotation.y += dt * 1.2;
-  }
-
-  /** Runs once every authored file has loaded and every ⊙ Pick binding resolved. */
-  protected onReady(): void {${template === "playable-ad" ? `
-    // Playable ads must reach an end state — networks check for it.
-    // Wire your win/lose here, then show the endcard and fire the CTA.` : ""}
-  }
-
-  protected getCameraFocus(): THREE.Vector3 {
-    return this.cube.position;
+  /** Runs every frame. */
+  update(dt: number) {
+    // Works with the on-screen joystick and with WASD/arrows, no branching.
+    const move = ION.input.axis;
+    this.moveBy(move.x * this.speed * dt, 0, move.y * this.speed * dt);
   }
 }
 `;
 
 const mainTs = `import { IonEngine } from "@ion-engine/runtime";
-import { Game } from "./game/Game";
+import MyGame from "./game/Game";
+import manifest from "./game/assets";
+import environment from "./game/environment.json";
+import colliders from "./game/colliders.json";
+import particles from "./game/particles.json";
+import sceneBindings from "./game/sceneBindings.json";
+import mainLayout from "./game/ui/mainLayout.json";
+import endcardLayout from "./game/ui/endcardLayout.json";
 
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 
@@ -246,7 +267,19 @@ if (import.meta.env.DEV) {
   installEditor();
 }
 
-IonEngine.boot(canvas, { createGame: (c) => Game.createGame(c) });
+/**
+ * Wiring. You should not need to change this file.
+ *
+ * It hands ION your game class and the files the editors write; ION does the
+ * rest. Everything you actually work on lives in src/game/.
+ */
+IonEngine.boot(canvas, {
+  createGame: (c) =>
+    MyGame.create.call(MyGame, c, {
+      manifest,
+      data: { environment, colliders, particles, sceneBindings, mainLayout, endcardLayout },
+    }),
+});
 
 if (import.meta.hot) import.meta.hot.accept();
 `;
@@ -330,6 +363,8 @@ const tsconfig = `{
     // "@ion-engine/runtime" resolves and a deep path into engine internals
     // does not — the package's own exports map decides what is reachable.
     "paths": {
+      // What your game imports from. One name, one place.
+      "ion": ["./IONEngine/runtime"],
       "@ion-engine/runtime": ["./IONEngine/runtime"],
       "@ion-engine/editor": ["./IONEngine/editor"]
     }
@@ -524,6 +559,7 @@ async function main() {
     "src/main.ts": mainTs,
     "src/index.template.html": indexTemplate(config.name),
     "src/game/Game.ts": gameTs(config.template),
+    "src/game/Player.ts": playerTs,
     "src/game/assets.ts": assetsTs,
     "src/game/environment.json": JSON.stringify({ version: 1 }, null, 2) + "\n",
     "src/game/colliders.json": JSON.stringify({ version: 1, colliders: [] }, null, 2) + "\n",

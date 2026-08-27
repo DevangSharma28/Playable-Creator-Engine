@@ -4,6 +4,20 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.mjs";
 import { enginePackageDir } from "./sync.mjs";
+import { createRequire as _cr } from "node:module";
+
+/** Absolute path to the runtime's public entry, honouring its exports map. */
+function runtimeEntry(projectRoot) {
+  const dir = enginePackageDir(projectRoot, "@ion-engine/runtime");
+  if (!dir) return null;
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
+    const main = manifest.exports?.["."]?.default ?? manifest.main;
+    return typeof main === "string" ? path.join(dir, main) : null;
+  } catch {
+    return null;
+  }
+}
 
 export function build(projectRoot, opts = {}) {
   const config = loadConfig(projectRoot);
@@ -24,6 +38,8 @@ export function build(projectRoot, opts = {}) {
       ION_PROJECT_ROOT: projectRoot,
       ION_BUILD_LIB: buildLib,
       ION_VITE_CONFIG: path.join(buildLib, "vite.config.prod.mts"),
+      // So `import … from "ion"` resolves in the production build too.
+      ION_RUNTIME_ENTRY: runtimeEntry(projectRoot) ?? "",
       HALF_FLOAT: (opts.halfFloat ?? config.build.halfFloat) ? "1" : "0",
       ION_BUDGET_BYTES: String(config.build.budgetBytes),
       ALLOW_COMPAT_WARNINGS: config.build.failOnCompatWarnings === false ? "1" : (process.env.ALLOW_COMPAT_WARNINGS ?? ""),

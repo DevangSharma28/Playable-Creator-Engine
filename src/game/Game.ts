@@ -823,8 +823,8 @@ export class Game {
     return joy.x !== 0 || joy.y !== 0 ? joy : this.keyboardInput.keyboardAxis;
   }
 
-  /** Advance all systems by one frame. Call once per requestAnimationFrame tick. */
-  update(dt: number, elapsed: number): void {
+  /** Advance all systems by one frame. Called once per requestAnimationFrame tick. */
+  tick(dt: number, elapsed: number): void {
     if (!this.ended) {
       this.player.update(dt, elapsed, this.combinedAxis());
 

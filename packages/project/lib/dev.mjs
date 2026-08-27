@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.mjs";
 import { verifyInstall } from "./integrity.mjs";
-import { enginePackageDir, ENGINE_DIR } from "./sync.mjs";
+import { enginePackageDir, sync, ENGINE_DIR } from "./sync.mjs";
 
 /**
  * Resolves an installed ION package's own directory from the project.
@@ -109,8 +109,31 @@ function syncAssets(projectRoot) {
   return n;
 }
 
+/** The versions currently materialised in IONEngine/, or {} if it hasn't been written yet. */
+function readEngineVersions(projectRoot) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(projectRoot, ENGINE_DIR, "ion-engine.json"), "utf8")).packages ?? {};
+  } catch {
+    return {};
+  }
+}
+
 export async function dev(projectRoot, opts = {}) {
   const config = loadConfig(projectRoot);
+
+  // Refresh IONEngine/ before anything reads it.
+  //
+  // `postinstall` covers install and update, but not the case that matters
+  // while ION is linked to a checkout: rebuilding the engine there leaves
+  // every project's materialised copy stale, and the symptom is a fix that
+  // "didn't work" because the old bundle is still being served. Copying ~2 MB
+  // costs milliseconds, so this re-syncs unconditionally rather than trying to
+  // decide when it is needed and getting that wrong.
+  const before = readEngineVersions(projectRoot);
+  sync(projectRoot, { quiet: true });
+  const after = readEngineVersions(projectRoot);
+  const changed = Object.entries(after).filter(([k, v]) => before[k] !== v);
+
   const port = opts.port ?? config.server.port;
   const apiPort = opts.apiPort ?? config.server.apiPort;
   const apiOrigin = `http://127.0.0.1:${apiPort}`;
@@ -200,6 +223,11 @@ export async function dev(projectRoot, opts = {}) {
     const entry = packageEntry(projectRoot, name);
     if (entry) alias.push({ find: new RegExp(`^${name.replace("/", "\\/")}$`), replacement: entry });
   }
+  // `ion` is the specifier game code is written against — short, and the same
+  // word in every project. It maps to the runtime's public entry, so it grants
+  // no more than "@ion-engine/runtime" does.
+  const runtimeEntry = packageEntry(projectRoot, "@ion-engine/runtime");
+  if (runtimeEntry) alias.push({ find: /^ion$/, replacement: runtimeEntry });
 
   const { createServer } = await import("vite");
   const server = await createServer({
@@ -221,6 +249,7 @@ export async function dev(projectRoot, opts = {}) {
   await server.listen();
 
   console.log(`\n  ION Studio   http://localhost:${port}`);
+  if (changed.length) console.log(`  engine       refreshed — ${changed.map(([k, v]) => `${k}@${v}`).join("  ")}`);
   console.log(`  project      ${config.name} v${config.version}  (ION ${config.ionVersion}, ${config.target})`);
   console.log(`  dev API      ${apiOrigin}`);
   if (copied) console.log(`  assets       ${copied} file(s) synced to public/assets`);

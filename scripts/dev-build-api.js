@@ -96,6 +96,17 @@ const SRC_DIR = path.join(ROOT, "src");
  */
 const SCRIPT_CATEGORIES = { game: path.join(SRC_DIR, "game") };
 if (fs.existsSync(path.join(SRC_DIR, "engine"))) SCRIPT_CATEGORIES.engine = path.join(SRC_DIR, "engine");
+/**
+ * Categories that always appear in a /list-scripts response, even when the
+ * directory behind one doesn't exist.
+ *
+ * Dropping a key outright was a mistake: `{engine, game}` is a published
+ * response shape, and tools/ui-editor.html reads `.engine.length` directly.
+ * Removing `engine` for projects that consume the engine as a package turned
+ * a correct "there is nothing here" into a TypeError that broke the whole
+ * Scripts panel. An empty array says the same thing without breaking anyone.
+ */
+const REPORTED_CATEGORIES = ["engine", "game"];
 
 /**
  * tools/ui-editor.html's Save/Set-as-Main/Set-as-Endcard prefer writing
@@ -1081,7 +1092,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === "GET" && req.url === "/list-scripts") {
-    const result = {};
+    const result = Object.fromEntries(REPORTED_CATEGORIES.map((c) => [c, []]));
     for (const [category, dir] of Object.entries(SCRIPT_CATEGORIES)) {
       const files = [];
       try {

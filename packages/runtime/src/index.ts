@@ -13,6 +13,16 @@
  * on an ION upgrade that was supposed to be safe.
  */
 
+// ── The simple API ─────────────────────────────────────────────────────────
+//
+// What a game is normally written against. `Game`, `Entity` and `ION` cover
+// scene building, input, audio, particles, colliders, camera, UI, timing and
+// events without any engine wiring. Everything below this block is the
+// advanced surface — still supported, still exported, but not what a game
+// needs to reach for first.
+export { Game, Entity, ION, SimpleZone } from "./simple";
+export type { Vec3Like, ShapeOptions, ZoneOptions } from "./simple";
+
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 export { IonEngine } from "../../../src/engine/IonEngine";
 export type { IonEngineOptions, GameDevFacade } from "../../../src/engine/IonEngine";
@@ -30,7 +40,8 @@ export { Animator, LoopAnimator } from "../../../src/engine/core/Animator";
 export type { AnimatorOptions, LoopAnimatorOptions } from "../../../src/engine/core/Animator";
 
 // ── Entities ───────────────────────────────────────────────────────────────
-export type { Entity } from "../../../src/engine/entities/Entity";
+/** The minimal advanced-API entity contract. Most games extend the simple `Entity` class above instead. */
+export type { Entity as EntityContract } from "../../../src/engine/entities/Entity";
 
 // ── Assets ─────────────────────────────────────────────────────────────────
 export { AssetLoader } from "../../../src/engine/AssetLoader";

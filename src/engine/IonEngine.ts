@@ -316,7 +316,16 @@ export interface GameDevFacade {
  * is optional — see GameDevFacade.
  */
 export interface IonGameLike {
-  update(dt: number, elapsed: number): void;
+  /**
+   * One frame of engine work.
+   *
+   * Deliberately not called `update`: that is the name a *game* wants for its
+   * own per-frame code, and when both used it a subclass's `update` silently
+   * overrode the engine's — so entity ticking and camera follow stopped
+   * running while the game itself looked fine. Separate names make that
+   * collision impossible rather than merely unlikely.
+   */
+  tick(dt: number, elapsed: number): void;
   render(): void;
   dispose(): void;
 }
@@ -507,7 +516,7 @@ export class IonEngine {
             let steps = 0;
             while (accumulator >= fixedStep && steps < MAX_FIXED_STEPS_PER_FRAME) {
               fixedElapsed += fixedStep;
-              activeGame.update(fixedStep, fixedElapsed);
+              activeGame.tick(fixedStep, fixedElapsed);
               this.scheduler.update(fixedStep);
               // After update(), so overlaps are evaluated against where
               // things actually moved to this step rather than a step
@@ -526,7 +535,7 @@ export class IonEngine {
             // frame, where it would produce the same overrun again, forever.
             if (steps === MAX_FIXED_STEPS_PER_FRAME) accumulator = 0;
           } else {
-            activeGame.update(dt, now / 1000);
+            activeGame.tick(dt, now / 1000);
             this.scheduler.update(dt);
             this.colliders.update(); // see the fixed-step branch above for the ordering
             this.particles.update(dt);
