@@ -72,41 +72,25 @@ export function verifyPackage(pkgDir) {
 }
 
 /**
- * Verifies every copy of the engine this project has.
+ * Verifies the installed ION packages against the hashes they shipped with.
  *
- * There are two, and checking only one was a real hole. `npm install` puts the
- * packages in `node_modules`, and `ion sync` copies them to `IONEngine/` — and
- * `IONEngine/` is the copy that is actually *served*: the dev server and the
- * production build both resolve `ion` and `@ion-engine/runtime` there (see
- * enginePackageDir). It is also the copy a client can see in their file tree,
- * which makes it the one they are likely to edit. Verifying only node_modules
- * meant an edited `IONEngine/runtime/dist/index.js` was loaded by every build
- * while `ion doctor` reported no problems at all.
+ * One location, because there is now only one copy: `node_modules`. This used
+ * to check a second, `IONEngine/`, which `ion sync` maintained as a duplicate
+ * of the same packages — see resolve.mjs for why that duplicate is gone.
  *
- * @returns {{ name: string, location: "node_modules"|"IONEngine", checked: number, modified: string[], missing: string[], unverifiable: boolean }[]}
+ * @returns {{ name: string, location: "node_modules", checked: number, modified: string[], missing: string[], unverifiable: boolean }[]}
  */
 export function verifyInstall(projectRoot) {
-  const results = [];
-
   const scope = path.join(projectRoot, "node_modules", "@ion-engine");
-  if (fs.existsSync(scope)) {
-    for (const name of fs.readdirSync(scope)) {
-      const dir = path.join(scope, name);
-      if (!fs.statSync(dir).isDirectory()) continue;
-      results.push({ name: `@ion-engine/${name}`, location: "node_modules", ...verifyPackage(dir) });
-    }
-  }
-
-  const engineDir = path.join(projectRoot, "IONEngine");
-  if (fs.existsSync(engineDir)) {
-    for (const name of fs.readdirSync(engineDir)) {
-      const dir = path.join(engineDir, name);
-      if (!fs.statSync(dir).isDirectory()) continue;
-      // README.md and ion-engine.json are written by `ion sync` itself and are
-      // deliberately outside every package's manifest.
-      results.push({ name: `IONEngine/${name}`, location: "IONEngine", ...verifyPackage(dir) });
-    }
-  }
-
-  return results;
+  if (!fs.existsSync(scope)) return [];
+  return fs
+    .readdirSync(scope)
+    .filter((name) => {
+      try {
+        return fs.statSync(path.join(scope, name)).isDirectory();
+      } catch {
+        return false;
+      }
+    })
+    .map((name) => ({ name: `@ion-engine/${name}`, location: "node_modules", ...verifyPackage(path.join(scope, name)) }));
 }

@@ -57,15 +57,18 @@ test(
       assert.ok(fs.existsSync(path.join(project, "package.json")));
     });
 
-    await t.test("npm install resolves every dependency and materialises IONEngine/", () => {
+    await t.test("one npm install is the whole setup", () => {
       const { status, output } = run("npm", ["install", "--no-audit", "--no-fund"], project);
       assert.equal(status, 0, output);
-      // postinstall runs `ion sync`, which is what puts the engine at the top
-      // level where the project's tsconfig paths point.
+      // Straight into node_modules, with no postinstall step and no second
+      // copy of the engine anywhere in the project.
       for (const short of ["runtime", "editor", "build", "project"]) {
-        assert.ok(fs.existsSync(path.join(project, "IONEngine", short, "package.json")), `IONEngine/${short} missing`);
+        assert.ok(
+          fs.existsSync(path.join(project, "node_modules", "@ion-engine", short, "package.json")),
+          `@ion-engine/${short} is not installed`
+        );
       }
-      assert.ok(!fs.existsSync(path.join(project, "IONEngine", "runtime", "node_modules")), "a nested node_modules was copied in");
+      assert.ok(!fs.existsSync(path.join(project, "IONEngine")), "the engine was copied into the project instead of being resolved from node_modules");
     });
 
     await t.test("the project typechecks against the installed engine", () => {
@@ -181,9 +184,8 @@ test(
     });
 
     await t.test("an engine file edited in place is reported and cannot be committed", () => {
-      // IONEngine/ specifically: it is the copy that is served, and it went
-      // unverified entirely until this test was written.
-      const edited = path.join(project, "IONEngine", "runtime", "dist", "index.js");
+      // node_modules is now the only copy, and the one that is served.
+      const edited = path.join(project, "node_modules", "@ion-engine", "runtime", "dist", "index.js");
       const original = fs.readFileSync(edited, "utf8");
       fs.writeFileSync(edited, `${original}\n// edited in place\n`);
       try {

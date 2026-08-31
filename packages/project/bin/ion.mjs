@@ -37,7 +37,6 @@ const USAGE = `
     ion dev        Start ION Studio and the dev server
     ion build      Produce the production build
     ion preview    Serve the last production build
-    ion sync       Refresh IONEngine/ from the installed packages
     ion doctor     Check Node, config, packages and engine integrity
 
   Options
@@ -51,6 +50,7 @@ if (command === undefined || command === "help" || command === "--help" || comma
   process.exit(0);
 }
 
+// `sync` is retained but does nothing — see its case below.
 const KNOWN = ["dev", "build", "preview", "sync", "doctor"];
 if (!KNOWN.includes(command)) {
   console.error(`\n✖ Unknown command "${command}".\n${USAGE}`);
@@ -89,8 +89,17 @@ try {
       break;
     }
     case "sync": {
-      const { sync } = await import("../lib/sync.mjs");
-      process.exit(sync(root).missing.length ? 1 : 0);
+      // Kept as a no-op on purpose. Projects generated before the engine
+      // stopped being copied into IONEngine/ have `"postinstall": "ion sync"`
+      // in their package.json, and removing the command outright would make
+      // `npm install` fail in every one of them — with an error about a
+      // missing script, which says nothing about what changed or what to do.
+      console.log("\n  ion sync is no longer needed.\n");
+      console.log("  The engine is resolved directly from node_modules, so npm install and");
+      console.log("  npm update are all it takes — there is no second copy to keep in step.");
+      console.log("  You can delete the \"postinstall\": \"ion sync\" line from package.json,");
+      console.log("  and the IONEngine/ folder if this project still has one.\n");
+      process.exit(0);
       break;
     }
     case "doctor": {

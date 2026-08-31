@@ -1578,6 +1578,28 @@ const server = http.createServer((req, res) => {
   res.end("Not found");
 });
 
+/**
+ * A port already in use is a normal thing to hit, not a crash.
+ *
+ * Without this handler Node emits an unhandled 'error' event and the process
+ * dies with a bare `Error: listen EADDRINUSE` stack trace — no mention of ION,
+ * no mention of which project, and nothing to suggest that another ION project
+ * already running was the cause. `ion dev` probes for a free port before
+ * spawning this (see ports.mjs), so reaching here means something claimed the
+ * port in between; saying so is more useful than a stack.
+ */
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`\n✖ ION dev API: port ${PORT} is already in use.`);
+    console.error("  Another ION project is probably running. Each one needs its own API port;");
+    console.error("  `npm run dev` normally picks a free pair automatically.");
+    console.error("  Pass one explicitly with: npm run dev -- --api-port <n>\n");
+  } else {
+    console.error(`\n✖ ION dev API failed to start: ${err.message}\n`);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, "127.0.0.1", () => {
   console.log(`Dev build API listening on http://127.0.0.1:${PORT} (GET /version, GET /estimate-size, GET /build-report, POST /build, POST /save-layout, GET /load-layout, GET /list-layouts, GET /list-scripts, GET /list-logic-scripts, GET /script-info, POST /save-inspectable-values, GET /list-bindings, POST /save-binding, POST /remove-binding, GET /list-scene-bindings, POST /save-scene-bindings, GET /list-colliders, POST /save-colliders, GET /list-particles, POST /save-particles, GET /list-environment, POST /save-environment)`);
 });

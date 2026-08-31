@@ -1573,7 +1573,7 @@ npm run verify:bundle   # run a built dist/index.html in headless Chrome
 `npm run test:e2e` starts from an empty directory and does what a client does:
 
 1. `node create-ion-project.mjs` — generates a project.
-2. `npm install` — resolves the four `@ion-engine/*` packages and materialises `IONEngine/`.
+2. `npm install` — resolves and installs the four `@ion-engine/*` packages. No postinstall step.
 3. `tsc --noEmit` — the project typechecks against the installed engine.
 4. `ion doctor` — reports a healthy project.
 5. A deep import into engine internals is asserted to **fail resolution**, which is what makes the boundary in §16.3 real rather than advisory.
@@ -1583,7 +1583,7 @@ npm run verify:bundle   # run a built dist/index.html in headless Chrome
 9. The built playable **boots and draws in headless Chrome** with no page errors.
 10. The shipped bytes contain **no editor module** and the page builds no editor DOM.
 11. An over-budget build **fails** and still leaves the artifact on disk to inspect.
-12. An engine file edited inside `IONEngine/` is **reported by `ion doctor`**, naming the file.
+12. An engine file edited inside `node_modules/@ion-engine/*` is **reported by `ion doctor`**, naming the file.
 13. Two builds of the same source are **byte-identical**.
 
 ### 13.4 Performance baselines
@@ -1771,27 +1771,93 @@ The editor being a **devDependency** is not cosmetic. A production install (`npm
 
 ```
 my-game/
-├── ion.config.json        yours — name, target, orientation, resolution, build settings, pinned ION version
-├── package.json           yours
-├── tsconfig.json          yours — maps "ion" and "@ion-engine/*" into IONEngine/
+├── package.json           the whole project: scripts, dependencies, config
+├── ion.config.json        name, target, orientation, resolution, build, pinned ION version
+├── tsconfig.json          maps only "ion"; @ion-engine/* resolves through Node
 ├── src/
 │   ├── main.ts            the entry. Generated once; you rarely touch it.
 │   ├── index.template.html
 │   └── game/              YOURS. This is where you work.
-│       ├── Game.ts        your game
-│       ├── Player.ts      your entities
-│       ├── assets.ts      what to preload
+│       ├── Game.ts  Player.ts  assets.ts
 │       ├── entities/ systems/ scenes/ scripts/
-│       ├── colliders.json  particles.json  environment.json  sceneBindings.json
+│       ├── colliders.json  particles.json  environment.json  scene.json  sceneBindings.json
 │       └── ui/            mainLayout.json, endcardLayout.json, bindings.json
 ├── assets/                yours — models, sounds, images
-├── IONEngine/             OURS. Written by npm install. Git-ignored.
-└── node_modules/          OURS.
+└── node_modules/          OURS. Four npm packages. Nothing to copy, nothing to sync.
 ```
 
-`IONEngine/` exists because two requirements pull in opposite directions. The engine has to be a real dependency — versioned, resolved by npm, updated with `npm update` — and npm puts dependencies in `node_modules`. But a project also has to *read* as engine-here / game-there, at the top level, in a file tree and in a pull request, which `node_modules` cannot express. So npm keeps ownership of **versions** and `ion sync` (run from `postinstall`) keeps ownership of **layout**: it copies what npm resolved into `IONEngine/`, one directory per package, and records exactly what it copied in `IONEngine/ion-engine.json`.
+```bash
+npm install     # once. Installs engine, editor and build tooling.
+npm run dev     # ION Studio, on the first free port from 8000
+```
 
-`runtime` and `editor` are **served** from `IONEngine/` — the folder the project is told it runs is the folder it runs. `build` and `project` are **executed** from `node_modules`, because they are Node programs whose own transitive dependencies (glTF-Transform, sharp, meshoptimizer, Vite) only resolve there. `enginePackageDir(root, name, kind)` in `packages/project/lib/sync.mjs` is the single place that distinction lives.
+That is the entire setup. No postinstall hook, no generated folder, no paths to
+configure, and no command anyone has to know about.
+
+**There used to be a fifth thing in that tree.** `ion sync` copied all four
+`@ion-engine/*` packages out of `node_modules` into a root-level `IONEngine/`
+folder on every install, and *that* folder — not `node_modules` — was what the
+dev server and the build actually served. The intent was legibility: a project
+that reads as engine-here / game-there at the top level.
+
+It cost more than it bought. Two copies of the engine meant two ways for them
+to disagree, and the important one was silent: an `npm update` whose
+`postinstall` did not run left the served copy a version behind the installed
+one, and every symptom pointed at the wrong place. Keeping the duplicate honest
+required a `postinstall` hook, a `sync` command, a version-stamp file, drift
+detection in `doctor`, and integrity verification of two locations — a whole
+subsystem whose only job was maintaining a copy. And it duplicated ~2 MB of
+engine into every project, which is what a package manager exists to avoid.
+
+npm is now the single authority. One copy, in `node_modules`, resolved by
+Node's own algorithm — which is also what makes `npm update` work with no
+ION-specific step, and what makes pnpm, Yarn, workspaces and `file:` links work
+without ION knowing about any of them. `ion sync` remains as a no-op that
+explains itself, because projects generated before this still have it in their
+`postinstall` and removing the command outright would break their `npm install`
+with an error about a missing script.
+
+Resolution goes through `require.resolve` of each package's own `package.json`
+(see `packages/project/lib/resolve.mjs`) rather than joining
+`node_modules/<name>` — that path is a guess that is right under npm's default
+layout and wrong under every other one.
+
+### 16.2.1 Running several projects at once
+
+ION is a tool people keep several windows of open. Every generated project
+ships the same `server.port`, because the generator cannot know what else is
+running — so "the configured port is free" is the uncommon case.
+
+Before this, the second project did not start. Vite exited with `Port 8000 is
+already in use`, and the dev API — a separate process with no `error` handler
+on its listener — died first with a raw unhandled `EADDRINUSE` stack trace that
+never mentioned ION or suggested another project was the cause.
+
+A configured port is now a **preference**. `ion dev` probes for the first free
+port at or above it, then for a free API port derived from the one it actually
+got, and prints both:
+
+```
+  ION Studio   http://localhost:8004
+               port 8000 was in use — this project took 8004
+  dev API      http://127.0.0.1:8005
+```
+
+Deriving the API port from the *real* server port rather than from the config
+is what keeps each project's pair together and readable — `8000/8001`,
+`8002/8003`, `8004/8005` — instead of handing the same API port to two
+projects. Nothing is written back to `ion.config.json`: which project got which
+port is a fact about this machine right now, not about the project, and
+rewriting a tracked file on every `npm run dev` would put port churn in the
+customer's git history. Pin one with `npm run dev -- --port 9000`.
+
+**Isolation is structural, not managed.** Each project has its own
+`node_modules`, its own Vite cache (`node_modules/.vite`), its own
+`src/game/*.json` editor state, its own `public/assets` mirror, its own `dist/`,
+its own dev-server and HMR socket, and its own dev API process pointed at its
+own root by `ION_PROJECT_ROOT`. The Studio page is served per-project with its
+own API origin injected, so a browser tab can only ever talk to the server that
+served it. Nothing is shared and nothing needs coordinating.
 
 ### 16.3 What the boundary actually is
 
@@ -1800,9 +1866,9 @@ my-game/
 What the boundary *does* guarantee, mechanically:
 
 1. **Deep imports do not resolve.** Each package's `exports` map publishes exactly one path. `import … from "@ion-engine/runtime/src/engine/editor/EditorRoot"` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` — in Node, in Vite, and as `TS2307` in TypeScript. Not a lint rule; a resolution error. `tests/build-regression.test.mjs` asserts it on a real generated project.
-2. **Engine edits cannot be committed.** `IONEngine/` and `node_modules/` are both git-ignored, so `git status` stays clean, `git add` refuses, and nothing reaches a remote. Every commit in a client's repository is their game.
-3. **Engine edits are noticed.** Each package ships a sha256 manifest (`ion-integrity.json`). `ion doctor` verifies **both** copies — `node_modules/@ion-engine/*` **and** `IONEngine/*` — and names the changed files. Verifying only the first was a real hole: `IONEngine/` is the copy that is actually served, so an edit there was loaded by every build while doctor reported no problems.
-4. **Version drift is noticed.** `ion doctor` compares `IONEngine/ion-engine.json` against what npm resolved and fails when they disagree — an `npm update` whose `postinstall` did not run leaves the served engine a version behind the installed one, and every symptom of that points at the wrong place.
+2. **Engine edits cannot be committed.** The engine lives only in `node_modules/`, which is git-ignored, so `git status` stays clean, `git add` refuses, and nothing reaches a remote. Every commit in a client's repository is their game.
+3. **Engine edits are noticed.** Each package ships a sha256 manifest (`ion-integrity.json`). `ion doctor` verifies the installed packages and names the changed files. There is one copy to verify now; when there were two, verifying only one was a real hole.
+4. **The installed version is the version.** `ion doctor` compares what npm resolved against `ion.config.json`'s `ionVersion` and says so when they differ. There is no second copy that can lag behind.
 
 Point 3 is a **correctness** check, not a security control: anyone who can edit the engine can equally edit the manifest, and nothing here tries to stop them. It exists to catch the failure that actually happens — someone debugs by editing engine source, it works, and the fix evaporates on the next `npm ci` with nothing in `git status` to explain why the bug came back.
 
@@ -1813,7 +1879,7 @@ Point 3 is a **correctness** check, not a security control: anyone who can edit 
 | | |
 | --- | --- |
 | **Yours to change** | `src/game/` in full, `assets/`, `ion.config.json`, `package.json`, `tsconfig.json`, `src/index.template.html`, and `src/main.ts` if you need a different boot. |
-| **Not yours** | `IONEngine/` and `node_modules/@ion-engine/*`. Regenerated on every install; edits cannot be committed and are reported by `ion doctor`. |
+| **Not yours** | `node_modules/@ion-engine/*`. Replaced on every install; edits cannot be committed and are reported by `ion doctor`. |
 | **Generated, do not hand-edit** | `src/game/colliders.json`, `particles.json`, `environment.json`, `sceneBindings.json`, `ui/*.json`. These are written by the ION editors. They are readable and diffable on purpose, and they load defensively — a partial or malformed one is reported and skipped rather than taking the boot down — but the editors own them. |
 
 ### 16.5 The public API
@@ -1851,14 +1917,14 @@ Two naming decisions are load-bearing. The engine's per-frame method is **`tick(
 
 ### 16.6 Versioning and upgrades
 
-All four packages carry one version, stamped from this repository's `package.json` by the package build. `ion.config.json`'s `ionVersion` records what a project was generated against; `ion doctor` reports drift between that, what npm resolved, and what `IONEngine/` actually contains.
+All four packages carry one version, stamped from this repository's `package.json` by the package build. `ion.config.json`'s `ionVersion` records what a project was generated against; `ion doctor` reports drift between that and what npm resolved. There is one installed copy and no second one to fall behind it.
 
 ```bash
 npm run engine:update    # npm update @ion-engine/runtime @ion-engine/editor @ion-engine/build @ion-engine/project
 npm run doctor
 ```
 
-`postinstall` refreshes `IONEngine/` automatically, so there is no separate step to remember. `src/game/` is never touched.
+npm resolves the new versions and that is the whole operation — there is no ION-specific step, because there is nothing to keep in step. `src/game/` is never touched.
 
 ### 16.7 Development and production workflow
 
@@ -1869,7 +1935,7 @@ npm run preview   # serve the last build
 npm run doctor    # check Node, config, packages, integrity, drift
 ```
 
-`ion dev` re-syncs `IONEngine/` on start, serves the project, mirrors `assets/` into `public/assets/` so dev and production resolve the same relative paths, and starts the dev API the editors save through.
+`ion dev` allocates a free port pair (see §16.2.1), serves the project, mirrors `assets/` into `public/assets/` so dev and production resolve the same relative paths, and starts the dev API the editors save through — pointed at this project's root and injected into this project's Studio page as `window.__ION_API_ORIGIN`.
 
 `ion build` runs `@ion-engine/build`'s `build.sh` with everything about *this* project passed as environment (`ION_PROJECT_ROOT`, `ION_BUILD_LIB`, `ION_VITE_CONFIG`, `ION_RUNTIME_ENTRY`, `ION_BUDGET_BYTES`, …), so the script itself is the same file ION develops against. `buildInvocation()` in `packages/project/lib/build.mjs` is the single producer of that invocation — the Studio's Builder button reaches it through the dev API rather than constructing its own, which is what stopped the two from disagreeing about how a build is run.
 

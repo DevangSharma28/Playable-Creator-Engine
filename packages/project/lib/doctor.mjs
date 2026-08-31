@@ -3,6 +3,7 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { loadConfig, CONFIG_NAME } from "./config.mjs";
 import { verifyInstall } from "./integrity.mjs";
+import { ION_PACKAGES } from "./resolve.mjs";
 
 const MIN_NODE = 20;
 
@@ -25,7 +26,7 @@ export function doctor(projectRoot) {
   }
 
   const require = createRequire(path.join(projectRoot, "package.json"));
-  for (const name of ["@ion-engine/runtime", "@ion-engine/editor", "@ion-engine/build", "@ion-engine/project"]) {
+  for (const name of ION_PACKAGES) {
     try {
       const dir = path.dirname(require.resolve(`${name}/package.json`));
       const installed = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).version;
@@ -56,43 +57,13 @@ export function doctor(projectRoot) {
   for (const result of verifyInstall(projectRoot)) {
     if (result.unverifiable) notes.push(`${result.name} has no integrity manifest — can't verify it wasn't modified.`);
     else if (result.modified.length || result.missing.length) {
-      const where = result.location === "IONEngine" ? "in IONEngine/" : "inside node_modules";
-      const restore = result.location === "IONEngine" ? "npx ion sync" : "npm install --force";
       problems.push(
-        `${result.name} has been modified ${where} (${result.modified.length} changed, ${result.missing.length} missing).\n` +
+        `${result.name} has been modified inside node_modules (${result.modified.length} changed, ${result.missing.length} missing).\n` +
           `    ${result.modified.slice(0, 3).map((f) => `      ${f}`).join("\n").trim()}\n` +
           `    Engine code is not yours to edit: it is git-ignored, unpushable, and replaced on install.\n` +
-          `    Restore with: ${restore}`
+          `    Restore with: npm install --force`
       );
     } else ok.push(`${result.name} intact (${result.checked} files verified)`);
-  }
-
-  // A stale IONEngine/ is the other way the two copies disagree: `npm update`
-  // without its postinstall leaves the served engine a version behind the
-  // installed one, and every symptom of that points at the wrong place.
-  const stamp = path.join(projectRoot, "IONEngine", "ion-engine.json");
-  if (fs.existsSync(stamp)) {
-    try {
-      const synced = JSON.parse(fs.readFileSync(stamp, "utf8")).packages ?? {};
-      for (const [short, syncedVersion] of Object.entries(synced)) {
-        const name = `@ion-engine/${short}`;
-        try {
-          const dir = path.dirname(require.resolve(`${name}/package.json`));
-          const installed = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")).version;
-          if (installed !== syncedVersion) {
-            problems.push(
-              `IONEngine/${short} is ${syncedVersion} but ${name} ${installed} is installed.\n` +
-                `    IONEngine/ is what actually gets served, so this project is running the older one.\n` +
-                `    Restore with: npx ion sync`
-            );
-          }
-        } catch { /* the missing-package case is already reported above */ }
-      }
-    } catch {
-      notes.push("IONEngine/ion-engine.json is unreadable — run `npx ion sync` to rewrite it.");
-    }
-  } else if (fs.existsSync(path.join(projectRoot, "IONEngine"))) {
-    notes.push("IONEngine/ has no ion-engine.json — run `npx ion sync` so its contents are recorded.");
   }
 
   console.log("");
