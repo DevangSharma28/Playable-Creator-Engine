@@ -130,9 +130,62 @@ const dirtyListeners = {
   scene: [] as (() => void)[],
 };
 
+/**
+ * One collider wireframe layer for the whole page, shared by the "Show
+ * Colliders" overlay and the editor's Configure Colliders mode.
+ *
+ * It has to be one instance, and the reason is not tidiness. `ColliderVisuals`
+ * is reconciled once per frame from `IonGame.render()`, which ticks the *debug
+ * layer* — and `EditorColliders.update()` deliberately does not redraw,
+ * precisely so the same layer is not reconciled twice a frame.
+ *
+ * Constructing a second instance for the editor therefore produced a layer
+ * that nothing ever ticked: entering Configure Colliders set `editorVisible`
+ * on it, `update()` was never called, `createVisual()` never ran, and the
+ * collider nodes stayed childless. Colliders existed and detection ran — the
+ * stats panel proved it — but not one wireframe was ever drawn, so the mode
+ * looked completely dead.
+ *
+ * The reference game has always shared one instance between the two. This is
+ * the packaged equivalent of that, and lives at module scope because both
+ * entry points below need it and neither owns the other.
+ */
+/**
+ * Keyed by the registry it draws, not cached outright: `IonEngine` builds a
+ * fresh `ColliderManager` on every boot, so a dev hot reload replaces
+ * `Ion.colliders` wholesale. A layer held across that would keep reconciling
+ * against the retired registry and draw nothing for the live one — the same
+ * silent-blank failure this whole mechanism exists to fix, arriving one reload
+ * later instead of immediately.
+ */
+let sharedColliderVisuals: { manager: typeof Ion.colliders; visuals: ColliderVisuals } | undefined;
+function colliderVisuals(): ColliderVisuals {
+  if (!sharedColliderVisuals || sharedColliderVisuals.manager !== Ion.colliders) {
+    sharedColliderVisuals = { manager: Ion.colliders, visuals: new ColliderVisuals(Ion.colliders) };
+  }
+  return sharedColliderVisuals.visuals;
+}
+
+/**
+ * The particle gizmo layer, shared for the same reason.
+ *
+ * Only one thing draws it today (the editor), so a second instance would not
+ * currently break anything — but the two layers are a matched pair and the
+ * failure mode above is invisible until someone looks at the screen. Keeping
+ * both on the same rule means the next reader does not have to work out why
+ * they differ.
+ */
+let sharedParticleVisuals: { manager: typeof Ion.particles; visuals: ParticleVisuals } | undefined;
+function particleVisuals(): ParticleVisuals {
+  if (!sharedParticleVisuals || sharedParticleVisuals.manager !== Ion.particles) {
+    sharedParticleVisuals = { manager: Ion.particles, visuals: new ParticleVisuals(Ion.particles) };
+  }
+  return sharedParticleVisuals.visuals;
+}
+
 const host: EditorHost = {
   createDebugLayer() {
-    return new ColliderDebugLayer(new ColliderVisuals(Ion.colliders));
+    return new ColliderDebugLayer(colliderVisuals());
   },
   open(options: EditorOpenOptions): EditorSession | undefined {
     const hierarchyEl = document.getElementById("si-hierarchy");
@@ -155,9 +208,9 @@ const host: EditorHost = {
       environmentEl,
       initialTarget: options.initialTarget,
       colliderManager: Ion.colliders,
-      colliderVisuals: new ColliderVisuals(Ion.colliders),
+      colliderVisuals: colliderVisuals(),
       particleManager: Ion.particles,
-      particleVisuals: new ParticleVisuals(Ion.particles),
+      particleVisuals: particleVisuals(),
       environment: options.environment as SceneEnvironment,
       sceneBaseline: options.sceneBaseline as ConstructorParameters<typeof EditorRoot>[0]["sceneBaseline"],
       sceneOverridesOnLoad: options.sceneOverridesOnLoad,

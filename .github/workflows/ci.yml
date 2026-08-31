@@ -129,6 +129,15 @@ jobs:
           node scripts/build-packages.mjs
           npm run test:e2e
 
+      # ION Studio driven in a real browser inside a real generated project.
+      # The editor a customer runs is reached through @ion-engine/editor's
+      # adapter, not the direct EditorRoot construction this repository's own
+      # dev entry uses — so a defect in that adapter is invisible to every
+      # other suite. One was: the editor's collider wireframes were never
+      # drawn while every API-level check reported success.
+      - name: ION Studio in a generated project
+        run: npm run verify:editor
+
       - name: Upload build output
         if: always()
         uses: actions/upload-artifact@v4
