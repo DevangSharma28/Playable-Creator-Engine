@@ -15,7 +15,7 @@ import type { UILayoutData } from "../engine/ui/UILayoutTypes";
 import mainLayoutRaw from "./ui/mainLayout.json";
 import endcardLayoutRaw from "./ui/endcardLayout.json";
 import { AssetLoader } from "../engine/AssetLoader";
-import { MraidAdapter } from "../engine/MraidAdapter";
+import { ViewportWatcher } from "../engine/core/ViewportWatcher";
 import { MindworksAdapter } from "../engine/MindworksAdapter";
 import { Cta } from "../engine/Cta";
 import { setCrashRecoveryUrl } from "../engine/core/CrashOverlay";
@@ -46,6 +46,26 @@ const endcardLayoutData = endcardLayoutRaw as UILayoutData;
 
 const COIN_COUNT = 6;
 const AUTO_END_MS = 15000;
+
+/**
+ * The events this game publishes on the shared bus, declared where they're
+ * emitted so a subscriber has one place to import the shape from.
+ *
+ * `Ion.on`/`Ion.emit` take the payload type per call site rather than
+ * through a global event-name registry (see engine/core/EventBus.ts for
+ * why), so naming the payload here is what keeps the two ends type-checked
+ * against the same thing instead of each restating it structurally.
+ */
+export interface CoinCollected {
+  collected: number;
+  total: number;
+}
+
+export interface GameEnded {
+  won: boolean;
+  seconds: number;
+  collected: number;
+}
 /**
  * Camera framing, lighting, and world settings, authored in the 3D
  * editor's Environment dock. A real import, so it ships: what you set in
@@ -105,6 +125,8 @@ export class Game {
    * runtime, and it ships.
    */
   private readonly colliderDebug: ColliderVisuals | undefined;
+  /** Every "the viewport changed" signal, de-duplicated into one callback. Disposed with the game — see ViewportWatcher. */
+  private readonly viewport: ViewportWatcher;
   /**
    * Particle emission-volume gizmos, DEV only.
    *
@@ -147,6 +169,8 @@ export class Game {
 
   private collected = 0;
   private ended = false;
+  /** True once the ad-network host reports the playable closed (Mindworks' gameClose). Gameplay stops for good; see the exposeLifecycleHooks call in the constructor. */
+  private hostClosed = false;
   /** Wall-clock-free playtime accumulator driving the 15s auto-endcard — only advances inside update(), so it (like everything else in update()) naturally stops while the UI editor or freecam is open instead of firing behind them on real elapsed time. */
   private playTimeMs = 0;
   /** The most recent explicit size passed to resizeTo() — replayed by applyCurrentSize() when the editor closes and hands sizing back to the game. */
@@ -214,8 +238,6 @@ export class Game {
     // than after the first resize event.
     this.cameraHandler.handleResize(window.innerWidth, window.innerHeight);
 
-    this.world = new World(this.scene);
-
     // The ION Collider & Area registry's own COLLIDERS group joins the
     // scene here, before anything creates a collider — Player builds its
     // cylinder in its own constructor a few lines down, and a collider
@@ -224,11 +246,9 @@ export class Game {
     // Game.create() precisely so entity constructors can do this.
     Ion.colliders.attachToScene(this.scene);
 
-    // Cinema_World.glb — a designed environment dropped in alongside World's
-    // procedural ground/walls (not replacing them; World.bound below still
-    // drives gameplay's play-area clamp regardless of what this model looks
-    // like). Shadow flags aren't baked into the GLB export, so set them the
-    // same way Player does for its own mesh.
+    // Cinema_World.glb — the designed environment. Shadow flags aren't baked
+    // into the GLB export, so set them the same way Player does for its own
+    // mesh.
     sceneModel.traverse((child) => {
       if ((child as THREE.Mesh).isMesh) {
         child.castShadow = true;
@@ -237,8 +257,15 @@ export class Game {
     });
     this.scene.add(sceneModel);
 
-    this.player = new Player(this.scene, this.world.bound, model, clips);
-    this.coinField = new CoinField(this.scene, COIN_COUNT, this.world.bound);
+    // After the model, and measured *from* it: the play area is whatever
+    // the artist marked walkable, not a number kept in sync by hand. See
+    // World's own doc comment for why a single origin-centred half-extent
+    // was wrong for this environment (and for any environment whose floor
+    // isn't a square around the origin).
+    this.world = new World(this.scene, { from: sceneModel });
+
+    this.player = new Player(this.scene, this.world, model, clips);
+    this.coinField = new CoinField(this.scene, COIN_COUNT, this.world);
     this.environment = new Environment(this.scene);
 
     // Editor-authored colliders (src/game/colliders.json — written by the
@@ -385,39 +412,42 @@ export class Game {
     // field's own doc comment.
     this.particleGizmos = import.meta.env.DEV ? new ParticleVisuals(Ion.particles) : undefined;
 
-    window.addEventListener("resize", this.onWindowResize);
-
-    // Some ad-network WebViews (Mintegral's Mindworks among them) can
-    // still be mid-layout — sometimes literally reporting 0×0 — the
-    // instant this constructor runs, and aren't guaranteed to ever fire a
-    // native `resize` event once they settle; they signal through MRAID's
-    // own ready/sizeChange events instead. Without this, a renderer sized
-    // once here from window.innerWidth/innerHeight and never revisited
-    // can stay wrong (in the 0×0 case, invisible) for the whole session —
-    // see MraidAdapter.onReady's own doc comment.
-    MraidAdapter.onReady(() => {
-      if (!this.manualSize) this.handleResize();
-    });
-    MraidAdapter.onSizeChange(() => {
+    // One watcher instead of a `resize` listener plus two MRAID
+    // subscriptions: it covers those, plus rotation (which reports stale
+    // dimensions if you trust the first `resize`) and visualViewport
+    // changes, and de-duplicates the lot down to "the size actually
+    // changed". See ViewportWatcher's own doc comment for the failure each
+    // signal exists to catch.
+    this.viewport = new ViewportWatcher(() => {
       if (!this.manualSize) this.handleResize();
     });
 
     // Mindworks calls these *into* the playable itself (see
-    // MindworksAdapter.exposeLifecycleHooks' own doc comment) — real
-    // no-op functions for now since this game has no countdown/music
-    // system yet to hook them up to; wire real behavior in here once it
-    // does, rather than leaving window.gameStart/gameClose undefined
-    // (the review tool checks they exist as callable functions).
+    // MindworksAdapter.exposeLifecycleHooks' own doc comment). They were
+    // no-ops, which satisfies the review tool's "are they callable" check
+    // and nothing else: a host that told the playable it had been closed
+    // got a playable that kept simulating and kept playing music behind a
+    // dismissed ad.
+    //
+    // gameStart is the host's "you are on screen now" — the earliest
+    // legitimate moment to start music. Safe to call unconditionally:
+    // playMusic() is a no-op if a user gesture hasn't unlocked audio yet,
+    // and the first-input path still covers that case.
+    //
+    // gameClose is terminal, not a pause: the ad is gone, so gameplay
+    // stops for good (see tick()) and the music is stopped rather than
+    // paused. Deliberately not dispose() — the host may still call into
+    // the playable afterwards, and tearing down the WebGL context out from
+    // under it would turn a clean stop into a crash.
     MindworksAdapter.exposeLifecycleHooks(
-      () => { },
-      () => { }
+      () => this.soundHandler.playMusic(),
+      () => {
+        this.hostClosed = true;
+        this.soundHandler.stopMusic();
+      }
     );
   }
 
-  /** Stored so dispose() can remove exactly this listener — an inline arrow passed straight to addEventListener can never be removed later. */
-  private readonly onWindowResize = (): void => {
-    if (!this.manualSize) this.handleResize();
-  };
 
   static async create(canvas: HTMLCanvasElement): Promise<Game> {
     const loader = new AssetLoader();
@@ -881,20 +911,32 @@ export class Game {
 
   /** Advance all systems by one frame. Called once per requestAnimationFrame tick. */
   tick(dt: number, elapsed: number): void {
+    if (this.hostClosed) return;
     if (!this.ended) {
       this.player.update(dt, elapsed, this.combinedAxis());
 
       this.playTimeMs += dt * 1000;
       if (this.playTimeMs >= AUTO_END_MS) {
-        // this.showEndCard(false);
+        this.showEndCard(false);
       }
     }
 
     this.coinField.update(dt, elapsed, this.player.position, () => {
       this.collected++;
-      this.hud.setScore(this.collected, this.coinField.total);
+      // Announced rather than pushed. HUD subscribes to this in its own
+      // constructor (see HUD.ts) instead of being handed the score by
+      // whoever happened to notice the pickup — which is the difference
+      // between "CoinField's collect path must know about HUD" and "anything
+      // that cares can listen". A VFX trigger, an achievement tracker or a
+      // sound cue can be added here without this call site changing at all.
+      //
+      // The one thing this pattern costs: an event has no compile-time
+      // partner, so a rename here and not in the subscriber fails silently.
+      // That's why the payload type is written explicitly at both ends —
+      // see EventBus.ts's own note on why there's no global event registry.
+      Ion.emit<CoinCollected>("coin-collected", { collected: this.collected, total: this.coinField.total });
       if (this.collected >= this.coinField.total) {
-        // this.showEndCad(true);
+        this.showEndCard(true);
       }
     });
 
@@ -943,7 +985,7 @@ export class Game {
    * bundle without a real navigation.
    */
   dispose(): void {
-    window.removeEventListener("resize", this.onWindowResize);
+    this.viewport.dispose();
     // Close the editor first, if it's open. Without this, disposing a Game
     // mid-editor-session (which is exactly what an in-place hot reload does
     // while the 3D Viewer/Editor is up) left the whole editor alive:
@@ -989,6 +1031,11 @@ export class Game {
     this.ended = true;
     this.hud.showEndCard(won);
     MindworksAdapter.gameEnd();
+    Ion.emit<GameEnded>("game-ended", { won, seconds: this.playTimeMs / 1000, collected: this.collected });
+    // The two numbers a campaign is actually read on, alongside the CTA
+    // click Cta.open() reports for itself. Goes nowhere unless the host
+    // page installed a sink — see engine/Telemetry.ts.
+    Ion.track("game-ended", { won, seconds: Math.round(this.playTimeMs / 100) / 10, collected: this.collected, total: this.coinField.total });
   }
 
   private handleResize(): void {

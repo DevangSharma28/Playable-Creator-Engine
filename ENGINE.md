@@ -287,6 +287,12 @@ interface IonEngineOptions {
 
 Responsibilities: the rAF loop and `dt` capping, EMA FPS tracking, ownership and teardown of the `Scheduler` / `EventBus` / `ColliderManager` / `ParticleManager`, the `Ion` binding, the crash guard, the in-place hot-reload handshake, and — DEV only — the `window.__*` hook surface the Engine Room panel talks to (see [§11.1](#111-dev-hook-surface)).
 
+**`elapsed` is game time in both timestep modes.** `tick(dt, elapsed)` receives seconds accumulated from frames that were actually simulated — zero at boot, frozen while the UI editor overlay or the 3D viewer is open, resumed exactly where it left off. That matches `Scheduler`/`Ion.time` and everything else in this engine.
+
+> It did not always. Fixed-timestep mode advanced by whole steps (correct), while variable mode passed `performance.now() / 1000` — the wall clock since *page* load, which starts at whatever the page had already been open for and keeps counting behind a paused game. So the documented contract held in one mode and not the other, and anything driving animation off `elapsed` (`Coin.update`'s own `rotation.z = elapsed * 2` is the reference game's example) jumped forward by the entire length of an editor session the moment gameplay resumed. Covered by `tests/runtime-lifecycle.test.mjs`'s "frame timing" suite.
+
+A crash — mid-frame or during boot — is reported to the analytics seam as `ion:crash` (with `phase: "frame" | "boot"`) alongside the `onCrash` option, so a host that installed a sink learns about the most expensive failure a playable can have without also wiring `onCrash`. See [`Telemetry.ts`](#telemetryts--the-analytics-seam) in [§9](#9--script-binding-and-ad-network-integration).
+
 **The `Game` contract is four members.** `static create(canvas): Promise<Game>`, `update(dt, elapsed)`, `render()`, `dispose()`. That is everything `IonEngine` requires to run a game.
 
 Everything else the Engine Room can ask for — 59 members covering the collider, particle, environment, history, gizmo, Control Desk, and audio panels — is declared **optional** on the `GameDevFacade` interface in this same file, and `installDevHooks` reaches them through `activeGame as Game & Partial<GameDevFacade>`. Implement a member and the matching dev control starts working; omit it and that control does nothing, which is correct for a game that never wired it. Every Engine Room call site is already written `window.__x && window.__x()`, so the degradation is graceful by construction, and the few hooks whose declared return is non-optional fall back to a zeroed value (`rendererStats`, `getColliderStats`, `getParticleStats`, `getParticlePresets`) or `false`.
@@ -303,9 +309,12 @@ Ion.sequence([{ wait, then }, …])
 Ion.tween(target, to, seconds, opts?)
 Ion.on<T>(event, fn) / Ion.once<T>(…) / Ion.emit<T>(event, payload)
 Ion.cta(storeUrl)                         // → CtaNetwork
+Ion.track(event, props?)                  // analytics seam — see Telemetry.ts in §9
 Ion.colliders                             // ColliderManager
 Ion.particles                             // ParticleManager
 ```
+
+`cta` and `track` are the two entries that work **before** boot and after teardown: both are stateless (one inspects `window`, the other writes to a module-level buffer), so neither goes through the bound context.
 
 Also re-exports `Easing`, so `import { Ion, Easing } from "./Ion"` is genuinely one line and one path.
 
@@ -333,7 +342,7 @@ Everything returns a `ScheduledHandle` (`cancel()`, `done`) — safe to cancel t
 
 Behaviours worth knowing, each with a regression test:
 
-- `every()` fires **at most once per frame** — a 5-second frame spike produces one call, not a 50-call catch-up burst.
+- `every()` fires **at most once per frame, and never pays off a backlog.** A repeat that fell behind — a 5-second frame spike, a backgrounded tab, a long editor session — re-bases on the current clock instead of advancing one interval at a time. Advancing by one interval was the original behaviour, and it only moved the burst from "50 calls in one update" to "50 calls over 50 consecutive frames"; a 5s repeat that sat behind a 60s pause was twelve intervals in arrears and fired on twelve straight frames on resume. Covered by `tests/engine-core.test.mjs`.
 - A callback that schedules more work runs that work on the *next* tick, not the current one; otherwise a zero-delay self-rescheduling timer spins forever inside one update.
 - Tweens run on a **private** tween.js `Group` fed this same game clock, never the library's global `TWEEN.update()`, so two Schedulers — or a stale one mid-hot-reload — cannot step on each other.
 
@@ -362,7 +371,12 @@ Reference use: `game/entities/Player.ts`'s reveal — two `Animator`s on differe
 
 Owned by `IonEngine` and cleared on teardown, for the same reason the `Scheduler` is: a hot-reloaded bundle's old listeners must not keep firing into whatever the new instance emits under the same name.
 
-> **Known Limitation.** The shipped reference game does not actually use the bus — HUD↔gameplay wiring is still direct references (`CoinField` takes an `onCollect` callback, `HUD` is hand-fed the score). The bus is available and tested, but the worked example for it does not exist yet.
+**Worked example — the score.** `Game.tick()` publishes `Ion.emit<CoinCollected>("coin-collected", { collected, total })` from the pickup callback, and `HUD`'s constructor takes `Ion.on<CoinCollected>(...)` and updates itself. `HUD` holds no reference to `CoinField` and `CoinField` holds none to `HUD`: a VFX trigger, an achievement tracker or a sound cue can subscribe to the same event without the pickup call site changing at all. `Game.ts` also publishes `game-ended` (`{ won, seconds, collected }`).
+
+Two details the example is there to show:
+
+- **The payload type is named**, in `Game.ts`, and imported `import type` by the subscriber. An event has no compile-time partner the way a method call does, so writing the payload out once and using it at both ends is what keeps `emit` and `on` checked against the same shape.
+- **`HUD` never unsubscribes, on purpose.** `IonEngine` clears the whole bus in its teardown, which is the mechanism that stops a hot-reloaded bundle's listeners firing into the new one. A subscription with the same lifetime as the `Game` needs nothing else; one that outlives its owner does.
 
 ### 2.6 `AssetLoader.ts`
 
@@ -374,6 +388,8 @@ Owns the generic manifest types, which live here rather than in game code becaus
 type AssetKind = "texture" | "glb" | "audio";
 interface AssetEntry { kind: AssetKind; path: string; }
 ```
+
+**One path, one load, regardless of call timing.** The resolved caches only de-duplicate *sequential* requests — the second call hits because the first already finished. Two overlapping calls both missed, and both started a real fetch: a manifest listing one texture twice (easy once several entity modules contribute entries), or a `loadGlb()` from an entity constructor for a model `preload()` is fetching at that moment, downloaded *and GPU-uploaded* the asset twice and left one copy unreachable for the life of the loader. In-flight promises are now tracked and shared, and dropped on settle rather than on success so a failed load stays retryable. Covered by `tests/engine-core.test.mjs`.
 
 Its `GLTFLoader` has `setMeshoptDecoder(MeshoptDecoder)` wired unconditionally in the constructor so it can decode `EXT_meshopt_compression` GLBs — see [§12.2](#122-asset-compression) for where that compression is applied. Harmless for a GLB that was never meshopt-compressed (the decoder only engages for primitives carrying the extension), and single-file-safe: that module's WASM is inlined as a base64 byte array in the JS itself, not fetched as a separate `.wasm`.
 
@@ -546,6 +562,34 @@ viewHelper?.update(activeCamera)        // DEV
 > **Known Limitation — shadows are configured but nothing casts.** The shipped `environment.json` has `shadowsEnabled: true` with `shadowType: "pcfsoft"`, every mesh in the environment GLB has `castShadow`/`receiveShadow` set, and both directional lights have `castShadow: false`. The result is zero shadows on screen while every material still compiles its shadow-map defines. Either turn `castShadow` on for the sun in the Environment dock (and size `shadowCameraExtent` to the real environment footprint — the shipped `20` was tuned for a 10-unit arena, not the ~109×124-unit environment model), or turn `shadowsEnabled` off for a free win. The engine supports both; the shipped configuration commits to neither.
 
 > **Known Limitation — depth precision.** The default camera `near` is `0.01` against a `far` of `1000`, a 100,000:1 ratio that spends the depth buffer up close and invites z-fighting on coplanar GLB geometry. Nothing in the reference playable comes within a unit of the camera. Both are now authorable in the Environment dock.
+
+### 3.4 `core/ViewportWatcher.ts` — when to re-size
+
+One place that answers "the viewport changed, re-size everything", because a playable ad does not run in a normal browser window and a bare `window.addEventListener("resize", …)` gets three real cases wrong:
+
+| Case | What a plain `resize` listener does | Why it matters |
+| --- | --- | --- |
+| An ad-network WebView still mid-layout at boot — sometimes literally 0×0 | Never hears about it. MRAID hosts signal through their own `ready` / `sizeChange` / `viewableChange` events and are not required to dispatch a native `resize` once they settle. | A renderer sized once at construction stays wrong, and in the 0×0 case stays *invisible*, for the entire session. |
+| Rotation | Fires **before** layout settles on iOS Safari, so the handler measures the pre-rotation size. | The playable renders letterboxed or cropped until something else happens to trigger another resize — often nothing does. |
+| Soft keyboard, pinch-zoom, collapsing browser chrome | Nothing. These move `visualViewport` without resizing the window. | UI anchored to the bottom edge drifts off screen. |
+
+```ts
+const viewport = new ViewportWatcher(() => this.handleResize(), { settleDelaysMs?, measure? });
+viewport.poll();          // re-measure now, fire if it moved
+viewport.forceUpdate();   // fire regardless, re-base the comparison
+viewport.dispose();
+```
+
+It listens to `resize`, `orientationchange`, `screen.orientation`'s own `change`, `visualViewport`'s `resize`, and — only when a host is actually present — MRAID's `ready`/`sizeChange`/`viewableChange`. After **every** signal it re-measures again at 120 ms and 400 ms, which is what catches the late, real dimensions a rotation reports.
+
+Two properties make that safe to point at a handler which resizes a renderer, re-projects two cameras and re-lays-out two UI layouts:
+
+- **It de-duplicates.** `onChange` fires only when the measured size actually differs from the last size reported, so six noisy sources and two settle timers collapse into one call per real change — and a settle pass that finds nothing new costs nothing.
+- **Every target is optional.** `screen.orientation` and `visualViewport` are genuinely absent in older WebViews, so each is reached through a guarded helper rather than a hard reference. `MraidAdapter.onReady` is subscribed only when MRAID is present, because it invokes its callback synchronously when it is not — which would schedule a pair of settle timers on every boot for a size that has not changed.
+
+Wired inside `IonGame` (the packaged runtime) and `src/game/Game.ts`, and exported publicly for a project driving its own renderer sizing. Covered by `tests/engine-core.test.mjs`.
+
+> Worth noting what this closed in the *packaged* runtime specifically: `IonGame` had only the plain `window` resize listener. The MRAID handling described above existed solely in `src/game/Game.ts` — i.e. in the reference playable, not in the product every generated project actually builds on.
 
 ---
 
@@ -856,7 +900,9 @@ The runtime half of the visual UI editor. `UILayoutTypes.ts` is the schema (`UIE
 
 **Element types.** The original five were `image`/`text`/`rect`/`joystick`/`group`; the set is now `button`, `progress`, `slider`, `toggle`, `checkbox`, `sprite`, `video`, `shape` and `icon` as well. Every one exists in **both** `UILayout.ts`'s `buildContent()` and `tools/ui-editor.html`'s `buildContentNode()` — an element the editor can author but the runtime can't render (or vice versa) is the editor-only/runtime-only split the architecture forbids. Four things people ask for as "types" are deliberately fields instead, because a separate type would have produced markup already reachable another way: a **mask** is `clipContent` on a group, a **gradient** is `fillType`/`gradient` on any box-ish element, and **panel**/**container** are both just a group.
 
-Two implementation notes worth knowing before touching them. **Sprites animate in pure CSS** — an absolutely-positioned sheet inside an `overflow:hidden` window whose `left`/`top` step by whole window-widths via `steps()`, so there is no rAF ticker, nothing to tear down on a hot reload, and no per-frame JS cost; `left`/`top` are two separate properties, which is why the column and row animations compose instead of fighting the way two `transform` animations on one node would. **Declarative actions stay engine-generic**: `show`/`hide`/`toggleVisible`/`setText` are pure UI operations the runtime carries out with no game knowledge, while `cta` and `emit` route out through `onAction()` so `src/game/` decides what `"start-game"` means — the engine never learns any game's vocabulary.
+**Shared `@keyframes` are de-duplicated against the DOM, not a module flag.** `ensureKeyframes()` and `ensureSpriteKeyframes(cols, rows)` inject one `<style>` per page and check `document.getElementById` before doing so. A module-scope `let injected = false` is reset by the dev preview's in-place hot reload — which re-executes the module while the *page* survives — so every save appended another identical `<style>` block that nothing ever removed.
+
+Two more implementation notes worth knowing before touching them. **Sprites animate in pure CSS** — an absolutely-positioned sheet inside an `overflow:hidden` window whose `left`/`top` step by whole window-widths via `steps()`, so there is no rAF ticker, nothing to tear down on a hot reload, and no per-frame JS cost; `left`/`top` are two separate properties, which is why the column and row animations compose instead of fighting the way two `transform` animations on one node would. **Declarative actions stay engine-generic**: `show`/`hide`/`toggleVisible`/`setText` are pure UI operations the runtime carries out with no game knowledge, while `cta` and `emit` route out through `onAction()` so `src/game/` decides what `"start-game"` means — the engine never learns any game's vocabulary.
 
 **`z-index` is an integer rank, never the raw `renderOrder`.** CSS defines `z-index` as `auto | <integer>`, so a fractional value is invalid and browsers drop the declaration outright. Because the editor seeds `renderOrder` at 0 and steps it by 0.1, emitting it directly meant every element after the first was rendering with **no `z-index` at all** — stacking silently fell back to DOM order, in the preview and the shipped playable alike, so the Properties panel's "R Order" control only appeared to work whenever DOM order happened to agree with it. `buildStackRanks()` (present identically in both files) sorts by `renderOrder ?? zIndex` and assigns contiguous integers, keeping the float authoring model — which is genuinely nicer to edit — while emitting something CSS will actually honor. Ties keep array order, so `zOrder`/DOM-order tie-breaking is unchanged.
 
@@ -911,6 +957,8 @@ Wired into the reference game as a desktop-testing fallback: `Game.combinedAxis(
 Guards against stealing keystrokes from a focused `<input>` / `<textarea>` / contenteditable (Control Desk, the UI editor's own fields), and clears held keys on window `blur`, so alt-tabbing mid-press cannot leave `keyboardAxis` stuck non-zero forever.
 
 `setEnabled(false)` suspends it. The 3D editor calls this for its session because the editor's W/E/R/Q gizmo shortcuts collide with the WASD fallback and both listen on `window`, where `stopPropagation` does nothing between two listeners on the same target. Without it, pressing **W** to switch the gizmo to Move also counted as the player's first input and started the background music mid-edit.
+
+Suspending **ends** an in-progress drag rather than forgetting it: every `onDragStart` gets its matching `onDragEnd`, with the last known pointer position. Dropping the gesture silently is the same stuck-flag failure the `blur` handler already exists to prevent for held keys — a camera or a dragged object stayed held for the whole editor session, because the `pointerup` that would have released it arrived while the manager was disabled and was ignored.
 
 ---
 
@@ -995,7 +1043,35 @@ Two host adapters wrapping different, incompatible conventions. These are the pr
 
 Both `isPresent` checks are independent (a host can speak MRAID without being Mindworks, or vice versa) — which is why `Cta.detect()` checks `MindworksAdapter.isPresent` first rather than folding it into MRAID's check.
 
-> **Known Limitation.** The reference game registers `MindworksAdapter.exposeLifecycleHooks(() => {}, () => {})` with genuine no-ops — it has no countdown or pause system to wire them to. A commercial playable should pause gameplay and audio on `gameClose` and resume on `gameStart`.
+The reference game wires both for real: `gameStart` starts the music (the host's "you are on screen now" is the earliest legitimate moment, and `playMusic()` is a safe no-op if a user gesture has not unlocked audio yet), and `gameClose` sets a terminal flag that makes `Game.tick()` return immediately and stops the music. Deliberately *not* `dispose()` — the host may still call in afterwards, and tearing down the WebGL context under it would turn a clean stop into a crash.
+
+### `Telemetry.ts` — the analytics seam
+
+The one place a playable reports that something happened. Before it, `onCrash` was the only telemetry seam in the engine, and every network wants more than that — "did they interact", "did they reach the end state", "did they click" are the numbers a campaign is read on.
+
+```ts
+Ion.track(event, props?)                      // what a game calls
+Telemetry.setSink((event, props, atMs) => …)  // what a host page installs
+Telemetry.hasSink / Telemetry.bufferedCount   // diagnostics
+Telemetry.reset()
+```
+
+Three properties, each answering a specific failure:
+
+- **Events fired before a sink exists are buffered and replayed in order.** An ad network's SDK routinely attaches *after* the playable's own script has run — the same ordering problem `MraidAdapter.onReady` exists for. An unbuffered seam silently drops exactly the boot and first-interaction events, i.e. the ones worth the most. The buffer holds 64 and evicts oldest-first, because a dropped recent event is one the sink will almost certainly see a successor to.
+- **A sink that throws cannot take the frame down.** A sink is host code this engine did not write, and an uncaught throw mid-frame would reach `IonEngine`'s crash guard and replace a working playable with the recovery overlay — an analytics bug costing the whole impression. Every call into a sink is wrapped; a throw is logged and otherwise ignored.
+- **Stateless with respect to the engine's lifecycle**, like `Cta` — usable before `IonEngine.boot()` and after teardown, which is what makes `Ion.track` one of the two facade entries that work outside a bound context.
+
+The engine emits two events for itself, both reserved under the `ion:` prefix:
+
+| Event | Fired by | Payload |
+| --- | --- | --- |
+| `ion:cta` | `Cta.open()` | `{ network }` — the host that actually handled the click |
+| `ion:crash` | `IonEngine` | `{ phase: "frame" \| "boot", message }` |
+
+`ion:cta` is emitted from `Cta` rather than left to each CTA button precisely because that is the single place in the engine that knows a click happened *and* which network took it. Everything else is the playable's own vocabulary — this imposes no taxonomy, because every network's differs. The reference game adds `game-ended` (`{ won, seconds, collected, total }`).
+
+Covered by `tests/engine-core.test.mjs`.
 
 ### `core/CrashOverlay.ts`
 
@@ -1322,7 +1398,7 @@ It talks to `scripts/dev-build-api.js` (localhost:8001, dev-only, started by `np
 
 | Endpoint | Purpose |
 | --- | --- |
-| `GET /version` | Engine Room's version/commit readout |
+| `GET /version` | Engine Room's version/commit readout. Reports `version` (the installed `@ion-engine/runtime`, falling back to the repo's own `package.json` in this checkout), `projectVersion`, `root`, and the local git HEAD. All read **per request** — they were module-level constants resolved once at boot, which made the pill silently report whatever version the server started with after an engine upgrade or a `npm run packages` rebuild under a live server. `root` exists because an origin is not an identity; see [§11.5](#115-dev-server-ports-and-why-the-page-is-told-its-api-origin). |
 | `POST /build` | Builder's **Build Now** — runs `build.sh` (body `{ halfFloat: boolean }`, forwarded via `env`, never as a shell string), returns the final `dist/index.html` byte size |
 | `GET /estimate-size` | Builder's pre-build size bar — the last real `dist/index.html` on disk, flagged `stale` if `src/` / `assets/` / `tools/ui-editor.html` have anything newer (a *deletion* counts too, which is why a directory's own mtime is part of the check) |
 | `GET /build-report` | The 📊 **Build Report** button — `dist/build-report.json` as-is, same stale/exists shape |
@@ -1338,6 +1414,18 @@ It talks to `scripts/dev-build-api.js` (localhost:8001, dev-only, started by `np
 | `GET /list-environment` · `POST /save-environment` | Environment dock — `src/game/environment.json`. Same wholesale-replace contract; validated for the `camera`/`ambient`/`world` blocks, a `directionals` array, and an `id` on every light |
 
 `GET /list-environment` returns `{ version: 1 }` when no file exists rather than an error — `loadSceneEnv` fills every missing field from its own defaults, so an empty object is a valid answer for a project that has never opened the dock.
+
+### 11.5 Dev-server ports, and why the page is told its API origin
+
+`npm run dev` (`scripts/dev.js`) reserves both ports before either child process binds, using the same `packages/project/lib/ports.mjs` the packaged `ion dev` uses — one implementation, not two. Vite gets `--port`; the API gets `ION_API_PORT` and an `ION_DEV_ORIGINS` CORS entry for the port Vite actually got. A moved port is printed (`ion  port 8000 was taken — using 8002`).
+
+`vite.config.mts`'s `ionDevApiOriginPlugin` then injects `window.__ION_API_ORIGIN` into `index.html`, so the Engine Room is **told** where its API is rather than falling back to the hardcoded `http://127.0.0.1:8001` in its own script.
+
+> This is worth the two moving parts because of what the old arrangement did when 8001 was taken. Vite bound 8000 and the API exited with its "port in use" message — and `dev.js` deliberately keeps Vite alive when the API dies, because the game still serves fine without the Build button, so that message just scrolled past. The Engine Room then fell back to 8001, which was **another project's API**. The version pill, the commit hash, the build report and every Save went to that project. Nothing errored, because from the page's point of view nothing had.
+>
+> The case that actually produced it was worse than a port clash between two live projects: the process on 8001 was an orphaned dev API whose project directory had been moved to the Trash hours earlier. A dev server outlives the folder it was started in. It answered `/version` exactly as confidently as a live one, and the only visible symptom was a version this checkout has never had (`v4.4.0`) beside a commit hash that is not an object in this repository (`9bf731b`).
+>
+> `GET /version` now also reports `root`, and the pill's tooltip shows it — so *which project answered* is a hover away rather than an investigation.
 
 ### 11.4 Data files
 
@@ -1529,19 +1617,22 @@ npm run test:visual     # ION Studio layout regression, real browser
 npm run verify:bundle   # run a built dist/index.html in headless Chrome
 ```
 
-**383 assertions across sixteen suites, all passing**, plus a clean `tsc --noEmit`. `npm test` runs everything except the three that need a browser or several minutes; CI runs those too.
+**521 assertions across nineteen suites — 519 passing, 2 skipped, none failing**, plus a clean `tsc --noEmit`. `npm test` runs everything except the three that need a browser or several minutes; CI runs those too.
 
 ### 13.1 What runs where
 
 | Suite | Assertions | What it covers |
 | --- | --- | --- |
-| `runtime-lifecycle` | 19 | Boot, frames reaching the renderer, teardown releasing GPU resources, re-boot into the same canvas, crash handling, resize across extreme aspect ratios. |
-| `simple-api` | 49 | `Game`, `Entity` and `ION` — scene building, camera follow and shake, input, audio, timers and tweens, events, colliders and zones, UI, and the errors each produces when used wrongly. |
+| `runtime-lifecycle` | 21 | Boot, frames reaching the renderer, `elapsed` being game time in both timestep modes, teardown releasing GPU resources, re-boot into the same canvas, crash handling, resize across extreme aspect ratios. |
+| `simple-api` | 61 | `Game`, `Entity`, `Prop` and `ION` — scene building, the handle vocabulary (degrees, colour, `spin`, `destroy`, handle identity), camera follow and shake, input, audio, timers and tweens, events, colliders and zones, UI, and the errors each produces when used wrongly. |
 | `serialization` | 32 | Round-trips for scene environment, colliders, particles, scene bindings, UI layouts and `ion.config.json`, plus partial and malformed input for each. |
 | `editor-history` | 20 | Undo/redo: stack order, redo invalidation, gesture merging, dirty tracking, the 200-entry bound and its discard contract, re-entrancy, subscriptions. |
 | `project-generator` | 25 | What `create-ion-project.mjs` writes, the client/engine boundary in the generated tree, template config, and `ion.config.json` validation. |
 | `dev-api` | 16 | The endpoints every ION editor saves through: round-trips, validation, atomic writes, and path containment. |
 | `compat-scan` | 29 | Each ad-network compatibility rule against the pattern it claims to catch, and the shipped bundle against all of them. |
+| `collision-intersect` | 38 | `intersect.ts` directly: every shape pair's overlap answer, argument-order symmetry, scratch-pool reuse, point containment, and `penetration`'s minimum-translation and `up`-constrained behaviour. |
+| `packaged-dev-facade` | 9 | `IonGame`'s dev-panel surface: registry-backed stats with no editor open, the orientation gizmo's ownership and its absence from a production build, and that callbacks registered at boot survive to a session opened later — and are replayed onto every subsequent one. |
+| `engine-core` | 23 | `Scheduler` (game clock, repeat re-basing, nested scheduling, `clear`), `AssetLoader` (in-flight de-duplication, retryable failures, progress), `Telemetry` (buffering, bounds, a throwing sink), `ViewportWatcher` (de-duplication, deferred re-measure, disposal). |
 | `particles` | 40 | The simulation over typed arrays — emission, lifetimes, buffer capacity, seeded determinism, shapes, collision, curves, module gating. |
 | `particle-shader` | 6 | The real `#ifdef` structure for every define combination the renderer emits. |
 | `scene-environment` | 26 | Config loading, light reconciliation, shadow plumbing, fog, tone mapping, `restore()`, the reference-aspect FOV correction, `dispose()`. |
@@ -1555,6 +1646,8 @@ npm run verify:bundle   # run a built dist/index.html in headless Chrome
 `scripts/test-ui-editor.js` is an older end-to-end smoke pass (insert → edit → drag → upload → Save) that overlaps the suites above but exercises the whole flow in one sequence.
 
 ### 13.2 The test harness
+
+**`tests/lib/runtime-bundle.mjs`** builds the real published entry (`packages/runtime/src/index.ts`) — what a client can actually import is part of what is under test, so a symbol that stops being exported breaks these suites. It defaults to the **production** build (`import.meta.env.DEV` false) so a test of shipped behaviour cannot accidentally be testing the dev one, and takes `{ dev: true }` for the cases that need the other branch. That matters more than it sounds: most of the `window.__*` panel hooks and the Engine Room's orientation gizmo exist only in the dev build, so asserting anything about them against the production bundle proves nothing — it reports `__getColliderStats is not a function` and looks like a failure of the thing under test. `bootGame({ dev: true })` threads it through.
 
 **`tests/lib/dom-env.mjs`** is what lets the engine's *runtime* half be tested at all. `IonGame` constructs a `THREE.WebGLRenderer` in its constructor and reads `window.innerWidth` on the next line, so testing any of it means providing a browser-shaped environment rather than mocking the classes under test. It supplies:
 
@@ -1573,7 +1666,7 @@ npm run verify:bundle   # run a built dist/index.html in headless Chrome
 `npm run test:e2e` starts from an empty directory and does what a client does:
 
 1. `node create-ion-project.mjs` — generates a project.
-2. `npm install` — resolves the four `@ion-engine/*` packages and materialises `IONEngine/`.
+2. `npm install` — resolves and installs the four `@ion-engine/*` packages. No postinstall step.
 3. `tsc --noEmit` — the project typechecks against the installed engine.
 4. `ion doctor` — reports a healthy project.
 5. A deep import into engine internals is asserted to **fail resolution**, which is what makes the boundary in §16.3 real rather than advisory.
@@ -1583,7 +1676,7 @@ npm run verify:bundle   # run a built dist/index.html in headless Chrome
 9. The built playable **boots and draws in headless Chrome** with no page errors.
 10. The shipped bytes contain **no editor module** and the page builds no editor DOM.
 11. An over-budget build **fails** and still leaves the artifact on disk to inspect.
-12. An engine file edited inside `IONEngine/` is **reported by `ion doctor`**, naming the file.
+12. An engine file edited inside `node_modules/@ion-engine/*` is **reported by `ion doctor`**, naming the file.
 13. Two builds of the same source are **byte-identical**.
 
 ### 13.4 Performance baselines
@@ -1646,19 +1739,19 @@ Everything here is a real gap in the current code. Nothing in this document desc
 | 2 | ~~Compatibility scan is not a gate~~ — **closed** | `build.sh`'s final step is `scripts/check-build-report.mjs`, which exits 2 on a non-empty `compatibilityWarnings` or an over-budget artifact. `npm run build` fails everywhere — CLI, CI, and the Builder panel (which flags it amber rather than reporting a build failure). `ALLOW_COMPAT_WARNINGS=1` is the escape hatch. See [§12.6](#126-the-submittability-gate). |
 | 3 | **CTA paths are untestable here** | The six network branches in `Cta.ts` only exist inside a real host page. Re-verify each against the target network's current documentation before every submission. |
 | 4 | ~~`engine/` imports `game/`~~ — **closed** | `IonEngine` takes a `createGame` factory instead of importing a concrete `Game`. The engine no longer names the game layer at all, which is what made the packaged runtime in [§16](#16--commercial-distribution) possible. |
-| 5 | **The endcard is disabled in the reference game** | Both `showEndCard` call sites in `Game.update()` are commented out — the 15-second auto-end and the all-coins-collected win. One of them is additionally misspelled `showEndCad`. The endcard layout, `HUD.showEndCard`, and `MindworksAdapter.gameEnd()` all exist and work; nothing currently calls them. **A playable with no reachable end state will not pass review.** |
-| 6 | **Mindworks lifecycle hooks are no-ops** | `exposeLifecycleHooks(() => {}, () => {})`. The review tool only checks they are callable, but a commercial playable should pause gameplay and audio on `gameClose`. |
+| 5 | ~~The endcard is disabled in the reference game~~ — **closed** | Both call sites in `Game.tick()` are live: the 15-second auto-end and the all-coins-collected win. (One had additionally been misspelled `showEndCad`, so re-enabling it alone would not have compiled.) `showEndCard` shows the endcard layout, calls `MindworksAdapter.gameEnd()`, publishes `game-ended` on the bus, and reports it to the analytics seam. |
+| 6 | ~~Mindworks lifecycle hooks are no-ops~~ — **closed** | `gameStart` starts the music; `gameClose` sets a terminal flag that makes `Game.tick()` return immediately and stops the music. Deliberately not `dispose()` — see [§9](#mraidadapterts--mindworksadapterts). |
 | 7 | **`@ion-engine/*` is not published** | The only real access control is a private registry plus a licence. The generator currently resolves the packages from a local checkout (`--ion-packages`, or auto-detected beside the script). Everything in [§16.3](#163-what-the-boundary-actually-is) is an architectural boundary, not a secrecy one. |
 
 ### 14.2 Quality and coverage gaps
 
 | # | Gap | Detail |
 | --- | --- | --- |
-| 8 | **Narrow-phase collision maths is still untested directly** | `tests/simple-api.test.mjs` and `tests/performance.test.mjs` now cover the *system* — trigger enter/exit exactly once per crossing, disabled colliders, retirement with their entity, and sub-quadratic broad-phase scaling. `intersect.ts`'s per-shape-pair maths (468 lines) still has no dedicated suite; it is pure and DOM-free, so it is the same shape as the particle suite. |
+| 8 | ~~Narrow-phase collision maths is untested directly~~ — **closed** | `tests/collision-intersect.test.mjs` drives `intersect.ts` as the engine calls it: every shape pair, both argument orders, each case repeated after an unrelated call (the scratch-pool stomp guard the file's own header warns about), point containment, and `penetration`'s exact box↔box MTV plus its `up`-constrained behaviour. |
 | 8 | ~~No visual regression~~ — **partially closed** | `scripts/visual-regression.mjs` checks ION Studio's layout across eight viewports in a real browser and asserts measurable invariants (no horizontal scroll, docks on screen, dock open/close reversibility). It does **not** compare images, so a wrong gradient or a few-pixel drift still goes unseen. See [§13.5](#135-browser-verification). |
 | 9 | ~~No boot-sequence test~~ — **closed** | `tests/runtime-lifecycle.test.mjs` drives the real `IonEngine.boot()` and asserts the ordering directly, including that a re-boot retires the previous game rather than running both. |
 | 10 | **`index.html` is untyped and untested** | ~2,100 lines of vanilla JS against ~60 silently-guarded `window.__*` hooks, with no shared `.d.ts` and no boot-time hook assertion. `scripts/visual-regression.mjs` now at least fails if it throws while laying out. |
-| 11 | **`public/ui-editor.html` is a committed build artifact** | Byte-identical duplicate of `tools/ui-editor.html`. Diff noise, and a drift risk if someone edits the wrong copy. |
+| 11 | ~~`public/ui-editor.html` is a committed build artifact~~ — **closed** | Untracked and gitignored. `scripts/sync-assets.js` (npm's `predev`) still mirrors `tools/ui-editor.html` into `public/` so Vite serves it at `/ui-editor.html`; `tools/` is the single source. |
 
 ### 14.3 Configured but not committed
 
@@ -1676,11 +1769,12 @@ Everything here is a real gap in the current code. Nothing in this document desc
 | --- | --- | --- |
 | 17 | **Soft particles — Partial** | Shader path and `setDepthTexture` plumbing complete; no depth pre-pass produces the texture, so the flag compiles out. See [§5](#soft-particles--partial). |
 | 18 | **No engine-level audio system — Partial** | `ION.audio` covers one-shots, music, and a master volume, and every sound releases its WebAudio nodes when it ends or when the game is torn down. There is still no SFX pooling, no volume buses, and no spatial helper. |
+| 18b | **`World.bound` in the packaged simple API** | The reference game's play area is now measured (see item 23), but the packaged `ION.scene` has no equivalent — a project using the simple API still has no "where may the player go" primitive. |
 | 19 | ~~No camera shake~~ — **closed** | `ION.camera.shake(strength, seconds)`. Applied in `IonGame.onLateUpdate`, after the rig has placed the camera — an offset applied before the follow lerp is simply overwritten, which is why the first implementation of this did nothing whenever the camera was following something. FOV punch is still not built. |
-| 20 | **No `EventBus` worked example** | The bus is implemented and tested; the reference game still wires HUD↔gameplay with direct references. |
-| 21 | **No localization, no analytics hooks, no orientation-change handling** | None of these exist in any form. `onCrash` is the only telemetry seam. |
+| 20 | ~~No `EventBus` worked example~~ — **closed** | `Game.tick()` publishes `coin-collected`; `HUD` subscribes in its own constructor. Neither class holds a reference to the other. See [§2.5](#25-coreeventbusts). |
+| 21 | **No localization — Partial** | Analytics and orientation handling are closed: `Ion.track` / `Telemetry` is the analytics seam (see [§9](#telemetryts--the-analytics-seam)) and `ViewportWatcher` handles rotation, MRAID sizing and `visualViewport` (see [§3.4](#34-coreviewportwatcherts--when-to-re-size)). **Localization does not exist in any form** — every string is authored into a layout JSON, with no locale dimension and no runtime switch. |
 | 22 | **No `guide-environment.html`** | The in-app guide set covers colliders, particles, and the UI editor, but not the Environment dock. |
-| 23 | **`World.bound` is vestigial** | Defaults to `10` while the environment GLB is ~109×124 units. Its only remaining consumer is `CoinField`'s spawn extent — the `Player` clamp that used to read it is commented out — so six coins scatter in a 20-unit box in the middle of a cinema. |
+| 23 | ~~`World.bound` is vestigial~~ — **closed** | `World` now measures a real `THREE.Box3` from the environment GLB's own `walkablearea` node, and exposes `clamp` / `contains` / `randomPoint` against it. `CoinField` spawns inside the measured area and the `Player` clamp is live again. Still an **AABB over** the walkable polygons, not a point-in-polygon test — an L-shaped floor gets a rectangle drawn round it. See [§15.1](#151-what-the-reference-playable-actually-is). |
 
 ---
 
@@ -1694,17 +1788,23 @@ Everything here is a real gap in the current code. Nothing in this document desc
 | --- | --- |
 | `Game.ts` | The composition root: renderer, scene, camera rig, environment, entities, colliders, particles, UI, plus a large dev-facade surface of passthroughs to `EditorRoot` |
 | `assets.ts` | This game's manifest — `manifest`, `libGlb`, `libAudio` |
-| `world/World.ts` | `bound` only, since lighting moved to `environment.json` |
-| `entities/Player.ts` | Character: model, animation mixer, `moveAndSlide` movement, an `Animator`-driven reveal |
+| `world/World.ts` | The play area, measured from the environment GLB's `walkablearea` node — `bounds` / `center` / `halfExtent`, plus `clamp` / `contains` / `randomPoint`. Lighting moved to `environment.json`. |
+| `entities/Player.ts` | Character: model, animation mixer, `moveAndSlide` movement, a `World.clamp` backstop, an `Animator`-driven reveal |
 | `entities/Coin.ts` · `entities/CoinField.ts` | The `Entity` contract and a pool of them |
 | `entities/Environment.ts` | A near-empty holder for scene-bound fields (`collider`, `ambientParticles`) |
 | `AreaDemo.ts` | ~40 lines covering the whole collider/trigger runtime API — the reference for it |
 | `SoundHandler.ts` | Music + the Audio Reactor's analyser + Control Desk-tunable `volume`/`muted` |
-| `ui/HUD.ts` | The `applyBindings` reference — a UI class whose fields are assigned in the editor |
+| `ui/HUD.ts` | The `applyBindings` reference — a UI class whose fields are assigned in the editor — and the `EventBus` reference: it subscribes to `coin-collected` rather than being handed the score |
 
 > **Known Limitation.** `Game.ts` is 930 lines, of which roughly 250 are dev-only passthrough methods to `EditorRoot` (collider, particle, environment, history, and gizmo facades). They are all behind `this.editor?.…` so they cost nothing in production, but they make the file harder to read as gameplay code. They are also now **optional** (see `GameDevFacade`, [§2.1](#21-ionenginets)) — this file keeps them because the reference playable wants every dev control working, not because the engine demands them. Moving them onto a separate object the dev hooks reach directly would delete all 250 lines from here; that refactor is known and unmade.
 
-> **Known Limitation — unguarded GLB name lookups.** `Game.ts` does three unchecked `getObjectByName` casts (`walkablearea`, `cinemafloor`, `Colliders`) and immediately reads `.visible`. Rename any of those nodes in the GLB export and the constructor throws a `TypeError` — a dead playable with no message. They belong in `sceneBindings.json` or behind a guarded helper.
+**The play area is measured, not declared.** `World` takes the loaded environment model and builds a `THREE.Box3` from its `walkablearea` node — four flat polygons the artist authored to describe exactly where the player may walk. `CoinField` spawns inside that box (0.3 units in from the edge) and `Player` clamps to it (0.4 units in) as a backstop behind the authored solid colliders.
+
+> This replaced a single scalar half-extent measured from the world origin, which assumed the play area was a square centred on (0, 0, 0). Cinema_World.glb's floor is neither — it spans roughly x ∈ [-5.2, 12.1], z ∈ [-12.8, 3.8] — so a ±10 box put most coin spawns over parts of the world with no floor under them, and `Player`'s clamp against the same number had been commented out precisely because clamping to the wrong box was worse than not clamping at all. Measuring is also what makes it survive dropping in a different environment GLB, which is the first thing anyone building on this does.
+>
+> **Still an AABB**, not a point-in-polygon test: an L-shaped floor gets a rectangle drawn round it, so a point `World.contains` accepts can sit in the missing corner. That is a per-game design decision, and the rectangle is already correct enough for the two things that read it.
+
+> **Known Limitation — GLB name lookups.** `Game.ts` looks up three nodes by name (`walkablearea`, `cinemafloor`, `Colliders`) to hide them, and `World` looks up the first of those again to measure. Both are guarded and warn rather than throwing, so renaming a node in the GLB degrades (a visible helper mesh; a play area measured from the whole model instead of the floor) rather than producing a dead playable. They would still be better expressed in `sceneBindings.json`.
 
 ### 15.2 Building a new playable on this engine
 
@@ -1771,27 +1871,116 @@ The editor being a **devDependency** is not cosmetic. A production install (`npm
 
 ```
 my-game/
-├── ion.config.json        yours — name, target, orientation, resolution, build settings, pinned ION version
-├── package.json           yours
-├── tsconfig.json          yours — maps "ion" and "@ion-engine/*" into IONEngine/
+├── package.json           the whole project: scripts, dependencies, config
+├── ion.config.json        name, target, orientation, resolution, build, pinned ION version
+├── tsconfig.json          maps only "ion"; @ion-engine/* resolves through Node
 ├── src/
 │   ├── main.ts            the entry. Generated once; you rarely touch it.
 │   ├── index.template.html
 │   └── game/              YOURS. This is where you work.
-│       ├── Game.ts        your game
-│       ├── Player.ts      your entities
-│       ├── assets.ts      what to preload
+│       ├── Game.ts  Player.ts  assets.ts
 │       ├── entities/ systems/ scenes/ scripts/
-│       ├── colliders.json  particles.json  environment.json  sceneBindings.json
+│       ├── colliders.json  particles.json  environment.json  scene.json  sceneBindings.json
 │       └── ui/            mainLayout.json, endcardLayout.json, bindings.json
 ├── assets/                yours — models, sounds, images
-├── IONEngine/             OURS. Written by npm install. Git-ignored.
-└── node_modules/          OURS.
+└── node_modules/          OURS. Four npm packages. Nothing to copy, nothing to sync.
 ```
 
-`IONEngine/` exists because two requirements pull in opposite directions. The engine has to be a real dependency — versioned, resolved by npm, updated with `npm update` — and npm puts dependencies in `node_modules`. But a project also has to *read* as engine-here / game-there, at the top level, in a file tree and in a pull request, which `node_modules` cannot express. So npm keeps ownership of **versions** and `ion sync` (run from `postinstall`) keeps ownership of **layout**: it copies what npm resolved into `IONEngine/`, one directory per package, and records exactly what it copied in `IONEngine/ion-engine.json`.
+```bash
+npm install     # once. Installs engine, editor and build tooling.
+npm run dev     # ION Studio, on the first free port from 8000
+```
 
-`runtime` and `editor` are **served** from `IONEngine/` — the folder the project is told it runs is the folder it runs. `build` and `project` are **executed** from `node_modules`, because they are Node programs whose own transitive dependencies (glTF-Transform, sharp, meshoptimizer, Vite) only resolve there. `enginePackageDir(root, name, kind)` in `packages/project/lib/sync.mjs` is the single place that distinction lives.
+That is the entire setup. No postinstall hook, no generated folder, no paths to
+configure, and no command anyone has to know about.
+
+**There used to be a fifth thing in that tree.** `ion sync` copied all four
+`@ion-engine/*` packages out of `node_modules` into a root-level `IONEngine/`
+folder on every install, and *that* folder — not `node_modules` — was what the
+dev server and the build actually served. The intent was legibility: a project
+that reads as engine-here / game-there at the top level.
+
+It cost more than it bought. Two copies of the engine meant two ways for them
+to disagree, and the important one was silent: an `npm update` whose
+`postinstall` did not run left the served copy a version behind the installed
+one, and every symptom pointed at the wrong place. Keeping the duplicate honest
+required a `postinstall` hook, a `sync` command, a version-stamp file, drift
+detection in `doctor`, and integrity verification of two locations — a whole
+subsystem whose only job was maintaining a copy. And it duplicated ~2 MB of
+engine into every project, which is what a package manager exists to avoid.
+
+npm is now the single authority. One copy, in `node_modules`, resolved by
+Node's own algorithm — which is also what makes `npm update` work with no
+ION-specific step, and what makes pnpm, Yarn, workspaces and `file:` links work
+without ION knowing about any of them. `ion sync` remains as a no-op that
+explains itself, because projects generated before this still have it in their
+`postinstall` and removing the command outright would break their `npm install`
+with an error about a missing script.
+
+Resolution goes through `require.resolve` of each package's own `package.json`
+(see `packages/project/lib/resolve.mjs`) rather than joining
+`node_modules/<name>` — that path is a guess that is right under npm's default
+layout and wrong under every other one.
+
+### 16.2.1 Running several projects at once
+
+ION is a tool people keep several windows of open. Every generated project
+ships the same `server.port`, because the generator cannot know what else is
+running — so "the configured port is free" is the uncommon case.
+
+Before this, the second project did not start. Vite exited with `Port 8000 is
+already in use`, and the dev API — a separate process with no `error` handler
+on its listener — died first with a raw unhandled `EADDRINUSE` stack trace that
+never mentioned ION or suggested another project was the cause.
+
+A configured port is now a **preference**. `ion dev` probes for the first free
+port at or above it, then for a free API port derived from the one it actually
+got, and prints both:
+
+```
+  ION Studio   http://localhost:8004
+               port 8000 was in use — this project took 8004
+  dev API      http://127.0.0.1:8005
+```
+
+Deriving the API port from the *real* server port rather than from the config
+is what keeps each project's pair together and readable — `8000/8001`,
+`8002/8003`, `8004/8005` — instead of handing the same API port to two
+projects. Nothing is written back to `ion.config.json`: which project got which
+port is a fact about this machine right now, not about the project, and
+rewriting a tracked file on every `npm run dev` would put port churn in the
+customer's git history. Pin one with `npm run dev -- --port 9000`.
+
+**Isolation is structural, not managed.** Each project has its own
+`node_modules`, its own Vite cache (`node_modules/.vite`), its own
+`src/game/*.json` editor state, its own `public/assets` mirror, its own `dist/`,
+its own dev-server and HMR socket, and its own dev API process pointed at its
+own root by `ION_PROJECT_ROOT`. The Studio page is served per-project with its
+own API origin injected, so a browser tab can only ever talk to the server that
+served it. Nothing is shared and nothing needs coordinating.
+
+### 16.2.2 The packaged dev facade — two rules
+
+`IonGame` implements the whole `GameDevFacade` on a project's behalf, so a generated project's `Game.ts` contains gameplay and nothing else. Everything in that surface is a forward to the open editor session — **except** for two categories that must not be, and getting either wrong fails silently in a way that reads as a bug somewhere else entirely.
+
+**1. Anything backed by a runtime registry answers from the registry.**
+
+`Ion.colliders` and `Ion.particles` are owned by `IonEngine` and always exist. `getColliderStats()`, `getParticleStats()` and `setParticleQuality()` therefore need no editor.
+
+> They used to forward to `this.editorSession?.…`, so with the editor closed — which is most of the time — the Engine Room's collider readout showed `0 total / 0 enabled / 0 narrow tests` no matter how many colliders were registered and overlapping. That reads as *the collision system is broken*, when collision was the one part working correctly: detection ran, and trigger enter/exit fired exactly once per crossing. Only the readout lied. Verified by driving a generated project in Chrome: `ENTER`/`EXIT` fired while the panel reported zeros.
+
+**2. Callbacks are held by the game, not by the session.**
+
+`IonEngine.installDevHooks` registers the panel's callbacks **once**, immediately after `Game.create()` resolves — long before anyone opens the 3D editor. A forward to `this.editorSession?.onX(cb)` therefore lands on `undefined` and the callback is gone for the life of the process.
+
+| Callback | Delivered how | What its loss looked like |
+| --- | --- | --- |
+| `onColliderDirty`, `onParticleDirty`, `onEnvironmentDirty`, `onSceneDirty` | Held on `IonGame`, handed to `host.open()` through `EditorOpenOptions` — `EditorRoot` takes them as **constructor** options, so this is the only moment it can accept one | The Exit button never learned the session had unsaved work. Edits were discarded on exit with no warning — and since a Hierarchy re-parent is flagged through `onSceneDirty` like any other scene-graph change, that is exactly what "parenting doesn't stick" was |
+| `onGizmoModeChange`, `onInspectorStateChange`, `onEditorHistoryChange` | Held on `IonGame`, re-applied to **every** session in `setFreecam(true)` | Toolbar highlights never followed the keyboard shortcuts (W/E/R/Q, F/G/H/X/C) that change the same state. Applying them only once would still break from the second editor entry onward, since a session is destroyed on Exit and rebuilt on re-entry |
+
+The reference `src/game/Game.ts` has always done both correctly, which is why the engine's own Engine Room worked while a generated project's did not — the two paths had quietly diverged. `tests/packaged-dev-facade.test.mjs` now pins the packaged path to the reference one's behaviour.
+
+**The orientation gizmo belongs to the game, not to a session.** `ViewHelperWidget` was constructed inside the editor session, so on the packaged path it drew only while the 3D editor was open and sat frozen the rest of the time. `IonGame` owns it now and updates it at the end of every `render()` against whichever camera actually drew. Constructed only behind `import.meta.env.DEV` and only when `#er-viewhelper` is in the page, so a production build drops the class — `scripts/verify-bundle.mjs` asserts `ViewHelper` is absent from `dist/index.html`, checked against a generated project's own build as well as this repo's.
 
 ### 16.3 What the boundary actually is
 
@@ -1800,9 +1989,9 @@ my-game/
 What the boundary *does* guarantee, mechanically:
 
 1. **Deep imports do not resolve.** Each package's `exports` map publishes exactly one path. `import … from "@ion-engine/runtime/src/engine/editor/EditorRoot"` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED` — in Node, in Vite, and as `TS2307` in TypeScript. Not a lint rule; a resolution error. `tests/build-regression.test.mjs` asserts it on a real generated project.
-2. **Engine edits cannot be committed.** `IONEngine/` and `node_modules/` are both git-ignored, so `git status` stays clean, `git add` refuses, and nothing reaches a remote. Every commit in a client's repository is their game.
-3. **Engine edits are noticed.** Each package ships a sha256 manifest (`ion-integrity.json`). `ion doctor` verifies **both** copies — `node_modules/@ion-engine/*` **and** `IONEngine/*` — and names the changed files. Verifying only the first was a real hole: `IONEngine/` is the copy that is actually served, so an edit there was loaded by every build while doctor reported no problems.
-4. **Version drift is noticed.** `ion doctor` compares `IONEngine/ion-engine.json` against what npm resolved and fails when they disagree — an `npm update` whose `postinstall` did not run leaves the served engine a version behind the installed one, and every symptom of that points at the wrong place.
+2. **Engine edits cannot be committed.** The engine lives only in `node_modules/`, which is git-ignored, so `git status` stays clean, `git add` refuses, and nothing reaches a remote. Every commit in a client's repository is their game.
+3. **Engine edits are noticed.** Each package ships a sha256 manifest (`ion-integrity.json`). `ion doctor` verifies the installed packages and names the changed files. There is one copy to verify now; when there were two, verifying only one was a real hole.
+4. **The installed version is the version.** `ion doctor` compares what npm resolved against `ion.config.json`'s `ionVersion` and says so when they differ. There is no second copy that can lag behind.
 
 Point 3 is a **correctness** check, not a security control: anyone who can edit the engine can equally edit the manifest, and nothing here tries to stop them. It exists to catch the failure that actually happens — someone debugs by editing engine source, it works, and the fix evaporates on the next `npm ci` with nothing in `git status` to explain why the bug came back.
 
@@ -1813,8 +2002,43 @@ Point 3 is a **correctness** check, not a security control: anyone who can edit 
 | | |
 | --- | --- |
 | **Yours to change** | `src/game/` in full, `assets/`, `ion.config.json`, `package.json`, `tsconfig.json`, `src/index.template.html`, and `src/main.ts` if you need a different boot. |
-| **Not yours** | `IONEngine/` and `node_modules/@ion-engine/*`. Regenerated on every install; edits cannot be committed and are reported by `ion doctor`. |
+| **Not yours** | `node_modules/@ion-engine/*`. Replaced on every install; edits cannot be committed and are reported by `ion doctor`. |
 | **Generated, do not hand-edit** | `src/game/colliders.json`, `particles.json`, `environment.json`, `sceneBindings.json`, `ui/*.json`. These are written by the ION editors. They are readable and diffable on purpose, and they load defensively — a partial or malformed one is reported and skipped rather than taking the boot down — but the editors own them. |
+
+### 16.4.1 Three.js is an implementation detail
+
+The rule the API is built to: **a game is written in game vocabulary, and never has to learn three.js to do an ordinary thing.** Three.js is how ION draws, not what a project programs against.
+
+That held right up to the point where the API handed something back. `ION.scene.box()` returned a `THREE.Mesh`, so the second you used what you were given you were in three.js — and the shipped starter template demonstrated it in the first file anyone opens:
+
+```ts
+const coin = ION.scene.find(`Coin${i}`);
+if (coin) coin.rotation.y += dt * 2;   // radians, per-frame lookup, and no way to free it
+```
+
+Every `ION.scene.*` call now returns a **`Prop`**: a handle in the same vocabulary `Entity` already spoke. The same line is now written once, at creation, and never ticked:
+
+```ts
+ION.scene.box({ color: "yellow", size: 0.6, name: `Coin${i}` }).spin(120);  // degrees per second
+```
+
+| Was, in three.js | Is, on the handle |
+| --- | --- |
+| `mesh.rotation.y += dt * 2` — radians | `prop.rotateBy(0, 120 * dt, 0)` or `prop.spin(120)` — degrees |
+| `mesh.material.color.set(0xff0000)` | `prop.color = "red"` |
+| `mesh.material.opacity = 0.5` (renders opaque unless you also set `transparent`) | `prop.opacity = 0.5` |
+| `mesh.removeFromParent()` — **leaks the geometry and material** | `prop.destroy()` — unparents *and* frees what ION built |
+| `mesh.scale.setScalar(2)` | `prop.size = 2` |
+
+**`SceneNode` is the shared half**, and the reason there is one vocabulary rather than two: `Entity` (has an `update()`, you subclass it) and `Prop` (has no behaviour, `ION.scene.*` returns it) both extend it, so `moveBy`, `rotation`, `lookAt`, `distanceTo`, `spin` and `destroy` mean the same thing and take the same units on either. Anything that accepts "something in the world" — `ION.camera.follow`, `ION.colliders.attach`, `ION.particles.play`, `ION.scene.add` — takes a `SceneNode`. Moving a prop to an entity is a change of declaration, not a rewrite. Collapsing the duplicated half also took `Entity` from 225 lines to 99.
+
+**`find()` returns the same handle every time** for the same object, kept in a `WeakMap` keyed by the `Object3D`. Otherwise `find("Coin") === find("Coin")` is false and a `spin()` started through one handle is invisible through the next. A `WeakMap` because the scene owns the objects: when one goes, its handle goes with it and there is no table to sweep.
+
+**`spin()` runs on game time**, like every other ION timer — it freezes while an editor is open instead of turning behind it — and it is applied as a per-frame *delta*, so it composes with whatever else rotates the object rather than stamping over it, and the wrap at the end of each cycle is seamless rather than a snap.
+
+**The escape hatch is still there.** `prop.object3D` / `entity.object3D` is the real three.js object, for the cases the handle does not cover. It is a hatch, not the main road — and the test suite uses it deliberately, so it cannot quietly stop working.
+
+> **A fix that fell out of this.** Both handles free GPU resources through one `releaseSceneResources()`, and writing it once exposed that the old version handed each `ION_OWNED` node to `disposeObject3D`, which walks the **whole subtree**. So anything parented under an ION-built shape was freed along with it, marker or not — attach a model from the asset manifest to a box, destroy the box, and every other clone of that GLB in the scene went blank, because they all share one geometry. The marker claims one node's own resources, not its descendants'; it now disposes accordingly.
 
 ### 16.5 The public API
 
@@ -1822,7 +2046,21 @@ Point 3 is a **correctness** check, not a security control: anyone who can edit 
 import { Game, Entity, ION } from "ion";
 ```
 
-That is the whole of what a game normally needs. `packages/runtime/src/index.ts` is the *entire* supported surface; the advanced API (`IonGame`, `Ion`, `ColliderManager`, `ParticleManager`, `UILayout`, `CameraHandler`, `AssetLoader`, the ad-network adapters) is exported alongside it for the cases the simple layer does not cover.
+`Prop` and `SceneNode` are exported alongside them for annotating your own helpers (`function collect(thing: Prop)`); you never construct either — `ION.scene.*` returns them. No game needs to `import * as THREE from "three"`, and the generated starter does not.
+
+That is the whole of what a game normally needs. `packages/runtime/src/index.ts` is the *entire* supported surface; the advanced API (`IonGame`, `Ion`, `ColliderManager`, `ParticleManager`, `UILayout`, `CameraHandler`, `AssetLoader`, `ViewportWatcher`, `Telemetry`, the ad-network adapters) is exported alongside it for the cases the simple layer does not cover.
+
+Two of those are worth knowing about even from the simple layer, because they are wired into `IonGame` already and only need to be reached to be used:
+
+```ts
+import { Telemetry, ViewportWatcher } from "ion";
+
+// Receive everything the playable reports, including the engine's own
+// `ion:cta` and `ion:crash`. Events fired before this call are replayed.
+Telemetry.setSink((event, props) => window.someNetworkSdk?.track?.(event, props));
+```
+
+`ViewportWatcher` is already driving `IonGame`'s resize path; it is exported for a project that drives its own renderer sizing and wants the same rotation / MRAID / `visualViewport` coverage.
 
 ```ts
 import { Game, ION } from "ion";
@@ -1851,14 +2089,14 @@ Two naming decisions are load-bearing. The engine's per-frame method is **`tick(
 
 ### 16.6 Versioning and upgrades
 
-All four packages carry one version, stamped from this repository's `package.json` by the package build. `ion.config.json`'s `ionVersion` records what a project was generated against; `ion doctor` reports drift between that, what npm resolved, and what `IONEngine/` actually contains.
+All four packages carry one version, stamped from this repository's `package.json` by the package build. `ion.config.json`'s `ionVersion` records what a project was generated against; `ion doctor` reports drift between that and what npm resolved. There is one installed copy and no second one to fall behind it.
 
 ```bash
 npm run engine:update    # npm update @ion-engine/runtime @ion-engine/editor @ion-engine/build @ion-engine/project
 npm run doctor
 ```
 
-`postinstall` refreshes `IONEngine/` automatically, so there is no separate step to remember. `src/game/` is never touched.
+npm resolves the new versions and that is the whole operation — there is no ION-specific step, because there is nothing to keep in step. `src/game/` is never touched.
 
 ### 16.7 Development and production workflow
 
@@ -1869,7 +2107,7 @@ npm run preview   # serve the last build
 npm run doctor    # check Node, config, packages, integrity, drift
 ```
 
-`ion dev` re-syncs `IONEngine/` on start, serves the project, mirrors `assets/` into `public/assets/` so dev and production resolve the same relative paths, and starts the dev API the editors save through.
+`ion dev` allocates a free port pair (see §16.2.1), serves the project, mirrors `assets/` into `public/assets/` so dev and production resolve the same relative paths, and starts the dev API the editors save through — pointed at this project's root and injected into this project's Studio page as `window.__ION_API_ORIGIN`.
 
 `ion build` runs `@ion-engine/build`'s `build.sh` with everything about *this* project passed as environment (`ION_PROJECT_ROOT`, `ION_BUILD_LIB`, `ION_VITE_CONFIG`, `ION_RUNTIME_ENTRY`, `ION_BUDGET_BYTES`, …), so the script itself is the same file ION develops against. `buildInvocation()` in `packages/project/lib/build.mjs` is the single producer of that invocation — the Studio's Builder button reaches it through the dev API rather than constructing its own, which is what stopped the two from disagreeing about how a build is run.
 

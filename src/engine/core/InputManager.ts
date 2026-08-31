@@ -80,6 +80,9 @@ export class InputManager {
   private downAtMs = 0;
   private pointerId: number | null = null;
   private dragging = false;
+  /** The most recent pointer position of the live gesture — what an interrupted drag reports as its end point (see setEnabled). */
+  private lastX = 0;
+  private lastY = 0;
 
   /** Which keys are currently held, keyed by the same lowercase strings KEY_AXIS uses — lets multiple keys (e.g. W and D) combine instead of the last keydown silently overwriting the others. */
   private readonly heldKeys = new Set<string>();
@@ -118,13 +121,28 @@ export class InputManager {
     window.addEventListener("blur", this.onBlur);
   }
 
-  /** Suspends/resumes keyboard *and* pointer gesture handling. Suspending clears any held keys immediately, so a key still down when the editor opens can't leave the axis stuck non-zero for the whole session. */
+  /**
+   * Suspends/resumes keyboard *and* pointer gesture handling. Suspending
+   * clears any held keys immediately, so a key still down when the editor
+   * opens can't leave the axis stuck non-zero for the whole session.
+   *
+   * A drag that was in progress is *ended*, not merely forgotten. Dropping
+   * the gesture silently left every onDragStart without its matching
+   * onDragEnd — the exact stuck-flag failure `blur` already exists to
+   * prevent for keys — so a camera or a dragged object stayed held for the
+   * whole editor session, with the pointerup that would have released it
+   * arriving while this was disabled and being ignored.
+   */
   setEnabled(enabled: boolean): void {
     if (this.enabled === enabled) return;
     this.enabled = enabled;
     if (!enabled) {
       this.heldKeys.clear();
       this.recomputeKeyboardAxis();
+      if (this.dragging) {
+        const info = { x: this.lastX, y: this.lastY, dx: this.lastX - this.downX, dy: this.lastY - this.downY };
+        for (const fn of this.dragEndListeners) fn(info);
+      }
       this.pointerId = null;
       this.dragging = false;
     }
@@ -184,6 +202,8 @@ export class InputManager {
     this.pointerId = e.pointerId;
     this.downX = e.clientX;
     this.downY = e.clientY;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
     this.downAtMs = performance.now();
     this.dragging = false;
     this.fireFirstInputOnce();
@@ -191,6 +211,8 @@ export class InputManager {
 
   private onPointerMove = (e: PointerEvent): void => {
     if (e.pointerId !== this.pointerId) return;
+    this.lastX = e.clientX;
+    this.lastY = e.clientY;
     const dx = e.clientX - this.downX;
     const dy = e.clientY - this.downY;
     if (!this.dragging) {

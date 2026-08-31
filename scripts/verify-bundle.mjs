@@ -118,6 +118,60 @@ export async function connect(port) {
  * @returns {Promise<{ok: boolean, errors: string[], canvas: {width:number,height:number}, webgl: boolean, drawCalls: number, editorPresent: boolean, sizeBytes: number}>}
  */
 /**
+ * Waits for a killed process to actually exit, rather than assuming SIGKILL is
+ * instantaneous. It rarely takes long, but "rarely" is exactly what a flaky
+ * CI failure looks like, and there is a real race behind it: Chrome tears down
+ * through several helper processes (zygote, GPU, renderer), and one of them
+ * can still hold a file open in the profile directory for a moment after the
+ * main process has already been signalled.
+ */
+export function waitForExit(child, timeoutMs = 5000) {
+  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, timeoutMs);
+    child.once("exit", () => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
+/**
+ * Deletes a directory, retrying through the exact race `waitForExit` cannot
+ * fully close.
+ *
+ * A recursive delete is not atomic: Node walks the tree, and if another
+ * process (a not-quite-dead Chrome helper) writes or removes a file in it
+ * between that walk and the `rmdir`, the result is `ENOTEMPTY` — not `ENOENT`,
+ * which `force: true` already absorbs. This is a genuine TOCTOU race, not a
+ * bug in the deletion itself, so the fix is to retry through the narrow window
+ * rather than to delete more carefully.
+ *
+ * Cleanup failing is never allowed to crash the script or change its exit
+ * code — it has nothing to do with whether the thing being verified passed,
+ * and an uncaught exception here previously discarded that result entirely,
+ * turning a real ✓ into a bare Node stack trace and exit 1.
+ */
+export async function removeDirRetrying(dir, attempts = 5) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if (err.code !== "ENOTEMPTY" && err.code !== "EBUSY") {
+        console.warn(`(cleanup) could not remove ${dir}: ${err.message}`);
+        return;
+      }
+      if (attempt === attempts) {
+        console.warn(`(cleanup) could not remove ${dir} after ${attempts} attempts: ${err.message}`);
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+    }
+  }
+}
+
+/**
  * Launches a headless Chrome on a random debug port and attaches to it.
  *
  * SwiftShader rather than the machine's GPU, deliberately: a test whose result
@@ -140,9 +194,10 @@ export async function launchChrome({ width = 400, height = 800 } = {}) {
   const cdp = await connect(debugPort);
   return {
     cdp,
-    close() {
+    async close() {
       browser.kill("SIGKILL");
-      fs.rmSync(profile, { recursive: true, force: true });
+      await waitForExit(browser);
+      await removeDirRetrying(profile);
     },
   };
 }
@@ -226,8 +281,9 @@ export async function verifyBundle(distDir, { width = 400, height = 800, settleM
     };
   } finally {
     browser.kill("SIGKILL");
+    await waitForExit(browser);
     server.close();
-    fs.rmSync(profile, { recursive: true, force: true });
+    await removeDirRetrying(profile);
   }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "cube-joystick-ad",
-  "version": "4.4.0",
+  "version": "5.0.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -27,7 +27,8 @@
     "verify:bundle": "node scripts/verify-bundle.mjs dist",
     "test:all": "npm run test && npm run test:perf && npm run test:e2e",
     "test:persistence": "node --test tests/scene-persistence.test.mjs tests/dev-server-data.test.mjs",
-    "verify:persistence": "node scripts/verify-scene-persistence.mjs"
+    "verify:persistence": "node scripts/verify-scene-persistence.mjs",
+    "verify:editor": "node scripts/verify-editor.mjs"
   },
   "keywords": [],
   "author": "",

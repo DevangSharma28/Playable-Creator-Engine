@@ -1,5 +1,6 @@
 import { MraidAdapter } from "./MraidAdapter";
 import { MindworksAdapter } from "./MindworksAdapter";
+import { Telemetry } from "./Telemetry";
 
 /**
  * The one call a playable's CTA/install button should ever make.
@@ -110,6 +111,14 @@ export class Cta {
         window.open(storeUrl, "_blank");
         break;
     }
+
+    // The click-through is the one event every campaign is actually judged
+    // on, and this is the single place in the engine that knows one
+    // happened *and* which host handled it — so reporting it here means a
+    // playable gets it for free rather than having to remember to call
+    // Ion.track alongside every CTA button. Telemetry never throws and
+    // no-ops with no sink installed, so this cannot affect the click.
+    Telemetry.track("ion:cta", { network });
 
     return network;
   }

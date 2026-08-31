@@ -85,6 +85,45 @@ test("boot", async (t) => {
   });
 });
 
+test("frame timing", async (t) => {
+  await t.test("`elapsed` is game time — it starts at zero and only counts simulated frames", async () => {
+    // It used to be `performance.now() / 1000`: the wall clock since page
+    // load, which starts at whatever the page had already been open for and
+    // keeps running while gameplay is paused. Anything driving animation off
+    // it (`rotation.z = elapsed * 2` is the reference game's own coin) jumped
+    // by the whole length of an editor session the moment play resumed.
+    const seen = [];
+    const harness = await bootGame({
+      game: ({ Game }) => class Timed extends Game {
+        start() {}
+        onUpdate(dt, elapsed) { seen.push(elapsed); super.onUpdate(dt, elapsed); }
+      },
+    });
+
+    harness.frames(3, 20);
+    assert.equal(seen.length, 3);
+    assert.ok(seen[0] < 0.1, `elapsed must start near zero, not at the page's age; got ${seen[0]}`);
+    for (let i = 1; i < seen.length; i++) {
+      assert.ok(seen[i] > seen[i - 1], "elapsed must advance every frame");
+    }
+    assert.ok(Math.abs(seen[2] - 0.06) < 0.02, `three 20ms frames should be ~0.06s of game time; got ${seen[2]}`);
+
+    // Pause the way the UI editor overlay does, let real time pass, resume.
+    harness.env.window.__setUIEditorPaused(true);
+    const beforePause = seen[seen.length - 1];
+    harness.frames(10, 100);
+    assert.equal(seen.length, 3, "a paused game must not tick at all");
+    harness.env.window.__setUIEditorPaused(false);
+
+    harness.frames(1, 20);
+    assert.ok(
+      seen[seen.length - 1] - beforePause < 0.1,
+      `elapsed must not have absorbed the paused second; it jumped by ${seen[seen.length - 1] - beforePause}`
+    );
+    harness.dispose();
+  });
+});
+
 test("teardown", async (t) => {
   await t.test("gives back every GPU resource the game itself allocated", async () => {
     const harness = await bootGame({

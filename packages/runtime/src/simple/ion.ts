@@ -3,7 +3,9 @@ import { Ion as IonCore, Easing } from "../../../../src/engine/Ion";
 import { Cta } from "../../../../src/engine/Cta";
 import type { ScheduledHandle } from "../../../../src/engine/core/Scheduler";
 import type { Collider } from "../../../../src/engine/collision";
-import { Entity, ION_OWNED } from "./entity";
+import { Entity } from "./entity";
+import { ION_OWNED, SceneNode, type Vec3Like } from "./node";
+import { Prop, propFor, installPropColorSetter } from "./prop";
 import { requireGame, type SimpleGameHost } from "./context";
 
 /**
@@ -55,6 +57,24 @@ function toColor(value: string | number | undefined, fallback = 0xcccccc): numbe
   return fallback;
 }
 
+/**
+ * Applies a colour to every mesh under `object`.
+ *
+ * Handed to prop.ts rather than imported by it: the name/hex/number table
+ * above must exist exactly once, and prop.ts is imported *by* this module, so
+ * importing it back would be a cycle.
+ */
+installPropColorSetter((object, value) => {
+  const color = toColor(value);
+  object.traverse((node) => {
+    const material = (node as THREE.Mesh).material;
+    if (!material) return;
+    for (const entry of Array.isArray(material) ? material : [material]) {
+      (entry as THREE.MeshStandardMaterial).color?.setHex(color);
+    }
+  });
+});
+
 export interface ShapeOptions {
   color?: string | number;
   /** Uniform size. Use width/height/depth for a non-cube. */
@@ -84,7 +104,7 @@ function material(o: ShapeOptions): THREE.MeshStandardMaterial {
   });
 }
 
-function place(mesh: THREE.Mesh, o: ShapeOptions, defaultName: string): THREE.Mesh {
+function place(mesh: THREE.Mesh, o: ShapeOptions, defaultName: string): Prop {
   mesh.name = o.name ?? defaultName;
   mesh.position.set(o.x ?? 0, o.y ?? 0, o.z ?? 0);
   mesh.castShadow = true;
@@ -93,13 +113,13 @@ function place(mesh: THREE.Mesh, o: ShapeOptions, defaultName: string): THREE.Me
   // up owning it is allowed to free them. See ION_OWNED.
   mesh.userData[ION_OWNED] = true;
   game().world.add(mesh);
-  return mesh;
+  return propFor(mesh);
 }
 
 /** Building and finding things in the world. */
 const scene = {
   /** A box. `ION.scene.box({ color: "orange", size: 1.5, y: 0.75 })` */
-  box(options: ShapeOptions = {}): THREE.Mesh {
+  box(options: ShapeOptions = {}): Prop {
     const w = options.width ?? options.size ?? 1;
     const h = options.height ?? options.size ?? 1;
     const d = options.depth ?? options.size ?? 1;
@@ -107,20 +127,20 @@ const scene = {
   },
 
   /** A ball. */
-  sphere(options: ShapeOptions = {}): THREE.Mesh {
+  sphere(options: ShapeOptions = {}): Prop {
     const r = options.radius ?? (options.size ?? 1) / 2;
     return place(new THREE.Mesh(new THREE.SphereGeometry(r, 24, 16), material(options)), options, "Sphere");
   },
 
   /** A cylinder. */
-  cylinder(options: ShapeOptions = {}): THREE.Mesh {
+  cylinder(options: ShapeOptions = {}): Prop {
     const r = options.radius ?? (options.size ?? 1) / 2;
     const h = options.height ?? options.size ?? 1;
     return place(new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, 24), material(options)), options, "Cylinder");
   },
 
   /** A flat floor, already lying down and sized to `size`. */
-  ground(options: ShapeOptions = {}): THREE.Mesh {
+  ground(options: ShapeOptions = {}): Prop {
     const s = options.size ?? 40;
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s, s), material({ rough: 0.95, color: "green", ...options }));
     mesh.rotation.x = -Math.PI / 2;
@@ -130,7 +150,7 @@ const scene = {
     mesh.position.set(options.x ?? 0, options.y ?? 0, options.z ?? 0);
     mesh.userData[ION_OWNED] = true;
     game().world.add(mesh);
-    return mesh;
+    return propFor(mesh);
   },
 
   /**
@@ -139,7 +159,7 @@ const scene = {
    * `ION.scene.model("./assets/models/player.glb")` — already loaded, because
    * everything in the manifest is preloaded before your game starts.
    */
-  model(path: string, options: ShapeOptions = {}): THREE.Object3D {
+  model(path: string, options: ShapeOptions = {}): Prop {
     const loader = game().assetLoader;
     let object: THREE.Object3D;
     try {
@@ -164,36 +184,55 @@ const scene = {
       }
     });
     game().world.add(object);
-    return object;
+    return propFor(object);
   },
 
-  /** Put an entity or raw object into the world yourself. Entities add themselves; this is for anything else. */
-  add(thing: Entity | THREE.Object3D): void {
-    game().world.add(thing instanceof Entity ? thing.object3D : thing);
+  /** Put something into the world yourself. Entities and `ION.scene.*` results add themselves; this is for anything else. */
+  add(thing: SceneNode | THREE.Object3D): void {
+    game().world.add(thing instanceof SceneNode ? thing.object3D : thing);
   },
 
-  remove(thing: Entity | THREE.Object3D): void {
-    const object = thing instanceof Entity ? thing.object3D : thing;
+  remove(thing: SceneNode | THREE.Object3D): void {
+    const object = thing instanceof SceneNode ? thing.object3D : thing;
     object.removeFromParent();
   },
 
-  /** Find something by the name it was given — including anything placed in the ION editor. */
-  find(name: string): THREE.Object3D | undefined {
-    return game().world.getObjectByName(name);
+  /**
+   * Find something by the name it was given — including anything placed in the
+   * ION editor.
+   *
+   * Returns the same `Prop` every time for the same object, so `find("Coin")
+   * === find("Coin")` and a `spin()` started through one handle is visible
+   * through the next.
+   */
+  find(name: string): Prop | undefined {
+    const object = game().world.getObjectByName(name);
+    return object ? propFor(object) : undefined;
+  },
+
+  /** Everything with this name. Useful when the editor placed a row of them. */
+  findAll(name: string): Prop[] {
+    const out: Prop[] = [];
+    game().world.traverse((node) => {
+      if (node.name === name) out.push(propFor(node));
+    });
+    return out;
   },
 };
 
 /** The camera. Framing, lighting and fog are authored in the editor's Environment dock; this is the runtime side. */
 const camera = {
   /** Follow an entity. The offset and smoothing come from the Environment dock. */
-  follow(target: Entity | { x: number; y: number; z: number } | undefined): void {
+  /** Follow anything with a position — an Entity, a Prop, or a plain point. The offset and smoothing come from the Environment dock. */
+  follow(target: SceneNode | { x: number; y: number; z: number } | undefined): void {
     game().setCameraTarget(target);
   },
   /** Stop following and leave the camera where it is. */
   stopFollow(): void {
     game().setCameraTarget(undefined);
   },
-  get position(): THREE.Vector3 {
+  /** Where the camera is. A plain x/y/z view — writable, and no three.js type in sight. */
+  get position(): Vec3Like {
     return game().rig.camera.position;
   },
   /** Field of view in degrees. */
@@ -261,14 +300,14 @@ const audio = {
 /** Effects authored in the editor's Particle System mode. */
 const particles = {
   /** Play a named effect, optionally at a position or entity. */
-  play(name: string, at?: Entity | { x: number; y: number; z: number }): void {
+  play(name: string, at?: SceneNode | { x: number; y: number; z: number }): void {
     const system = IonCore.particles.getByName(name);
     if (!system) {
       console.warn(`ION.particles: no effect named "${name}". Create one in the editor's Particle System mode (P).`);
       return;
     }
     if (at) {
-      const p = at instanceof Entity ? at.object3D.position : at;
+      const p = at instanceof SceneNode ? at.object3D.position : at;
       system.playAt(new THREE.Vector3(p.x, p.y, p.z));
     } else system.play();
   },
@@ -308,7 +347,7 @@ const colliders = {
     return new SimpleZone(collider);
   },
   /**
-   * Give an entity a body, so it can enter zones and be found by queries.
+   * Give something a body, so it can enter zones and be found by queries.
    *
    * A zone with nothing to detect never fires, and until this existed the
    * simple API had no way to put a collider on an entity at all — every
@@ -321,7 +360,7 @@ const colliders = {
    * ION.colliders.zone({ name: "Goal", size: 3 }).onEnter(() => ION.ui.showEndcard());
    * ```
    */
-  attach(entity: Entity, options: ZoneOptions & { solid?: boolean } = {}): SimpleZone {
+  attach(entity: SceneNode, options: ZoneOptions & { solid?: boolean } = {}): SimpleZone {
     const collider = IonCore.colliders.box({
       name: options.name ?? entity.object3D.name,
       tag: options.tag ?? options.name ?? entity.object3D.name,

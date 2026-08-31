@@ -13,13 +13,6 @@
       "objectPath": "COLLIDERS/Box Collider",
       "objectName": "Box Collider",
       "colliderId": "col_rwnc5oawgr"
-    },
-    {
-      "className": "Player",
-      "fieldName": "collider",
-      "objectPath": "COLLIDERS/Player Collider",
-      "objectName": "Player Collider",
-      "colliderId": "col_0xxh34v760"
     }
   ]
 }

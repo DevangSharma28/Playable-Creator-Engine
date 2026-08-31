@@ -1,10 +1,10 @@
-import { createRequire } from "node:module";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { loadConfig } from "./config.mjs";
 import { verifyInstall } from "./integrity.mjs";
-import { enginePackageDir, sync, ENGINE_DIR } from "./sync.mjs";
+import { enginePackageDir, enginePackageEntry } from "./resolve.mjs";
+import { allocateDevPorts } from "./ports.mjs";
 import { buildInvocation } from "./build.mjs";
 
 /**
@@ -15,34 +15,6 @@ import { buildInvocation } from "./build.mjs";
  * `file:` links — all of which a customer may plausibly be using and none of
  * which put the package where a naive join would look.
  */
-/**
- * Where an ION package lives for this project.
- *
- * IONEngine/ first: that folder is what the project is *told* it runs, so it
- * has to be what actually runs — otherwise reading it tells you nothing and
- * editing it to debug something changes nothing. node_modules is the fallback
- * for a project that has not synced yet.
- */
-function packageDir(projectRoot, name) {
-  return enginePackageDir(projectRoot, name);
-}
-
-/** The file a bare specifier resolves to *from the project*, honouring the package's exports map. */
-function packageEntry(projectRoot, name) {
-  const dir = enginePackageDir(projectRoot, name);
-  if (dir) {
-    // Honour the package's own exports map rather than assuming dist/index.js.
-    const manifest = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8"));
-    const main = manifest.exports?.["."]?.default ?? manifest.exports?.["."] ?? manifest.main;
-    if (typeof main === "string") return path.join(dir, main);
-  }
-  try {
-    return createRequire(path.join(projectRoot, "package.json")).resolve(name);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * The Vite plugin that turns a plain project directory into ION Studio.
  *
@@ -110,36 +82,69 @@ function syncAssets(projectRoot) {
   return n;
 }
 
-/** The versions currently materialised in IONEngine/, or {} if it hasn't been written yet. */
-function readEngineVersions(projectRoot) {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(projectRoot, ENGINE_DIR, "ion-engine.json"), "utf8")).packages ?? {};
-  } catch {
-    return {};
-  }
+/**
+ * The four files the ION editors write, relative to the project root.
+ *
+ * Every one is a real `import` in the entry's module graph, which is what
+ * makes editor-authored data ship in the production build.
+ */
+const EDITOR_AUTHORED = [
+  "src/game/colliders.json",
+  "src/game/particles.json",
+  "src/game/environment.json",
+  "src/game/scene.json",
+];
+
+/**
+ * Invalidate editor-authored data on save, but never hot-update it.
+ *
+ * This replaces `server.watcher.unwatch(...)`, which looked like it did the
+ * same job and quietly did something much worse. Un-watching a file removes it
+ * from the watcher entirely, so Vite never learns it changed — and Vite's
+ * module graph is invalidated *by* watcher events. The transformed JSON module
+ * therefore stayed in the dev server's cache, and a **full browser reload
+ * re-served the stale copy**: the editor saved, the running game updated, and
+ * a reload threw the work away. Restarting the dev server rebuilt the cache,
+ * which is why it presented as in-memory state rather than as a cache.
+ *
+ * `scene.json` was additionally missing from that list altogether, so saving a
+ * moved object *did* trigger a full reload — tearing down the very editor
+ * session that had just saved.
+ *
+ * Watching gives the invalidation; returning an empty module array from
+ * `handleHotUpdate` gives up the HMR. Vite calls `moduleGraph.onFileChange()`
+ * before this hook runs, so declining the update costs nothing — the cache is
+ * already correct for the next request.
+ */
+function ionEditorDataPlugin(projectRoot) {
+  const authored = new Set(EDITOR_AUTHORED.map((relative) => path.join(projectRoot, relative)));
+  return {
+    name: "ion:editor-authored-data",
+    handleHotUpdate(ctx) {
+      if (!authored.has(ctx.file)) return;
+      ctx.server.config.logger.info(`  ion  ${path.relative(projectRoot, ctx.file)} saved — loads on next full reload`);
+      // Empty, not undefined: undefined means "use the default", which is the
+      // reload this exists to prevent.
+      return [];
+    },
+  };
 }
 
 export async function dev(projectRoot, opts = {}) {
   const config = loadConfig(projectRoot);
 
-  // Refresh IONEngine/ before anything reads it.
-  //
-  // `postinstall` covers install and update, but not the case that matters
-  // while ION is linked to a checkout: rebuilding the engine there leaves
-  // every project's materialised copy stale, and the symptom is a fix that
-  // "didn't work" because the old bundle is still being served. Copying ~2 MB
-  // costs milliseconds, so this re-syncs unconditionally rather than trying to
-  // decide when it is needed and getting that wrong.
-  const before = readEngineVersions(projectRoot);
-  sync(projectRoot, { quiet: true });
-  const after = readEngineVersions(projectRoot);
-  const changed = Object.entries(after).filter(([k, v]) => before[k] !== v);
-
-  const port = opts.port ?? config.server.port;
-  const apiPort = opts.apiPort ?? config.server.apiPort;
+  // A configured port is a preference. ION is a tool people run several
+  // copies of at once, every generated project starts with the same number in
+  // its config, and before this the second project simply did not start — Vite
+  // exited with "Port 8000 is already in use" and the dev API died first with
+  // a raw unhandled EADDRINUSE stack trace. See ports.mjs.
+  const { port, apiPort, movedFrom } = await allocateDevPorts({
+    port: opts.port ?? config.server.port,
+    apiPort: opts.apiPort ?? (opts.port ? opts.port + 1 : config.server.apiPort),
+  });
   const apiOrigin = `http://127.0.0.1:${apiPort}`;
 
-  const editorDir = packageDir(projectRoot, "@ion-engine/editor");
+  const editorDir = enginePackageDir(projectRoot, "@ion-engine/editor");
   if (!editorDir) throw new Error("@ion-engine/editor is not installed.\n  Run `npm install` — ION Studio is a devDependency of this project.");
   // Both halves of the editor package are checked, because a half-built
   // package is a real state and its symptom is misleading: Vite reports
@@ -189,7 +194,7 @@ export async function dev(projectRoot, opts = {}) {
     console.warn(`  ⚠ Builder unavailable: ${err.message.split("\n")[0]}`);
   }
 
-  const apiScript = path.join(enginePackageDir(projectRoot, "@ion-engine/build", "executed") ?? "", "lib", "dev-build-api.cjs");
+  const apiScript = path.join(enginePackageDir(projectRoot, "@ion-engine/build") ?? "", "lib", "dev-build-api.cjs");
   let api;
   if (fs.existsSync(apiScript)) {
     api = spawn(process.execPath, [apiScript], {
@@ -214,9 +219,9 @@ export async function dev(projectRoot, opts = {}) {
   // opaque: the editor's dynamic import 404s, main.ts's await throws, and the
   // game never boots at all, with only "Failed to fetch dynamically imported
   // module" to go on.
-  const allow = [projectRoot, path.join(projectRoot, ENGINE_DIR)];
+  const allow = [projectRoot];
   for (const name of ["@ion-engine/runtime", "@ion-engine/editor"]) {
-    const dir = packageDir(projectRoot, name);
+    const dir = enginePackageDir(projectRoot, name);
     if (dir) allow.push(dir);
   }
 
@@ -235,13 +240,13 @@ export async function dev(projectRoot, opts = {}) {
   // external-bare plugin), so no pattern is needed here.
   const alias = [];
   for (const name of ["@ion-engine/runtime", "three"]) {
-    const entry = packageEntry(projectRoot, name);
+    const entry = enginePackageEntry(projectRoot, name);
     if (entry) alias.push({ find: new RegExp(`^${name.replace("/", "\\/")}$`), replacement: entry });
   }
   // `ion` is the specifier game code is written against — short, and the same
   // word in every project. It maps to the runtime's public entry, so it grants
   // no more than "@ion-engine/runtime" does.
-  const runtimeEntry = packageEntry(projectRoot, "@ion-engine/runtime");
+  const runtimeEntry = enginePackageEntry(projectRoot, "@ion-engine/runtime");
   if (runtimeEntry) alias.push({ find: /^ion$/, replacement: runtimeEntry });
 
   const { createServer } = await import("vite");
@@ -249,22 +254,20 @@ export async function dev(projectRoot, opts = {}) {
     root: projectRoot,
     configFile: false,
     resolve: { alias, dedupe: ["three", "@ion-engine/runtime"] },
+    // strictPort, because the port was just probed: if it is gone by now
+    // something else grabbed it in the last millisecond, and silently landing
+    // somewhere else would leave the API pointing at the wrong origin.
     server: { port, strictPort: true, host: "127.0.0.1", fs: { allow } },
-    // The three files the ION editors write are real imports in the module
-    // graph, so watching them would hot-reload the very scene being edited
-    // the instant you pressed Save.
+    // Per project, and the default anyway — stated so it is obvious that two
+    // ION projects running at once never share a dependency cache.
+    cacheDir: path.join(projectRoot, "node_modules", ".vite"),
     optimizeDeps: { exclude: ["@ion-engine/runtime", "@ion-engine/editor"] },
-    plugins: [ionStudio({ studioDir, apiOrigin })],
+    plugins: [ionEditorDataPlugin(projectRoot), ionStudio({ studioDir, apiOrigin })],
   });
-  server.watcher.unwatch([
-    path.join(projectRoot, "src/game/colliders.json"),
-    path.join(projectRoot, "src/game/particles.json"),
-    path.join(projectRoot, "src/game/environment.json"),
-  ]);
   await server.listen();
 
   console.log(`\n  ION Studio   http://localhost:${port}`);
-  if (changed.length) console.log(`  engine       refreshed — ${changed.map(([k, v]) => `${k}@${v}`).join("  ")}`);
+  if (movedFrom !== null) console.log(`               port ${movedFrom} was in use — this project took ${port}`);
   console.log(`  project      ${config.name} v${config.version}  (ION ${config.ionVersion}, ${config.target})`);
   console.log(`  dev API      ${apiOrigin}`);
   if (copied) console.log(`  assets       ${copied} file(s) synced to public/assets`);

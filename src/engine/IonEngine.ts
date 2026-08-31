@@ -6,6 +6,7 @@ import { bindIon, unbindIon, type IonContext } from "./Ion";
 import { ColliderManager } from "./collision/ColliderManager";
 import { ParticleManager } from "./particles/ParticleManager";
 import { showCrashOverlay, removeCrashOverlay } from "./core/CrashOverlay";
+import { Telemetry } from "./Telemetry";
 import { isAssignableObjectField } from "./editor/objectAssignment";
 import { OBJECT_DRAG_MIME } from "./editor/EditorDragSource";
 // Type-only, so every one of these erases at build time and adds nothing to
@@ -398,6 +399,16 @@ export interface IonEngineOptions {
   onCrash?: (error: unknown) => void;
 }
 
+/** A thrown value's message, for the telemetry payload — `unknown` can be anything, and `String(err)` on a plain object gives "[object Object]" rather than nothing useful. */
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  try {
+    return typeof err === "string" ? err : JSON.stringify(err) ?? String(err);
+  } catch {
+    return String(err);
+  }
+}
+
 /** Guards the "spiral of death": if a single frame accumulated more steps than this (a background tab, a long GC pause, a breakpoint), drop the backlog rather than running hundreds of update()s and falling further behind on every subsequent frame. */
 const MAX_FIXED_STEPS_PER_FRAME = 5;
 
@@ -528,8 +539,21 @@ export class IonEngine {
     const fixedStep = this.options.fixedTimestep ?? 0;
     /** Unconsumed real time carried between frames — fixed-timestep mode only. */
     let accumulator = 0;
-    /** Game time in fixed mode: advances only by whole steps actually run, so it never drifts from the number of update()s. Unused in variable mode, which keeps passing wall-clock `now` exactly as before. */
-    let fixedElapsed = 0;
+    /**
+     * The `elapsed` handed to tick(), in *game* seconds: zero at boot, and
+     * advanced only by time that was actually simulated.
+     *
+     * Both modes share it, which is the point. Fixed mode always advanced
+     * by whole steps; variable mode used to pass `now / 1000` — the raw
+     * `performance.now()` clock, which starts at page load rather than at
+     * boot and keeps running while gameplay is paused. So the documented
+     * contract ("`elapsed` is game time, which pauses with the editor" —
+     * IonGame.onUpdate) held in one mode and not the other, and anything
+     * driving animation off it (the reference game's own Coin does:
+     * `rotation.z = elapsed * 2`) jumped forward by the whole length of an
+     * editor session the moment gameplay resumed.
+     */
+    let gameElapsed = 0;
 
     const loop = (now: number): void => {
       if (this.win.__gameInstanceGeneration !== myGeneration) return;
@@ -547,8 +571,8 @@ export class IonEngine {
             accumulator += dt;
             let steps = 0;
             while (accumulator >= fixedStep && steps < MAX_FIXED_STEPS_PER_FRAME) {
-              fixedElapsed += fixedStep;
-              activeGame.tick(fixedStep, fixedElapsed);
+              gameElapsed += fixedStep;
+              activeGame.tick(fixedStep, gameElapsed);
               this.scheduler.update(fixedStep);
               // After update(), so overlaps are evaluated against where
               // things actually moved to this step rather than a step
@@ -567,7 +591,8 @@ export class IonEngine {
             // frame, where it would produce the same overrun again, forever.
             if (steps === MAX_FIXED_STEPS_PER_FRAME) accumulator = 0;
           } else {
-            activeGame.tick(dt, now / 1000);
+            gameElapsed += dt;
+            activeGame.tick(dt, gameElapsed);
             this.scheduler.update(dt);
             this.colliders.update(); // see the fixed-step branch above for the ordering
             this.particles.update(dt);
@@ -578,6 +603,13 @@ export class IonEngine {
         // Deliberately not re-entering this loop — see IonEngineOptions.onCrash's
         // doc comment for why a dead RAF chain is the right outcome here.
         console.error("IonEngine: gameplay crashed — showing the fallback CTA instead of a dead frame.", err);
+        // Reported through the analytics seam as well as `onCrash`: a
+        // crash is the single most expensive thing a playable can do
+        // (the impression is spent, the click can't happen), and a host
+        // that installed a sink should not have to also wire onCrash to
+        // find out. Telemetry swallows its own failures, so this cannot
+        // make a crash worse.
+        Telemetry.track("ion:crash", { phase: "frame", message: errorMessage(err) });
         try {
           this.options.onCrash?.(err);
         } catch (hookErr) {
@@ -602,6 +634,7 @@ export class IonEngine {
    */
   private reportBootFailure(err: unknown): void {
     console.error("IonEngine: the game failed to start — showing the fallback CTA instead of a blank canvas.", err);
+    Telemetry.track("ion:crash", { phase: "boot", message: errorMessage(err) });
     // Nothing was created, so nothing can be torn down; but the Ion binding
     // was taken before createGame ran and would otherwise outlive this
     // attempt and make the next boot's staleness check meaningless.

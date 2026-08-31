@@ -64,10 +64,44 @@ function ionEditorDataPlugin(): Plugin {
   };
 }
 
+/**
+ * Tells the Engine Room where its dev API actually is.
+ *
+ * `index.html` falls back to `http://127.0.0.1:8001` when nothing sets
+ * `window.__ION_API_ORIGIN`, and that fallback is a guess about a port this
+ * process does not own. When it is wrong it is not inert — another project's
+ * dev API (or an orphaned one from a project that has since been deleted)
+ * answers, and the panel reports *that* project's version, commit and build
+ * report while every Save goes to its files. Nothing errors, because from the
+ * page's point of view nothing has.
+ *
+ * scripts/dev.js reserves both ports before either process binds and passes
+ * the API's here, so the page is told rather than guessing. Same mechanism the
+ * packaged `ion dev` uses (see packages/project/lib/dev.mjs) — this is the
+ * checkout's own copy of that one line.
+ */
+function ionDevApiOriginPlugin(): Plugin {
+  return {
+    name: "ion:dev-api-origin",
+    apply: "serve",
+    transformIndexHtml(html) {
+      const apiPort = process.env.ION_API_PORT;
+      if (!apiPort) return html; // `npx vite` on its own — leave the fallback alone
+      return html.replace(
+        "<head>",
+        `<head>\n  <script>window.__ION_API_ORIGIN=${JSON.stringify(`http://127.0.0.1:${apiPort}`)};</script>`
+      );
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [ionEditorDataPlugin()],
+  plugins: [ionEditorDataPlugin(), ionDevApiOriginPlugin()],
   server: {
-    port: 8000,
+    // scripts/dev.js has already checked this one is free and passes it on the
+    // command line too; the env var keeps `strictPort` honest when the config
+    // is read directly. A bare `npx vite` still gets the historical 8000.
+    port: Number(process.env.ION_PORT ?? 8000),
     strictPort: true,
     // Vite 5+ defaults to binding only the IPv6 loopback (::1) —
     // scripts/dev-build-api.js's CORS allowlist (and README, and various

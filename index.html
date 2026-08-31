@@ -4060,7 +4060,19 @@
         const el = document.getElementById("engine-room-version");
         const commit = info.commit || "no-git";
         el.innerHTML = "v" + info.version + " · " + commit + (info.dirty ? '<span class="dirty">*</span>' : "");
-        el.title = info.branch ? "Branch " + info.branch + (info.dirty ? " — uncommitted local changes" : "") : "";
+        // The project root is in the tooltip because an origin is not an
+        // identity: this panel finds its API by port, and a port can be held
+        // by another project's dev server — or by an orphaned one whose
+        // folder has since been deleted, which keeps answering exactly as
+        // confidently as a live one. That happened, and the only visible
+        // symptom was a version this checkout had never had next to a commit
+        // hash that was not an object in its repository. Showing which root
+        // answered turns that from a mystery into a glance.
+        el.title = [
+          info.root ? "Project " + info.root : null,
+          info.branch ? "Branch " + info.branch + (info.dirty ? " — uncommitted local changes" : "") : null,
+          info.projectVersion && info.projectVersion !== info.version ? "Project version " + info.projectVersion : null,
+        ].filter(Boolean).join("\n");
       })
       .catch(() => {
         // dev-build-api isn't running (npm run dev wasn't used to start this, or it's still booting) — nothing to read version/commit from.
@@ -5675,6 +5687,19 @@
     let colliderModeOn = false;
 
     function setColliderMode(on) {
+      // Configure Colliders and Particle System are one-at-a-time. Neither
+      // used to know about the other, and the consequences were not confined
+      // to the toolbars: Particle mode puts `particle-mode` on <body>, which
+      // swaps the Inspector and Hierarchy between docks and hides the view
+      // helper, the Scripts pane and Control Desk. Switching straight to
+      // Colliders left all of that in place — two stacked toolbars, both
+      // buttons lit, the docks still in particle layout, and the camera view
+      // helper simply gone, with nothing to suggest which mode was
+      // responsible. Turning the other one off first is the whole fix.
+      //
+      // No recursion: this only fires on the way *on*, and the call it makes
+      // is on the way *off*.
+      if (on && particleModeOn) setParticleMode(false);
       // Trust the engine's answer rather than the requested value: with no
       // editor open the hook returns undefined, and the button must not
       // light up for a mode that didn't actually start.
@@ -5811,6 +5836,8 @@
     }
 
     function setParticleMode(on) {
+      // The mirror of setColliderMode's own exclusivity — see its comment.
+      if (on && colliderModeOn) setColliderMode(false);
       // Trust the engine's answer rather than the requested value: with no
       // editor open the hook returns undefined, and the button must not
       // light up for a mode that didn't actually start.

@@ -27,7 +27,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { launchChrome } from "./verify-bundle.mjs";
+import { launchChrome, waitForExit } from "./verify-bundle.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -111,7 +111,6 @@ async function startDevServer({ port, apiPort }) {
   const vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
     cwd: ROOT,
     stdio: "ignore",
-    shell: process.platform === "win32",
   });
   const api = spawn(process.execPath, [path.join(ROOT, "scripts", "dev-build-api.js")], {
     cwd: ROOT,
@@ -124,16 +123,24 @@ async function startDevServer({ port, apiPort }) {
     origin,
     apiOrigin: `http://127.0.0.1:${apiPort}`,
     mirror,
-    stop() {
-      // Same reasoning as verify-scene-persistence.mjs's matching teardown:
-      // vite runs through a shell on Windows (to resolve npx.cmd), so its
-      // .pid is the shell's, not vite's — plain kill() leaves the real
-      // process (and its locks on `mirror`) running and the rmSync below
-      // fails with EPERM. taskkill /t kills the whole tree instead.
-      if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(vite.pid), "/t", "/f"]);
-      else vite.kill("SIGTERM");
+    async stop() {
+      vite.kill("SIGTERM");
       api.kill("SIGTERM");
-      fs.rmSync(mirror, { recursive: true, force: true });
+      await Promise.all([waitForExit(vite), waitForExit(api)]);
+      // Same TOCTOU race as Chrome's profile dir: a not-quite-dead vite/api
+      // process can still hold a file open under `mirror` for a moment.
+      for (let attempt = 1; attempt <= 5; attempt++) {
+        try {
+          fs.rmSync(mirror, { recursive: true, force: true });
+          return;
+        } catch (err) {
+          if (err.code !== "ENOTEMPTY" && err.code !== "EBUSY" || attempt === 5) {
+            console.warn(`(cleanup) could not remove ${mirror}: ${err.message}`);
+            return;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+        }
+      }
     },
   };
 }
@@ -281,8 +288,12 @@ async function main() {
 
     fs.writeFileSync(path.join(outDir, "measurements.json"), JSON.stringify({ results, failures }, null, 2));
   } finally {
-    browser.close();
-    server.stop();
+    // browser.close() waits out Chrome's own teardown race before touching
+    // its profile dir — see verify-bundle.mjs. server.stop() removes the
+    // mirrored project dir the same way; wait for both children to actually
+    // exit first for the same reason.
+    await browser.close();
+    await server.stop();
   }
 
   if (failures.length) {

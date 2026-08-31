@@ -181,29 +181,30 @@ export default class MyGame extends Game {
     this.player = new Player();
     ION.camera.follow(this.player);
 
-    // Something to collect.
+    // Something to collect. Every ION.scene.* call hands back a Prop: a handle
+    // that speaks degrees, takes a colour by name, and knows how to free
+    // itself. spin() keeps turning on its own, so update() has nothing to do.
     for (let i = 0; i < 5; i++) {
-      ION.scene.box({
-        color: "yellow",
-        size: 0.6,
-        // Kept close: a portrait playable sees roughly ±4 units across at
-        // the default camera distance, so a wider spread just puts them
-        // off-screen at startup.
-        x: ION.random(-3.5, 3.5),
-        y: 0.3,
-        z: ION.random(-6, 2),
-        name: \`Coin\${i}\`,
-      });
+      ION.scene
+        .box({
+          color: "yellow",
+          size: 0.6,
+          // Kept close: a portrait playable sees roughly ±4 units across at
+          // the default camera distance, so a wider spread just puts them
+          // off-screen at startup.
+          x: ION.random(-3.5, 3.5),
+          y: 0.3,
+          z: ION.random(-6, 2),
+          name: \`Coin\${i}\`,
+        })
+        .spin(120); // degrees per second
     }
   }
 
   /** Runs every frame. dt is seconds since the last one. */
-  update(dt: number) {
-    // Spin every coin. Entities update themselves — this is for loose props.
-    for (let i = 0; i < 5; i++) {
-      const coin = ION.scene.find(\`Coin\${i}\`);
-      if (coin) coin.rotation.y += dt * 2;
-    }
+  update(_dt: number) {
+    // Nothing to do yet — the coins spin themselves. Put your game's
+    // per-frame logic here.
   }
 ${template === "playable-ad" ? `
   /** Runs once everything the editors authored has loaded. */
@@ -339,20 +340,17 @@ public/assets/
 *.log
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The ION Engine.
+# The ION Engine is a dependency, not part of this repository.
 #
-# IONEngine/ is written by \`npm install\` from the @ion-engine/* packages this
-# project depends on. It is ours, not yours: it is regenerated on every
-# install, so an edit there cannot be committed, cannot be pushed, and does not
-# survive. That is what keeps this repository's history a record of *your game*
-# — every commit you make is src/game/ and project configuration, never engine
-# code.
+# It lives in node_modules, which is ignored above, so engine code cannot be
+# committed and cannot be pushed. Every commit here is your game: src/game/
+# and this project's own configuration.
 #
 # Update it with:  npm run engine:update
 # Check it with:   npm run doctor
 # ─────────────────────────────────────────────────────────────────────────────
-IONEngine/
 `;
+
 
 const tsconfig = `{
   "compilerOptions": {
@@ -366,20 +364,21 @@ const tsconfig = `{
     "noEmit": true,
     "types": ["vite/client"],
 
-    // The engine is resolved out of IONEngine/, which is where it actually
-    // lives for this project. Only the package roots are mapped, so
-    // "@ion-engine/runtime" resolves and a deep path into engine internals
-    // does not — the package's own exports map decides what is reachable.
+    // "@ion-engine/*" needs no mapping — Node's own resolution finds it in
+    // node_modules, and each package's "exports" map decides what is
+    // reachable, so a deep import into engine internals fails to resolve
+    // rather than merely being discouraged.
+    //
+    // "ion" is the one alias: a short name for the runtime's public entry,
+    // the same word in every ION project. It grants exactly what
+    // "@ion-engine/runtime" grants.
     "paths": {
-      // What your game imports from. One name, one place.
-      "ion": ["./IONEngine/runtime"],
-      "@ion-engine/runtime": ["./IONEngine/runtime"],
-      "@ion-engine/editor": ["./IONEngine/editor"]
+      "ion": ["./node_modules/@ion-engine/runtime"]
     }
   },
-  // IONEngine/ is deliberately not in this list: it is not your source, it is
-  // typechecked by ION before release, and including it would make every one
-  // of your builds pay for it.
+  // Your source only. The engine is a dependency: it ships its own .d.ts and
+  // is typechecked by ION before release, so including it would make every
+  // one of your typechecks pay for it again.
   "include": ["src"]
 }
 `;
@@ -389,21 +388,34 @@ const readme = (name, template) => `# ${name}
 Built on the ION Engine (${TEMPLATES[template].label} template).
 
 \`\`\`bash
-npm install
-npm run dev       # ION Studio → http://localhost:8000
+npm install       # once — installs the engine, the editor and the build tooling
+npm run dev       # ION Studio, on the first free port from 8000
 npm run build     # single-file production output in dist/
 npm run preview   # serve the built file
 npm run doctor    # check Node, config, packages, engine integrity
+npm run typecheck # tsc --noEmit
 \`\`\`
+
+That is the whole setup. There is no postinstall step, nothing to copy, and no
+paths to configure.
+
+## Running more than one project
+
+\`npm run dev\` takes the first free port from the one in \`ion.config.json\`, so
+several ION projects run side by side without being told about each other —
+8000, 8002, 8004, and so on, each with its own dev API alongside it. Every
+project has its own \`node_modules\`, its own Vite cache, its own editor state
+and its own \`dist/\`; nothing is shared. Pin one with
+\`npm run dev -- --port 9000\` if you want a fixed address.
 
 ## Layout
 
 \`\`\`
-IONEngine/        the engine, editor and build tooling   — ION's, generated, git-ignored
 src/game/         your game                              — yours, the only place you normally work
 src/main.ts       entry point                            — wired for you
 ion.config.json   project + engine configuration         — yours
 assets/           source assets                          — yours
+node_modules/     the engine, editor and build tooling   — ION's, installed by npm
 \`\`\`
 
 | | |
@@ -411,20 +423,21 @@ assets/           source assets                          — yours
 | \`src/game/\` | **Yours.** Gameplay, entities, systems, scenes, UI, and the files the ION editors write. |
 | \`ion.config.json\` | **Yours.** Name, target, orientation, resolution, build settings, and the pinned ION version. |
 | \`assets/\` | **Yours.** Only what \`src/game/assets.ts\` references is shipped. |
-| \`IONEngine/\` | **ION's.** Written by \`npm install\`, git-ignored, regenerated every time. |
+| \`@ion-engine/*\` | **ION's.** Ordinary npm dependencies. Not yours to edit — \`npm run doctor\` says so if they have been. |
 
-Every commit in this repository is your game. \`IONEngine/\` is a build artifact
-of \`npm install\`, so an edit there cannot be committed, cannot be pushed, and
-does not survive the next install. \`npm run doctor\` says so if it happens.
+Every commit in this repository is your game. The engine lives in
+\`node_modules\`, which is git-ignored, so engine code cannot be committed and
+cannot be pushed.
 
 ## Updating the engine
 
 \`\`\`bash
-npm run engine:update    # npm resolves new versions, IONEngine/ is rewritten
+npm run engine:update
 \`\`\`
 
-\`src/game/\` is untouched. \`ionVersion\` in \`ion.config.json\` records what you
-were pinned to; \`npm run doctor\` reports a mismatch.
+npm resolves the new versions and \`src/game/\` is untouched. \`ionVersion\` in
+\`ion.config.json\` records what you were pinned to; \`npm run doctor\` reports a
+mismatch.
 
 ## Writing gameplay
 
@@ -539,17 +552,16 @@ async function main() {
       version: "0.1.0",
       private: true,
       type: "module",
+      // Everything this project needs, and nothing to run before them.
+      // There is no postinstall step: the engine is resolved straight out of
+      // node_modules, so `npm install` is the whole setup.
       scripts: {
-        // Writes IONEngine/ from whatever npm just resolved. Runs on every
-        // install and every update, so the folder is never stale and there is
-        // no setup step for anyone to miss.
-        postinstall: "ion sync",
         dev: "ion dev",
         build: "ion build",
         preview: "ion preview",
         doctor: "ion doctor",
-        "engine:update": "npm update @ion-engine/runtime @ion-engine/editor @ion-engine/build @ion-engine/project",
         typecheck: "tsc --noEmit",
+        "engine:update": "npm update @ion-engine/runtime @ion-engine/editor @ion-engine/build @ion-engine/project && npm run doctor",
       },
       dependencies: { "@ion-engine/runtime": dep("runtime"), three: "^0.185.1" },
       devDependencies: {

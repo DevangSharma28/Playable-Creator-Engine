@@ -1,5 +1,7 @@
 import { UILayout } from "../../engine/ui/UILayout";
 import { applyBindings, type BindingsData } from "../../engine/Bindings";
+import { Ion } from "../../engine/Ion";
+import type { CoinCollected } from "../Game";
 import bindingsRaw from "./bindings.json";
 
 const bindingsData = bindingsRaw as BindingsData;
@@ -31,6 +33,22 @@ export class HUD {
     // calling this externally) so HUD owns its own wiring, and the log
     // below reflects the real, final value right where it's actually used.
     applyBindings(this, "HUD", bindingsData, this.main, this.endcard);
+
+    // The worked example of the shared event bus. HUD holds no reference to
+    // CoinField and CoinField holds none to HUD — the score arrives because
+    // this class asked to hear about it, not because gameplay code was
+    // written to remember to tell it.
+    //
+    // Nothing to unsubscribe: IonEngine clears the whole bus in its teardown
+    // (see its __disposeGame hook), which is what stops a hot-reloaded
+    // bundle's listeners firing into the new one. A subscription taken here
+    // and never released would be a leak in any other lifecycle; in this one
+    // it's the same lifetime as the Game itself.
+    //
+    // Safe this early because IonEngine binds Ion *before* Game.create()
+    // runs — the same ordering that lets an entity register a collider in
+    // its own constructor.
+    Ion.on<CoinCollected>("coin-collected", ({ collected, total }) => this.setScore(collected, total));
 
     this.pulseMoneyIcon();
   }

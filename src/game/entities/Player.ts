@@ -10,6 +10,7 @@ import { Easing } from "../../engine/Ion";
 import { Animator, LoopAnimator } from "../../engine/core/Animator";
 import { Ion } from "../../engine/Ion";
 import type { CylinderCollider } from "../../engine/collision";
+import type { World } from "../world/World";
 import { lerp } from "three/src/math/MathUtils.js";
 
 
@@ -30,6 +31,8 @@ const CROSSFADE_DURATION = 0.2;
 const UP = new THREE.Vector3(0, 1, 0);
 /** Reused every frame — this runs in update(), where a per-frame Vector3 is garbage the collector has to keep up with. */
 const moveDelta = new THREE.Vector3();
+/** How far in from the play area's edge the player is held — roughly the character's own radius, so the body stays off the wall rather than intersecting it. */
+const PLAYER_EDGE_MARGIN = 0.4;
 
 
 // ============================================================================
@@ -89,7 +92,8 @@ export class Player {
 
   constructor(
     scene: THREE.Scene,
-    private readonly bound: number,
+    /** The measured play area. Was a single origin-centred half-extent, which is why the clamp in update() below had been commented out — see World's doc comment. */
+    private readonly world: World,
     model: THREE.Group,
     clips: THREE.AnimationClip[]
   ) {
@@ -295,17 +299,20 @@ export class Player {
       // Keep Player Inside Bounds
       // ----------------------------------------------------------------------
 
-      // this.player.position.x = THREE.MathUtils.clamp(
-      //   this.player.position.x,
-      //   -this.bound,
-      //   this.bound
-      // );
+      // A backstop behind the solid colliders above, not a replacement for
+      // them: colliders stop you at the walls that were actually authored,
+      // and this stops you leaving the room through a gap where none was.
+      // It clamps to the *measured* play area — the version of this that
+      // clamped to a ±10 box around the origin pinned the player to a
+      // corner of a room that isn't centred there, which is why it had been
+      // commented out rather than fixed.
+      this.world.clamp(this.player.position, PLAYER_EDGE_MARGIN);
 
-      // this.player.position.z = THREE.MathUtils.clamp(
-      //   this.player.position.z,
-      //   -this.bound,
-      //   this.bound
-      // );
+      // The clamp can move the body without the collider knowing, and the
+      // next frame's moveAndSlide starts from the collider's last synced
+      // world shape — so re-sync here or a clamped frame depenetrates from
+      // where the player would have been.
+      this.collider?.syncWorld();
 
 
       // ----------------------------------------------------------------------

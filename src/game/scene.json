@@ -1,4 +1,14 @@
 {
   "version": 1,
-  "objects": []
+  "objects": [
+    {
+      "objectPath": "Scene/Cinema_Tycoon_Environment/Environment_Mesh/sodamachine",
+      "objectName": "sodamachine",
+      "rotation": [
+        0,
+        -108,
+        0
+      ]
+    }
+  ]
 }

@@ -5,7 +5,7 @@
  * internals, because the thing under test is the tree it leaves behind: which
  * files exist, what the config says, and above all where the boundary between
  * ION's code and the client's code falls. A generator that writes engine
- * sources into `src/`, or forgets to git-ignore `IONEngine/`, has broken the
+ * sources into `src/`, or forgets to git-ignore `node_modules/`, has broken the
  * commercial arrangement no matter how well the engine itself works.
  *
  * The full `npm install` → `npm run build` flow is a separate suite
@@ -95,13 +95,13 @@ test("a generated project", async (t) => {
     });
     const files = walk(project.projectDir);
     assert.ok(!files.some((file) => file.startsWith("src/engine/")), "engine sources were written into src/");
-    assert.ok(!files.some((file) => file.startsWith("IONEngine/")), "IONEngine/ is written by npm install, not the generator");
+    assert.ok(!files.some((file) => file.startsWith("IONEngine/")), "the engine is an npm dependency, not a folder in the project");
     assert.ok(files.every((file) => !file.endsWith("build.sh")), "the build pipeline is not the client's file");
   });
 
   await t.test("git-ignores everything that is ION's rather than the client's", () => {
     const ignored = project.read(".gitignore");
-    for (const entry of ["node_modules/", "IONEngine/", "dist/", ".build-cache/"]) {
+    for (const entry of ["node_modules/", "dist/", ".build-cache/"]) {
       assert.ok(ignored.includes(entry), `.gitignore is missing ${entry}`);
     }
   });
@@ -128,7 +128,14 @@ test("a generated project", async (t) => {
       assert.ok(manifest.devDependencies[dev], `${dev} should be a devDependency`);
     }
     assert.equal(manifest.dependencies["@ion-engine/editor"], undefined, "the editor must not be a production dependency");
-    assert.equal(manifest.scripts.postinstall, "ion sync");
+    // No postinstall, and deliberately so: `npm install` is the whole setup.
+    // The engine used to be copied into an IONEngine/ folder by a postinstall
+    // hook, which meant two copies that could disagree and a step that had to
+    // run for the project to work at all.
+    assert.equal(manifest.scripts.postinstall, undefined, "a generated project must need no postinstall step");
+    for (const script of ["dev", "build", "preview", "doctor", "typecheck", "engine:update"]) {
+      assert.ok(manifest.scripts[script], `package.json is missing the "${script}" script`);
+    }
   });
 
   await t.test("the starter game imports only the public API", () => {
@@ -167,13 +174,15 @@ test("a generated project", async (t) => {
     assert.ok(!/^import .*@ion-engine\/editor/m.test(main), "the editor must be a dynamic import, not a static one");
   });
 
-  await t.test("tsconfig maps the public specifiers at IONEngine/", () => {
-    const tsconfig = project.json("tsconfig.json");
-    const paths = tsconfig.compilerOptions.paths;
-    for (const specifier of ["ion", "@ion-engine/runtime", "@ion-engine/editor"]) {
-      assert.ok(paths[specifier], `tsconfig has no path mapping for "${specifier}"`);
-      assert.ok(paths[specifier].every((target) => target.includes("IONEngine")), `"${specifier}" should map into IONEngine/`);
-    }
+  await t.test("tsconfig maps only `ion`, and maps it into node_modules", () => {
+    // "@ion-engine/*" needs no mapping — Node resolves it — and mapping it
+    // would override the package's own exports map, which is what makes a
+    // deep import into engine internals fail rather than merely be
+    // discouraged.
+    const paths = project.json("tsconfig.json").compilerOptions.paths;
+    assert.ok(paths.ion, 'tsconfig has no path mapping for "ion"');
+    assert.ok(paths.ion.every((target) => target.includes("node_modules")), '"ion" should map into node_modules');
+    assert.ok(!paths["@ion-engine/runtime"], "@ion-engine/* should resolve through Node, not a path mapping");
   });
 });
 

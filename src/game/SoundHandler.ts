@@ -62,6 +62,20 @@ export class SoundHandler {
         this.music.play();
     }
 
+    /**
+     * Pauses the music where it is — position is kept, so playMusic()
+     * resumes rather than restarting. For a host telling the playable it is
+     * no longer on screen (see MindworksAdapter's gameClose).
+     */
+    pauseMusic(): void {
+        if (this.music.isPlaying) this.music.pause();
+    }
+
+    /** Stops the music and rewinds it. The end-of-session call; pauseMusic() is the one that can be resumed. */
+    stopMusic(): void {
+        if (this.music.isPlaying) this.music.stop();
+    }
+
     /** Dev-only: the Engine Room's Audio Reactor panel polls this for a live frequency-spectrum readout of whatever's actually playing — see IonEngine.ts's __getAudioAnalyser hook. fftSize 128 (64 frequency bins) is plenty of resolution for a small bar-graph visualizer and cheap to compute every frame; raise it if the panel ever wants finer detail. */
     getAnalyser(): THREE.AudioAnalyser {
         if (!this.analyser) this.analyser = new THREE.AudioAnalyser(this.music, 128);

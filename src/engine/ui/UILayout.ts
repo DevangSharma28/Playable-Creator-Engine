@@ -107,12 +107,24 @@ const SHAPE_CLIP: Record<NonNullable<UIElementData["shape"]>, string> = {
   cross: "polygon(35% 0%, 65% 0%, 65% 35%, 100% 35%, 100% 65%, 65% 65%, 65% 100%, 35% 100%, 35% 65%, 0% 65%, 0% 35%, 35% 35%)",
 };
 
-let keyframesInjected = false;
-/** Injects the shared @keyframes once per page — cheaper than per-element <style> tags. */
+/**
+ * Injects the shared @keyframes once per page — cheaper than per-element
+ * <style> tags.
+ *
+ * De-duplicated against the real DOM rather than a module-level `let`,
+ * because the dev preview's in-place hot reload re-executes this module
+ * while the *page* survives: a module-scope flag is reset by the reload,
+ * `document.head` is not, so every save appended another identical
+ * `<style>` block that nothing ever removed. Asking the document whether
+ * the node is already there is correct in both directions — it can't
+ * re-inject after a reload, and it can't skip injection on a genuinely
+ * fresh page.
+ */
+const KEYFRAMES_STYLE_ID = "ion-ui-keyframes";
 function ensureKeyframes(): void {
-  if (keyframesInjected) return;
-  keyframesInjected = true;
+  if (document.getElementById(KEYFRAMES_STYLE_ID)) return;
   const style = document.createElement("style");
+  style.id = KEYFRAMES_STYLE_ID;
   style.textContent = `
     @keyframes ui-anim-pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.08); } }
     @keyframes ui-anim-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6%); } }
@@ -145,12 +157,14 @@ function ensureKeyframes(): void {
  * which is precisely the n frames that exist and never the wrapped-around
  * n-th one.
  */
-const injectedSpriteGrids = new Set<string>();
 function ensureSpriteKeyframes(cols: number, rows: number): void {
-  const key = `${cols}x${rows}`;
-  if (injectedSpriteGrids.has(key)) return;
-  injectedSpriteGrids.add(key);
+  // Keyed off the DOM for the same hot-reload reason ensureKeyframes is —
+  // a module-level Set of already-injected grids empties on every reload
+  // while the <style> nodes it was tracking stay in the head.
+  const id = `ion-ui-sprite-${cols}x${rows}`;
+  if (document.getElementById(id)) return;
   const style = document.createElement("style");
+  style.id = id;
   style.textContent = `
     @keyframes ui-sprite-x-${cols} { from { left: 0%; } to { left: -${cols * 100}%; } }
     @keyframes ui-sprite-y-${rows} { from { top: 0%; } to { top: -${rows * 100}%; } }

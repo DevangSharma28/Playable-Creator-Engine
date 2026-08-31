@@ -1,7 +1,12 @@
 import * as THREE from "three";
 import { Coin } from "./Coin";
+import type { World } from "../world/World";
 
 const PICKUP_RADIUS = 0.7;
+/** How far in from the play area's edge a coin may spawn — keeps them off the walls rather than flush against them. */
+const SPAWN_MARGIN = 0.3;
+/** Coins float this far above the floor. */
+const COIN_HEIGHT = 0.55;
 
 /**
  * Owns every Coin in the scene: spawning, per-frame animation, and
@@ -10,11 +15,13 @@ const PICKUP_RADIUS = 0.7;
  */
 export class CoinField {
   private readonly coins: Coin[] = [];
-  private readonly spawnExtent: number;
 
-  constructor(scene: THREE.Scene, count: number, playAreaBound: number) {
-    // Keep coins a little further inside the walls than the player can travel.
-    this.spawnExtent = Math.max(playAreaBound - 0.3, 0.5);
+  /**
+   * `world` rather than a single half-extent: the play area is a measured,
+   * off-centre box (see World), and scattering coins across a square
+   * centred on the origin put most of them outside the room.
+   */
+  constructor(scene: THREE.Scene, count: number, private readonly world: World) {
     for (let i = 0; i < count; i++) {
       this.coins.push(new Coin(scene, this.randomPosition()));
     }
@@ -39,10 +46,7 @@ export class CoinField {
   }
 
   private randomPosition(): THREE.Vector3 {
-    return new THREE.Vector3(
-      (Math.random() * 2 - 1) * this.spawnExtent,
-      0.55,
-      (Math.random() * 2 - 1) * this.spawnExtent
-    );
+    // randomPoint only writes x/z, so the height set here survives.
+    return this.world.randomPoint(SPAWN_MARGIN, new THREE.Vector3(0, COIN_HEIGHT, 0));
   }
 }

@@ -100,6 +100,16 @@ export class Scheduler {
         // a repeat slower than the frame rate should not fire a burst of
         // backdated calls after a long pause or a frame spike.
         timer.atMs += timer.intervalMs;
+        // ...and if one interval isn't enough to get back ahead of the
+        // clock, skip the whole backlog rather than paying it off one
+        // fire per frame. A 5s repeat that sat behind a 60s editor
+        // session is 12 intervals in arrears: advancing by one leaves it
+        // still overdue, so it would fire again next frame, and the next,
+        // for 12 straight frames — a burst, just spread over frames
+        // instead of packed into one update(). Re-basing on the current
+        // clock is what actually delivers what the comment above
+        // promises.
+        if (timer.atMs <= this.timeMs) timer.atMs = this.timeMs + timer.intervalMs;
       }
 
       this.timers.push(timer);

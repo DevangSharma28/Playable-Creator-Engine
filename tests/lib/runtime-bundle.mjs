@@ -20,10 +20,21 @@ import * as esbuild from "esbuild";
 
 const ROOT = resolve(import.meta.dirname, "..", "..");
 
-let cached;
+/** One bundle per `dev` setting — they are genuinely different builds, not the same one configured twice. */
+const cached = new Map();
 
-export async function loadRuntime() {
-  if (cached) return cached;
+/**
+ * @param {{ dev?: boolean }} [options]
+ *   `dev: true` builds the bundle with `import.meta.env.DEV` true, which is
+ *   what a *dev preview* actually runs. Several things exist only there — the
+ *   `window.__*` panel hooks beyond the always-on ones, and the Engine Room's
+ *   orientation gizmo — so a test of any of them against the default
+ *   production bundle is testing the wrong build and silently passes for the
+ *   wrong reason (or, worse, fails and looks like a real bug).
+ */
+export async function loadRuntime({ dev = false } = {}) {
+  const hit = cached.get(dev);
+  if (hit) return hit;
   // Emitted *inside* node_modules rather than into a temp dir, because the
   // bundle keeps `three` as a bare import and Node resolves bare specifiers by
   // walking up from the importing file. From /tmp there is no node_modules to
@@ -31,7 +42,7 @@ export async function loadRuntime() {
   // imports.
   const dir = join(ROOT, "node_modules", ".ion-test-build");
   mkdirSync(dir, { recursive: true });
-  const outfile = join(dir, "runtime.mjs");
+  const outfile = join(dir, dev ? "runtime-dev.mjs" : "runtime.mjs");
   await esbuild.build({
     entryPoints: [join(ROOT, "packages", "runtime", "src", "index.ts")],
     outfile,
@@ -40,15 +51,16 @@ export async function loadRuntime() {
     platform: "neutral",
     target: "es2022",
     external: ["three", "three/*"],
-    // The runtime reads this to decide whether dev-only branches exist. A
-    // test of production behavior must not accidentally be testing the dev
-    // build, so it is pinned false here and set explicitly where a test
-    // wants the other branch.
-    define: { "import.meta.env.DEV": "false", "import.meta.env.PROD": "true" },
+    // The runtime reads this to decide whether dev-only branches exist. It
+    // defaults to the production build, so a test of production behavior
+    // cannot accidentally be testing the dev one; a test that wants the other
+    // branch asks for it with `{ dev: true }`.
+    define: { "import.meta.env.DEV": String(dev), "import.meta.env.PROD": String(!dev) },
     logLevel: "silent",
   });
-  cached = await import(pathToFileURL(outfile).href);
-  return cached;
+  const loaded = await import(pathToFileURL(outfile).href);
+  cached.set(dev, loaded);
+  return loaded;
 }
 
 export { ROOT };

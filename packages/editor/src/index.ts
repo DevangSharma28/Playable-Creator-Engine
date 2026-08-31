@@ -22,7 +22,6 @@ import {
 import { EditorRoot } from "../../../src/engine/editor/EditorRoot";
 import { ColliderVisuals } from "../../../src/engine/editor/ColliderVisuals";
 import { ParticleVisuals } from "../../../src/engine/editor/ParticleVisuals";
-import { ViewHelperWidget } from "../../../src/engine/core/ViewHelperWidget";
 import type { SceneEnvironment } from "../../../src/engine/scene";
 import type { GizmoMode } from "../../../src/engine/core/SceneInspector";
 import type { ColliderShape } from "../../../src/engine/collision";
@@ -48,14 +47,17 @@ class ColliderDebugLayer implements DebugLayer {
 }
 
 class Session implements EditorSession {
-  private readonly viewHelper: ViewHelperWidget | undefined;
-  constructor(private readonly root: EditorRoot, viewHelperCanvas: HTMLCanvasElement | null) {
-    this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
-  }
+  constructor(private readonly root: EditorRoot) {}
   get camera(): THREE.PerspectiveCamera { return this.root.camera; }
   update(): void { this.root.update(); }
-  afterRender(activeCamera: THREE.Camera): void { this.viewHelper?.update(activeCamera); }
-  dispose(): void { this.viewHelper?.dispose(); this.root.dispose(); }
+  // No afterRender: the orientation gizmo used to be built here, which tied
+  // its lifetime to an editor session — so on the packaged path it drew only
+  // while the 3D editor was open and sat frozen the rest of the time. Its
+  // canvas belongs to the Engine Room panel, not to a session, so IonGame owns
+  // it now and draws it every frame. Two instances against one canvas would
+  // fight over the same WebGL context, hence removing it here rather than
+  // keeping both.
+  dispose(): void { this.root.dispose(); }
 
   setGizmoMode(mode: string): void { this.root.setGizmoMode(mode as GizmoMode); }
   onGizmoModeChange(cb: (mode: string) => void): void { this.root.addModeChangeListener(cb); }
@@ -73,7 +75,11 @@ class Session implements EditorSession {
   serializeColliders(): unknown[] { return this.root.serializeColliders(); }
   hasColliderChanges(): boolean { return this.root.hasColliderChanges; }
   markCollidersSaved(): void { this.root.markCollidersSaved(); }
-  onColliderDirty(_cb: () => void): void { /* wired at construction — see open() */ }
+  // Dirty notification is wired through EditorOpenOptions at construction —
+  // EditorRoot takes these as constructor options, and the subscriber (the
+  // Engine Room's Exit button) registers long before any session exists. See
+  // EditorOpenOptions in the runtime's editor-host.ts.
+  onColliderDirty(_cb: () => void): void { /* see open() */ }
   setColliderDebug(): boolean | undefined { return undefined; }
   toggleColliderDebug(): boolean | undefined { return undefined; }
   getColliderStats(): { total: number; enabled: number; narrowTests: number; activePairs: number } { return Ion.colliders.getStats(); }
@@ -130,9 +136,62 @@ const dirtyListeners = {
   scene: [] as (() => void)[],
 };
 
+/**
+ * One collider wireframe layer for the whole page, shared by the "Show
+ * Colliders" overlay and the editor's Configure Colliders mode.
+ *
+ * It has to be one instance, and the reason is not tidiness. `ColliderVisuals`
+ * is reconciled once per frame from `IonGame.render()`, which ticks the *debug
+ * layer* — and `EditorColliders.update()` deliberately does not redraw,
+ * precisely so the same layer is not reconciled twice a frame.
+ *
+ * Constructing a second instance for the editor therefore produced a layer
+ * that nothing ever ticked: entering Configure Colliders set `editorVisible`
+ * on it, `update()` was never called, `createVisual()` never ran, and the
+ * collider nodes stayed childless. Colliders existed and detection ran — the
+ * stats panel proved it — but not one wireframe was ever drawn, so the mode
+ * looked completely dead.
+ *
+ * The reference game has always shared one instance between the two. This is
+ * the packaged equivalent of that, and lives at module scope because both
+ * entry points below need it and neither owns the other.
+ */
+/**
+ * Keyed by the registry it draws, not cached outright: `IonEngine` builds a
+ * fresh `ColliderManager` on every boot, so a dev hot reload replaces
+ * `Ion.colliders` wholesale. A layer held across that would keep reconciling
+ * against the retired registry and draw nothing for the live one — the same
+ * silent-blank failure this whole mechanism exists to fix, arriving one reload
+ * later instead of immediately.
+ */
+let sharedColliderVisuals: { manager: typeof Ion.colliders; visuals: ColliderVisuals } | undefined;
+function colliderVisuals(): ColliderVisuals {
+  if (!sharedColliderVisuals || sharedColliderVisuals.manager !== Ion.colliders) {
+    sharedColliderVisuals = { manager: Ion.colliders, visuals: new ColliderVisuals(Ion.colliders) };
+  }
+  return sharedColliderVisuals.visuals;
+}
+
+/**
+ * The particle gizmo layer, shared for the same reason.
+ *
+ * Only one thing draws it today (the editor), so a second instance would not
+ * currently break anything — but the two layers are a matched pair and the
+ * failure mode above is invisible until someone looks at the screen. Keeping
+ * both on the same rule means the next reader does not have to work out why
+ * they differ.
+ */
+let sharedParticleVisuals: { manager: typeof Ion.particles; visuals: ParticleVisuals } | undefined;
+function particleVisuals(): ParticleVisuals {
+  if (!sharedParticleVisuals || sharedParticleVisuals.manager !== Ion.particles) {
+    sharedParticleVisuals = { manager: Ion.particles, visuals: new ParticleVisuals(Ion.particles) };
+  }
+  return sharedParticleVisuals.visuals;
+}
+
 const host: EditorHost = {
   createDebugLayer() {
-    return new ColliderDebugLayer(new ColliderVisuals(Ion.colliders));
+    return new ColliderDebugLayer(colliderVisuals());
   },
   open(options: EditorOpenOptions): EditorSession | undefined {
     const hierarchyEl = document.getElementById("si-hierarchy");
@@ -155,20 +214,26 @@ const host: EditorHost = {
       environmentEl,
       initialTarget: options.initialTarget,
       colliderManager: Ion.colliders,
-      colliderVisuals: new ColliderVisuals(Ion.colliders),
+      colliderVisuals: colliderVisuals(),
       particleManager: Ion.particles,
-      particleVisuals: new ParticleVisuals(Ion.particles),
+      particleVisuals: particleVisuals(),
       environment: options.environment as SceneEnvironment,
       sceneBaseline: options.sceneBaseline as ConstructorParameters<typeof EditorRoot>[0]["sceneBaseline"],
       sceneOverridesOnLoad: options.sceneOverridesOnLoad,
       resolveTexture: options.resolveTexture,
-      onColliderDirty: () => dirtyListeners.collider.forEach((f) => f()),
-      onParticleDirty: () => dirtyListeners.particle.forEach((f) => f()),
-      onEnvironmentDirty: () => dirtyListeners.environment.forEach((f) => f()),
-      onSceneDirty: () => dirtyListeners.scene.forEach((f) => f()),
+      // Two audiences, both fanned out from one place. `options.onXDirty` is
+      // the game's own held callback — the Engine Room's Exit/Save button,
+      // registered at boot and handed over here because that is the only
+      // moment EditorRoot can accept it. `dirtyListeners` is the separate
+      // `onDirty()` export below, for a dev page that wants to watch without
+      // going through the game.
+      onColliderDirty: () => { options.onColliderDirty?.(); dirtyListeners.collider.forEach((f) => f()); },
+      onParticleDirty: () => { options.onParticleDirty?.(); dirtyListeners.particle.forEach((f) => f()); },
+      onEnvironmentDirty: () => { options.onEnvironmentDirty?.(); dirtyListeners.environment.forEach((f) => f()); },
+      onSceneDirty: () => { options.onSceneDirty?.(); dirtyListeners.scene.forEach((f) => f()); },
     });
 
-    return new Session(root, document.getElementById("er-viewhelper") as HTMLCanvasElement | null);
+    return new Session(root);
   },
 };
 
