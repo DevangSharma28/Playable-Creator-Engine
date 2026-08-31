@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { IonGame, type IonGameOptions } from "../ion-game";
 import { Entity } from "./entity";
+import { SceneNode } from "./node";
 import { bindActiveGame, type SimpleGameHost } from "./context";
 import { bindIonFacade } from "./ion";
 
@@ -26,7 +27,7 @@ export abstract class Game extends IonGame implements SimpleGameHost {
   /** Every live entity, in creation order. */
   private readonly entities: Entity[] = [];
   private pendingStart: Entity[] = [];
-  private cameraTarget: Entity | { x: number; y: number; z: number } | undefined;
+  private cameraTarget: SceneNode | { x: number; y: number; z: number } | undefined;
   private shake = { strength: 0, remaining: 0, total: 0 };
   private readonly shakeOffset = new THREE.Vector3();
 
@@ -104,7 +105,7 @@ export abstract class Game extends IonGame implements SimpleGameHost {
 
   protected getCameraFocus(): THREE.Vector3 | undefined {
     if (!this.cameraTarget) return undefined;
-    const p = this.cameraTarget instanceof Entity ? this.cameraTarget.object3D.position : this.cameraTarget;
+    const p = this.cameraTarget instanceof SceneNode ? this.cameraTarget.object3D.position : this.cameraTarget;
     return p instanceof THREE.Vector3 ? p : new THREE.Vector3(p.x, p.y, p.z);
   }
 
@@ -145,7 +146,7 @@ export abstract class Game extends IonGame implements SimpleGameHost {
   }
 
   /** @internal — ION.camera.follow */
-  setCameraTarget(target: Entity | { x: number; y: number; z: number } | undefined): void {
+  setCameraTarget(target: SceneNode | { x: number; y: number; z: number } | undefined): void {
     this.cameraTarget = target;
   }
 

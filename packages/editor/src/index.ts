@@ -22,7 +22,6 @@ import {
 import { EditorRoot } from "../../../src/engine/editor/EditorRoot";
 import { ColliderVisuals } from "../../../src/engine/editor/ColliderVisuals";
 import { ParticleVisuals } from "../../../src/engine/editor/ParticleVisuals";
-import { ViewHelperWidget } from "../../../src/engine/core/ViewHelperWidget";
 import type { SceneEnvironment } from "../../../src/engine/scene";
 import type { GizmoMode } from "../../../src/engine/core/SceneInspector";
 import type { ColliderShape } from "../../../src/engine/collision";
@@ -48,14 +47,17 @@ class ColliderDebugLayer implements DebugLayer {
 }
 
 class Session implements EditorSession {
-  private readonly viewHelper: ViewHelperWidget | undefined;
-  constructor(private readonly root: EditorRoot, viewHelperCanvas: HTMLCanvasElement | null) {
-    this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
-  }
+  constructor(private readonly root: EditorRoot) {}
   get camera(): THREE.PerspectiveCamera { return this.root.camera; }
   update(): void { this.root.update(); }
-  afterRender(activeCamera: THREE.Camera): void { this.viewHelper?.update(activeCamera); }
-  dispose(): void { this.viewHelper?.dispose(); this.root.dispose(); }
+  // No afterRender: the orientation gizmo used to be built here, which tied
+  // its lifetime to an editor session — so on the packaged path it drew only
+  // while the 3D editor was open and sat frozen the rest of the time. Its
+  // canvas belongs to the Engine Room panel, not to a session, so IonGame owns
+  // it now and draws it every frame. Two instances against one canvas would
+  // fight over the same WebGL context, hence removing it here rather than
+  // keeping both.
+  dispose(): void { this.root.dispose(); }
 
   setGizmoMode(mode: string): void { this.root.setGizmoMode(mode as GizmoMode); }
   onGizmoModeChange(cb: (mode: string) => void): void { this.root.addModeChangeListener(cb); }
@@ -73,7 +75,11 @@ class Session implements EditorSession {
   serializeColliders(): unknown[] { return this.root.serializeColliders(); }
   hasColliderChanges(): boolean { return this.root.hasColliderChanges; }
   markCollidersSaved(): void { this.root.markCollidersSaved(); }
-  onColliderDirty(_cb: () => void): void { /* wired at construction — see open() */ }
+  // Dirty notification is wired through EditorOpenOptions at construction —
+  // EditorRoot takes these as constructor options, and the subscriber (the
+  // Engine Room's Exit button) registers long before any session exists. See
+  // EditorOpenOptions in the runtime's editor-host.ts.
+  onColliderDirty(_cb: () => void): void { /* see open() */ }
   setColliderDebug(): boolean | undefined { return undefined; }
   toggleColliderDebug(): boolean | undefined { return undefined; }
   getColliderStats(): { total: number; enabled: number; narrowTests: number; activePairs: number } { return Ion.colliders.getStats(); }
@@ -215,13 +221,19 @@ const host: EditorHost = {
       sceneBaseline: options.sceneBaseline as ConstructorParameters<typeof EditorRoot>[0]["sceneBaseline"],
       sceneOverridesOnLoad: options.sceneOverridesOnLoad,
       resolveTexture: options.resolveTexture,
-      onColliderDirty: () => dirtyListeners.collider.forEach((f) => f()),
-      onParticleDirty: () => dirtyListeners.particle.forEach((f) => f()),
-      onEnvironmentDirty: () => dirtyListeners.environment.forEach((f) => f()),
-      onSceneDirty: () => dirtyListeners.scene.forEach((f) => f()),
+      // Two audiences, both fanned out from one place. `options.onXDirty` is
+      // the game's own held callback — the Engine Room's Exit/Save button,
+      // registered at boot and handed over here because that is the only
+      // moment EditorRoot can accept it. `dirtyListeners` is the separate
+      // `onDirty()` export below, for a dev page that wants to watch without
+      // going through the game.
+      onColliderDirty: () => { options.onColliderDirty?.(); dirtyListeners.collider.forEach((f) => f()); },
+      onParticleDirty: () => { options.onParticleDirty?.(); dirtyListeners.particle.forEach((f) => f()); },
+      onEnvironmentDirty: () => { options.onEnvironmentDirty?.(); dirtyListeners.environment.forEach((f) => f()); },
+      onSceneDirty: () => { options.onSceneDirty?.(); dirtyListeners.scene.forEach((f) => f()); },
     });
 
-    return new Session(root, document.getElementById("er-viewhelper") as HTMLCanvasElement | null);
+    return new Session(root);
   },
 };
 

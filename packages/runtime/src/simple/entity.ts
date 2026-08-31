@@ -1,29 +1,12 @@
 import * as THREE from "three";
 import { getActiveGame, type SimpleGameHost } from "./context";
-import { disposeObject3D } from "../../../../src/engine/core/disposeScene";
-import type { Collider } from "../../../../src/engine/collision";
+import { SceneNode } from "./node";
+import { Prop } from "./prop";
 
-/** Reused by distanceTo so a per-frame distance check allocates nothing. */
-const scratch = new THREE.Vector3();
-
-/**
- * Marks a mesh whose geometry and material this entity may free.
- *
- * `ION.scene.box()` and friends build a fresh geometry and material per call,
- * so an entity that owns one can release it. A model instantiated from the
- * asset manifest shares both with every other clone of that GLB and with the
- * loader's cache, so freeing it on one entity's destroy() would blank every
- * other copy in the scene. The flag is what tells the two apart.
- */
-export const ION_OWNED = "__ionOwned";
-
-/** A live x/y/z view. Reading and writing go straight through — no copies, no sync step. */
-export interface Vec3Like {
-  x: number;
-  y: number;
-  z: number;
-  set(x: number, y: number, z: number): void;
-}
+// Re-exported from their new home so every existing import path still resolves.
+// The transform vocabulary these belong to is shared with `Prop` now, so it
+// lives in node.ts — see SceneNode.
+export { ION_OWNED, type Vec3Like } from "./node";
 
 /**
  * Anything in your game world: a player, an enemy, a pickup, a door.
@@ -43,14 +26,8 @@ export interface Vec3Like {
  * }
  * ```
  */
-export class Entity {
-  /**
-   * The three.js object behind this entity.
-   *
-   * Not needed for ordinary work — position, rotation, scale and the move
-   * helpers cover that. It is here so an advanced case is possible rather
-   * than blocked.
-   */
+export class Entity extends SceneNode {
+  /** The three.js object behind this entity. See SceneNode — ordinary work never needs it. */
   readonly object3D: THREE.Object3D;
 
   private destroyed = false;
@@ -62,12 +39,8 @@ export class Entity {
    * silently skipped its own unregister.
    */
   private readonly owner: SimpleGameHost;
-  /** Built once. The degrees view below is read every frame by anything that spins. */
-  private rotationView: Vec3Like | undefined;
-  /** Colliders given to this entity by `ION.colliders.attach`, retired with it. */
-  private readonly bodies: Collider[] = [];
-
   constructor(name?: string) {
+    super();
     this.object3D = new THREE.Group();
     this.object3D.name = name ?? this.constructor.name;
     const game = getActiveGame();
@@ -90,101 +63,9 @@ export class Entity {
   /** Runs when the entity is destroyed. */
   stop(): void {}
 
-  /** Where the entity is. Writable: `this.position.y = 2`. */
-  get position(): Vec3Like {
-    return this.object3D.position;
-  }
-
-  /**
-   * Rotation in **degrees**, because that is what people think in.
-   *
-   * The view is built once and kept. It used to be rebuilt — a fresh object
-   * and seven closures — on every read, which for the ordinary
-   * `this.rotation.y += 90 * dt` in an update() meant an allocation per entity
-   * per frame, and a GC pause is exactly the kind of jank a playable cannot
-   * afford.
-   */
-  get rotation(): Vec3Like {
-    if (this.rotationView) return this.rotationView;
-    const e = this.object3D.rotation;
-    const d = THREE.MathUtils.radToDeg;
-    const r = THREE.MathUtils.degToRad;
-    this.rotationView = {
-      get x() { return d(e.x); },
-      set x(v: number) { e.x = r(v); },
-      get y() { return d(e.y); },
-      set y(v: number) { e.y = r(v); },
-      get z() { return d(e.z); },
-      set z(v: number) { e.z = r(v); },
-      set(x: number, y: number, z: number) { e.set(r(x), r(y), r(z)); },
-    } as Vec3Like;
-    return this.rotationView;
-  }
-
-  get scale(): Vec3Like {
-    return this.object3D.scale;
-  }
-
-  /** Show or hide the entity. It keeps updating either way. */
-  get visible(): boolean {
-    return this.object3D.visible;
-  }
-  set visible(v: boolean) {
-    this.object3D.visible = v;
-  }
-
-  /** Put the entity at an exact spot. */
-  moveTo(x: number, y: number, z: number): this {
-    this.object3D.position.set(x, y, z);
-    return this;
-  }
-
-  /** Shift the entity by an amount — the usual way to move something each frame. */
-  moveBy(x: number, y: number, z: number): this {
-    this.object3D.position.x += x;
-    this.object3D.position.y += y;
-    this.object3D.position.z += z;
-    return this;
-  }
-
-  /** Turn the entity by an amount, in degrees. */
-  rotateBy(x: number, y: number, z: number): this {
-    const r = THREE.MathUtils.degToRad;
-    this.object3D.rotation.x += r(x);
-    this.object3D.rotation.y += r(y);
-    this.object3D.rotation.z += r(z);
-    return this;
-  }
-
-  /** Face a point or another entity. */
-  lookAt(target: Entity | { x: number; y: number; z: number }): this {
-    const p = target instanceof Entity ? target.object3D.position : target;
-    this.object3D.lookAt(p.x, p.y, p.z);
-    return this;
-  }
-
-  /** Straight-line distance to another entity or point. */
-  distanceTo(target: Entity | { x: number; y: number; z: number }): number {
-    if (target instanceof Entity) return this.object3D.position.distanceTo(target.object3D.position);
-    // A shared scratch vector rather than a new one: distance checks are the
-    // most common thing in an update(), and this is called from inside loops.
-    return this.object3D.position.distanceTo(scratch.set(target.x, target.y, target.z));
-  }
-
-  /** Attach something so it moves with this entity. */
-  add(child: Entity | THREE.Object3D): this {
-    this.object3D.add(child instanceof Entity ? child.object3D : child);
-    return this;
-  }
-
-  /** @internal — `ION.colliders.attach` records the collider here so destroy() takes it back out of the world. */
-  trackCollider(collider: Collider): void {
-    this.bodies.push(collider);
-  }
-
   /** The entity's visual. Assign what `ION.scene.box()` and friends return. */
-  set shape(object: THREE.Object3D | undefined) {
-    if (object) this.object3D.add(object);
+  set shape(object: Prop | THREE.Object3D | undefined) {
+    if (object) this.object3D.add(object instanceof Prop ? object.object3D : object);
   }
 
   /**
@@ -206,16 +87,9 @@ export class Entity {
       // game-wide dispose.
       console.error(`ION: ${this.object3D.name}.stop() threw during destroy()`, err);
     }
-    this.object3D.removeFromParent();
-    this.object3D.traverse((node) => {
-      if (node.userData[ION_OWNED]) disposeObject3D(node);
-    });
+    // Unparent, free what ION built, retire attached colliders, stop any spin.
+    this.releaseSceneResources();
     this.object3D.clear();
-    // A collider outliving the thing it was attached to keeps overlapping at
-    // whatever transform it last saw, so a destroyed pickup would go on firing
-    // the zone it was standing in.
-    for (const body of this.bodies) body.destroy();
-    this.bodies.length = 0;
     this.owner.unregisterEntity(this);
   }
 

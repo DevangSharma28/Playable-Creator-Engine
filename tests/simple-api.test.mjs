@@ -123,12 +123,12 @@ test("Entity", async (t) => {
     // end-to-end GL count is covered in tests/runtime-lifecycle.test.mjs.
     const harness = await scene();
     const entity = new runtime.Entity("Coin");
-    const mesh = ION.scene.box({ size: 0.4 });
-    entity.shape = mesh;
+    const prop = ION.scene.box({ size: 0.4 });
+    entity.shape = prop;
     let geometryDisposed = 0;
     let materialDisposed = 0;
-    mesh.geometry.addEventListener("dispose", () => geometryDisposed++);
-    mesh.material.addEventListener("dispose", () => materialDisposed++);
+    prop.object3D.geometry.addEventListener("dispose", () => geometryDisposed++);
+    prop.object3D.material.addEventListener("dispose", () => materialDisposed++);
     entity.destroy();
     assert.equal(geometryDisposed, 1);
     assert.equal(materialDisposed, 1);
@@ -178,18 +178,22 @@ test("Entity", async (t) => {
 test("ION.scene", async (t) => {
   await t.test("primitives land in the world with the requested size and place", async () => {
     const harness = await scene();
+    // Every ION.scene.* call hands back a Prop, not a THREE.Mesh. The geometry
+    // assertions go through `.object3D`, which is the documented escape hatch
+    // and is exercised here precisely because it must keep working.
     const box = ION.scene.box({ width: 2, height: 3, depth: 4, x: 1, y: 2, z: 3, name: "Crate" });
     assert.equal(box.name, "Crate");
     assert.deepEqual([box.position.x, box.position.y, box.position.z], [1, 2, 3]);
-    assert.equal(box.geometry.parameters.width, 2);
-    assert.equal(box.geometry.parameters.height, 3);
-    assert.equal(box.geometry.parameters.depth, 4);
-    assert.equal(ION.scene.sphere({ radius: 5 }).geometry.parameters.radius, 5);
-    assert.equal(ION.scene.cylinder({ radius: 2, height: 7 }).geometry.parameters.height, 7);
+    assert.equal(box.object3D.geometry.parameters.width, 2);
+    assert.equal(box.object3D.geometry.parameters.height, 3);
+    assert.equal(box.object3D.geometry.parameters.depth, 4);
+    assert.equal(ION.scene.sphere({ radius: 5 }).object3D.geometry.parameters.radius, 5);
+    assert.equal(ION.scene.cylinder({ radius: 2, height: 7 }).object3D.geometry.parameters.height, 7);
     const ground = ION.scene.ground({ size: 50 });
-    assert.equal(ground.geometry.parameters.width, 50);
-    assert.ok(Math.abs(ground.rotation.x + Math.PI / 2) < 1e-9, "ground is lying down");
-    assert.equal(ground.receiveShadow, true);
+    assert.equal(ground.object3D.geometry.parameters.width, 50);
+    // Degrees, not radians — the whole point of the handle.
+    assert.equal(Math.round(ground.rotation.x), -90, "ground is lying down");
+    assert.equal(ground.object3D.receiveShadow, true);
     harness.dispose();
   });
 
@@ -203,10 +207,12 @@ test("ION.scene", async (t) => {
 
   await t.test("colours accept names, hex strings, short hex and numbers", async () => {
     const harness = await scene();
-    assert.equal(ION.scene.box({ color: "orange" }).material.color.getHex(), 0xe8961e);
-    assert.equal(ION.scene.box({ color: "#123456" }).material.color.getHex(), 0x123456);
-    assert.equal(ION.scene.box({ color: "#abc" }).material.color.getHex(), 0xaabbcc);
-    assert.equal(ION.scene.box({ color: 0x00ff00 }).material.color.getHex(), 0x00ff00);
+    // Read back through the handle's own `color`, which is a #rrggbb string —
+    // no reaching into `.material.color` and no three.js Color type.
+    assert.equal(ION.scene.box({ color: "orange" }).color, "#e8961e");
+    assert.equal(ION.scene.box({ color: "#123456" }).color, "#123456");
+    assert.equal(ION.scene.box({ color: "#abc" }).color, "#aabbcc");
+    assert.equal(ION.scene.box({ color: 0x00ff00 }).color, "#00ff00");
     harness.dispose();
   });
 
@@ -218,8 +224,8 @@ test("ION.scene", async (t) => {
     const realWarn = console.warn;
     console.warn = (...args) => warnings.push(args.join(" "));
     try {
-      const mesh = ION.scene.box({ color: "deepblue" });
-      assert.equal(mesh.material.color.getHex(), 0xcccccc, "fell back rather than guessed");
+      const prop = ION.scene.box({ color: "deepblue" });
+      assert.equal(prop.color, "#cccccc", "fell back rather than guessed");
     } finally {
       console.warn = realWarn;
     }
@@ -238,7 +244,176 @@ test("ION.scene", async (t) => {
     const box = ION.scene.box({ name: "Temp" });
     ION.scene.remove(box);
     assert.equal(ION.scene.find("Temp"), undefined);
-    assert.equal(box.parent, null);
+    assert.equal(box.object3D.parent, null);
+    assert.equal(box.isDestroyed, false, "remove() detaches; destroy() is what frees");
+    harness.dispose();
+  });
+});
+
+test("Prop — the handle ION.scene.* hands back", async (t) => {
+  await t.test("rotation is degrees, not radians", async () => {
+    // The single most common thing a playable does to a prop is turn it, and
+    // the raw three.js `rotation` is radians — which is where the starter
+    // template's old `coin.rotation.y += dt * 2` came from, a line nobody
+    // could read the units of.
+    const harness = await scene();
+    const box = ION.scene.box();
+    box.rotation.y = 90;
+    assert.ok(Math.abs(box.object3D.rotation.y - Math.PI / 2) < 1e-9, "90 degrees is a quarter turn");
+    box.rotateBy(0, 90, 0);
+    assert.equal(Math.round(box.rotation.y), 180);
+    harness.dispose();
+  });
+
+  await t.test("colour and opacity are readable and writable by name", async () => {
+    const harness = await scene();
+    const box = ION.scene.box({ color: "orange" });
+    box.color = "blue";
+    assert.equal(box.color, "#3b82f6");
+    box.opacity = 0.5;
+    assert.equal(box.opacity, 0.5);
+    // A three.js material with opacity < 1 and transparent false renders fully
+    // opaque. Setting both together is the point of the setter existing.
+    assert.equal(box.object3D.material.transparent, true, "transparent must follow opacity");
+    box.opacity = 1;
+    assert.equal(box.object3D.material.transparent, false);
+    harness.dispose();
+  });
+
+  await t.test("colour reaches every mesh of a loaded model, not just the first", async () => {
+    const harness = await scene();
+    const box = ION.scene.box();
+    // A child mesh with its own material, the shape a GLB actually has.
+    const child = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial({ color: 0x000000 }));
+    box.object3D.add(child);
+    box.color = "red";
+    assert.equal(child.material.color.getHex(), 0xe5484d, "the whole subtree is recoloured");
+    harness.dispose();
+  });
+
+  await t.test("find() returns the same handle every time for the same object", async () => {
+    // Otherwise `a === b` is false for one object, and a spin() started through
+    // one handle is invisible through the next.
+    const harness = await scene();
+    const made = ION.scene.box({ name: "Coin" });
+    const found = ION.scene.find("Coin");
+    assert.equal(found, made, "the handle is the object's identity, not a wrapper per lookup");
+    assert.equal(ION.scene.find("Coin"), found);
+    harness.dispose();
+  });
+
+  await t.test("findAll() reaches a whole row of same-named objects", async () => {
+    const harness = await scene();
+    ION.scene.box({ name: "Coin" });
+    ION.scene.box({ name: "Coin" });
+    ION.scene.box({ name: "Other" });
+    assert.equal(ION.scene.findAll("Coin").length, 2);
+    assert.equal(ION.scene.findAll("Nope").length, 0);
+    harness.dispose();
+  });
+
+  await t.test("spin() turns on game time and composes with other rotation", async () => {
+    const harness = await scene();
+    const box = ION.scene.box();
+    box.spin(90); // a quarter turn per second
+    harness.frames(30, 16.7); // ~0.5s
+    const afterHalfSecond = box.rotation.y;
+    assert.ok(afterHalfSecond > 20 && afterHalfSecond < 70, `expected roughly 45 degrees, got ${afterHalfSecond}`);
+
+    // A delta, not an absolute angle — so a spin does not stamp over other
+    // rotation, and the wrap at the end of each cycle is seamless.
+    box.rotateBy(0, 100, 0);
+    harness.frames(2, 16.7);
+    assert.ok(box.rotation.y > afterHalfSecond + 90, "manual rotation survives the next spin tick");
+    harness.dispose();
+  });
+
+  await t.test("spin(0) and stopSpin() both stop it where it stands", async () => {
+    const harness = await scene();
+    const box = ION.scene.box();
+    box.spin(360);
+    harness.frames(10, 16.7);
+    box.stopSpin();
+    const settled = box.rotation.y;
+    harness.frames(20, 16.7);
+    assert.equal(box.rotation.y, settled, "stopSpin leaves it where it got to");
+
+    box.spin(360);
+    harness.frames(5, 16.7);
+    box.spin(0);
+    const settledAgain = box.rotation.y;
+    harness.frames(20, 16.7);
+    assert.equal(box.rotation.y, settledAgain, "spin(0) is the same as stopping");
+    harness.dispose();
+  });
+
+  await t.test("a spin freezes with gameplay rather than running behind an open editor", async () => {
+    // It is driven by the game clock, like every other ION timer, so an editor
+    // session does not come back to a world that kept turning without it.
+    const harness = await scene();
+    const box = ION.scene.box();
+    box.spin(360);
+    harness.frames(5, 16.7);
+    const before = box.rotation.y;
+    harness.env.window.__setUIEditorPaused(true);
+    harness.frames(30, 16.7);
+    assert.equal(box.rotation.y, before, "paused means paused");
+    harness.env.window.__setUIEditorPaused(false);
+    harness.frames(5, 16.7);
+    assert.ok(box.rotation.y > before, "and it resumes");
+    harness.dispose();
+  });
+
+  await t.test("destroy() unparents, frees the GPU resources, and stops the spin", async () => {
+    const harness = await scene();
+    const box = ION.scene.box({ name: "Doomed" });
+    box.spin(180);
+    let geometryDisposed = 0;
+    box.object3D.geometry.addEventListener("dispose", () => geometryDisposed++);
+
+    box.destroy();
+    assert.equal(geometryDisposed, 1, "removeFromParent alone would have leaked this");
+    assert.equal(box.object3D.parent, null);
+    assert.equal(ION.scene.find("Doomed"), undefined);
+    assert.equal(box.isDestroyed, true);
+    // Safe twice, and the retired spin must not keep writing to a dead object.
+    assert.doesNotThrow(() => box.destroy());
+    assert.doesNotThrow(() => harness.frames(5, 16.7));
+    harness.dispose();
+  });
+
+  await t.test("a model's shared geometry is left alone", async () => {
+    // Clones from the asset manifest share geometry with the loader's cache and
+    // with every other clone, so freeing one would blank the rest.
+    const harness = await scene(undefined, { assets: new SeededLoader() });
+    const box = ION.scene.box();
+    const shared = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshStandardMaterial());
+    box.object3D.add(shared); // no ION_OWNED marker — not ours to free
+    let disposed = 0;
+    shared.geometry.addEventListener("dispose", () => disposed++);
+    box.destroy();
+    assert.equal(disposed, 0);
+    harness.dispose();
+  });
+
+  await t.test("Entity and Prop share one vocabulary", async () => {
+    // The reason SceneNode exists: whichever kind of handle you are holding,
+    // the same call means the same thing and takes the same units.
+    const harness = await bootGame({
+      game: ({ Game, Entity }) => class G extends Game {
+        start() { this.thing = new Entity("Thing"); }
+      },
+    });
+    const prop = ION.scene.box();
+    const entity = harness.game.thing;
+    for (const method of ["moveTo", "moveBy", "rotateBy", "lookAt", "distanceTo", "add", "spin", "stopSpin"]) {
+      assert.equal(typeof prop[method], "function", `Prop.${method}`);
+      assert.equal(typeof entity[method], "function", `Entity.${method}`);
+    }
+    prop.moveTo(0, 0, 3);
+    entity.moveTo(0, 0, 0);
+    assert.equal(entity.distanceTo(prop), 3, "and they measure against each other");
+    assert.ok(prop instanceof runtime.SceneNode && entity instanceof runtime.SceneNode);
     harness.dispose();
   });
 });

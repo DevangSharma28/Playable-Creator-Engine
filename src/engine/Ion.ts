@@ -3,6 +3,7 @@ import type { EventBus, EventHandle, Listener } from "./core/EventBus";
 import type { ColliderManager } from "./collision/ColliderManager";
 import type { ParticleManager } from "./particles/ParticleManager";
 import { Cta, type CtaNetwork } from "./Cta";
+import { Telemetry, type TelemetryProps } from "./Telemetry";
 
 /** Re-exported so `import { Ion, Easing } from "./Ion"` is one line, one path — Scheduler.ts already re-exports it from tween.js for the same reason, this just closes the loop for callers going through the facade instead of Scheduler directly. `Easing.Quadratic.Out`, `Easing.Back.Out`, `Easing.Elastic.Out`, ... */
 export { Easing } from "./core/Scheduler";
@@ -134,11 +135,27 @@ export const Ion = {
 
   /**
    * Fire the install/click-through through whichever ad-network API is
-   * actually present. Stateless — the only thing here that works before
-   * boot, since it just inspects `window`. See engine/Cta.ts.
+   * actually present. Stateless — it just inspects `window` — so this and
+   * `track` below are the two entries here that work before boot. See
+   * engine/Cta.ts.
    */
   cta(storeUrl: string): CtaNetwork {
     return Cta.open(storeUrl);
+  },
+
+  /**
+   * Report an analytics event to whatever the host page installed (see
+   * engine/Telemetry.ts). Stateless, so — like `cta` above — this is one of
+   * the two things here that works before boot and after teardown, and it
+   * never throws even if the host's sink does.
+   *
+   *   Ion.track("level-complete", { seconds: Ion.time, coins: collected });
+   *
+   * Distinct from `emit` directly below, which is in-process wiring between
+   * this playable's own systems and goes nowhere near the host.
+   */
+  track(event: string, props?: TelemetryProps): void {
+    Telemetry.track(event, props);
   },
 
   /** Subscribe to `event`. Payload type is inferred from `fn`, or pass it explicitly: `Ion.on<{total: number}>("coin-collected", fn)`. See core/EventBus.ts for why there's no global event-name registry. */

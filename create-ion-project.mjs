@@ -181,29 +181,30 @@ export default class MyGame extends Game {
     this.player = new Player();
     ION.camera.follow(this.player);
 
-    // Something to collect.
+    // Something to collect. Every ION.scene.* call hands back a Prop: a handle
+    // that speaks degrees, takes a colour by name, and knows how to free
+    // itself. spin() keeps turning on its own, so update() has nothing to do.
     for (let i = 0; i < 5; i++) {
-      ION.scene.box({
-        color: "yellow",
-        size: 0.6,
-        // Kept close: a portrait playable sees roughly ±4 units across at
-        // the default camera distance, so a wider spread just puts them
-        // off-screen at startup.
-        x: ION.random(-3.5, 3.5),
-        y: 0.3,
-        z: ION.random(-6, 2),
-        name: \`Coin\${i}\`,
-      });
+      ION.scene
+        .box({
+          color: "yellow",
+          size: 0.6,
+          // Kept close: a portrait playable sees roughly ±4 units across at
+          // the default camera distance, so a wider spread just puts them
+          // off-screen at startup.
+          x: ION.random(-3.5, 3.5),
+          y: 0.3,
+          z: ION.random(-6, 2),
+          name: \`Coin\${i}\`,
+        })
+        .spin(120); // degrees per second
     }
   }
 
   /** Runs every frame. dt is seconds since the last one. */
-  update(dt: number) {
-    // Spin every coin. Entities update themselves — this is for loose props.
-    for (let i = 0; i < 5; i++) {
-      const coin = ION.scene.find(\`Coin\${i}\`);
-      if (coin) coin.rotation.y += dt * 2;
-    }
+  update(_dt: number) {
+    // Nothing to do yet — the coins spin themselves. Put your game's
+    // per-frame logic here.
   }
 ${template === "playable-ad" ? `
   /** Runs once everything the editors authored has loaded. */

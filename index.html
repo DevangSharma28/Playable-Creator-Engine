@@ -4059,7 +4059,19 @@
         const el = document.getElementById("engine-room-version");
         const commit = info.commit || "no-git";
         el.innerHTML = "v" + info.version + " · " + commit + (info.dirty ? '<span class="dirty">*</span>' : "");
-        el.title = info.branch ? "Branch " + info.branch + (info.dirty ? " — uncommitted local changes" : "") : "";
+        // The project root is in the tooltip because an origin is not an
+        // identity: this panel finds its API by port, and a port can be held
+        // by another project's dev server — or by an orphaned one whose
+        // folder has since been deleted, which keeps answering exactly as
+        // confidently as a live one. That happened, and the only visible
+        // symptom was a version this checkout had never had next to a commit
+        // hash that was not an object in its repository. Showing which root
+        // answered turns that from a mystery into a glance.
+        el.title = [
+          info.root ? "Project " + info.root : null,
+          info.branch ? "Branch " + info.branch + (info.dirty ? " — uncommitted local changes" : "") : null,
+          info.projectVersion && info.projectVersion !== info.version ? "Project version " + info.projectVersion : null,
+        ].filter(Boolean).join("\n");
       })
       .catch(() => {
         // dev-build-api isn't running (npm run dev wasn't used to start this, or it's still booting) — nothing to read version/commit from.

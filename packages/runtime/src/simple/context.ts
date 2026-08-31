@@ -1,4 +1,5 @@
 import type { Entity } from "./entity";
+import type { SceneNode } from "./node";
 
 /**
  * The running game, for the high-level API to reach.
@@ -31,7 +32,7 @@ export interface SimpleGameHost {
   readonly stick: import("../../../../src/engine/core/DynamicJoystick").DynamicJoystick | undefined;
   readonly storeUrl: string;
 
-  setCameraTarget(target: Entity | { x: number; y: number; z: number } | undefined): void;
+  setCameraTarget(target: SceneNode | { x: number; y: number; z: number } | undefined): void;
   shakeCamera(strength: number, seconds: number): void;
   playSound(path: string, opts?: { volume?: number; loop?: boolean; music?: boolean }): void;
   stopMusic(): void;

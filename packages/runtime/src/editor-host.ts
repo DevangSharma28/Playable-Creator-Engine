@@ -34,6 +34,28 @@ export interface EditorOpenOptions {
   initialTarget?: THREE.Vector3;
   /** Resolves a texture path through the project's own AssetLoader — the editor never loads assets itself. */
   resolveTexture?: (path: string) => THREE.Texture | undefined;
+
+  /**
+   * "Something in this dock now has unsaved work."
+   *
+   * Passed in at open time rather than subscribed to on the returned session,
+   * and that is not a style choice — `EditorRoot` takes these as constructor
+   * options, so a session that is already built has no way to accept one.
+   *
+   * The subscriber is the Engine Room's Exit/Save button, and `IonEngine`
+   * registers it **once, immediately after `Game.create()` resolves** — long
+   * before any editor session exists. So the game has to hold the callback
+   * and hand it over here when a session opens. It previously forwarded
+   * straight to `this.editorSession?.onColliderDirty(cb)`, which was
+   * `undefined` at that moment, so every one of these was silently dropped
+   * for the life of the process: the panel never learned there was anything
+   * to save, and a re-parent or a gizmo move in the Hierarchy was lost on
+   * exit with no warning.
+   */
+  onColliderDirty?: () => void;
+  onParticleDirty?: () => void;
+  onEnvironmentDirty?: () => void;
+  onSceneDirty?: () => void;
 }
 
 /**
@@ -46,8 +68,16 @@ export interface EditorOpenOptions {
 export interface EditorSession {
   readonly camera: THREE.PerspectiveCamera;
   update(): void;
-  /** Anything that must draw after the main render — the view-helper widget. */
-  afterRender(activeCamera: THREE.Camera): void;
+  /**
+   * Anything the *session* must draw after the main render.
+   *
+   * Optional, and currently unused: the view-helper widget used to live here,
+   * which meant the Engine Room's orientation gizmo only drew while the 3D
+   * editor was open and sat frozen the rest of the time. It is owned by the
+   * game now (see IonGame), because its canvas belongs to the panel, not to a
+   * session.
+   */
+  afterRender?(activeCamera: THREE.Camera): void;
   dispose(): void;
 
   setGizmoMode(mode: string): void;

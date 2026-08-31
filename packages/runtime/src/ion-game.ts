@@ -15,6 +15,8 @@ import { getEditorHost, type DebugLayer, type EditorSession } from "./editor-hos
 import { InputManager } from "../../../src/engine/core/InputManager";
 import { DynamicJoystick } from "../../../src/engine/core/DynamicJoystick";
 import { disposeScene } from "../../../src/engine/core/disposeScene";
+import { ViewportWatcher } from "../../../src/engine/core/ViewportWatcher";
+import { ViewHelperWidget } from "../../../src/engine/core/ViewHelperWidget";
 
 /**
  * The two overlay divs every ION page provides, fetched with an error that
@@ -165,6 +167,8 @@ export abstract class IonGame {
   /** The "Show Colliders" overlay. Exists only when a dev entry registered an editor host — undefined, and never drawn, in production. */
   private readonly debugLayer: DebugLayer | undefined;
   private readonly canvas!: HTMLCanvasElement;
+  /** Every "the viewport changed" signal — window, rotation, visualViewport, MRAID — de-duplicated into one resize callback. Disposed with the game. */
+  private readonly viewport!: ViewportWatcher;
   private manualSize = false;
   private lastManualWidth = 0;
   private lastManualHeight = 0;
@@ -174,6 +178,56 @@ export abstract class IonGame {
   private sceneBaseline: SceneSnapshot | undefined;
   /** The records scene.json held at boot — kept so a session that touches nothing still re-writes them. */
   private sceneOverridesOnLoad: readonly { objectPath: string }[] = [];
+
+  /**
+   * The Engine Room's own callbacks, held here rather than on the editor
+   * session.
+   *
+   * `IonEngine.installDevHooks` registers every one of these **once**, right
+   * after `Game.create()` resolves — which is long before anyone opens the 3D
+   * editor. Each `onX()` below used to forward straight to
+   * `this.editorSession?.onX(cb)`, and `editorSession` is `undefined` at that
+   * moment, so the callback was dropped on the floor and never re-offered.
+   *
+   * The visible damage was not subtle:
+   *
+   *  - **Saving.** `onColliderDirty` / `onSceneDirty` / `onEnvironmentDirty` /
+   *    `onParticleDirty` are how the Exit button finds out there is unsaved
+   *    work. None of them ever fired, so the panel reported a clean session
+   *    while holding real edits, and exiting discarded them silently.
+   *  - **Parenting.** Re-parenting in the Hierarchy is a scene-graph change
+   *    like any other, flagged through `onSceneDirty` — so it was lost by the
+   *    same mechanism, which is what "parenting doesn't stick" actually was.
+   *  - **Toolbar state.** The gizmo-mode and grid/helpers/snap/space buttons
+   *    never learned about the keyboard shortcuts (W/E/R/Q, F/G/H/X/C) that
+   *    change the same state, so their highlights drifted out of sync.
+   *
+   * The reference `src/game/Game.ts` has always stored these and re-applied
+   * them when a session opens. This is the packaged equivalent.
+   */
+  private gizmoModeChangeCallback: ((mode: string) => void) | undefined;
+  private inspectorStateChangeCallback: ((state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void) | undefined;
+  private historyChangeCallback: (() => void) | undefined;
+  private colliderDirtyCallback: (() => void) | undefined;
+  private particleDirtyCallback: (() => void) | undefined;
+  private environmentDirtyCallback: (() => void) | undefined;
+  private sceneDirtyCallback: (() => void) | undefined;
+
+  /**
+   * The Engine Room's orientation gizmo (the little axes triad).
+   *
+   * Owned by the game, for the whole of its life, and drawn from `render()`
+   * every frame — not by the editor session. It lived on the session before,
+   * which meant it drew only while the 3D editor was open and sat frozen at
+   * whatever it last rendered the rest of the time; the canvas belongs to the
+   * panel, not to a session, so its lifetime should match the panel's.
+   *
+   * DEV-gated at the construction site, exactly like the reference game does
+   * it: the class is only ever constructed behind `import.meta.env.DEV`, so
+   * Rollup drops it from a production bundle. `scripts/verify-bundle.mjs`
+   * asserts `ViewHelper` is absent from `dist/index.html`.
+   */
+  private readonly viewHelper: ViewHelperWidget | undefined;
 
   /**
    * Public because `IonGame.create()` constructs `new this(options)` and
@@ -235,8 +289,18 @@ export abstract class IonGame {
       : undefined;
 
     this.debugLayer = getEditorHost()?.createDebugLayer();
+    // Only when the dev page actually provides the canvas — a production page
+    // has no #er-viewhelper, so this stays undefined and nothing below it runs.
+    const viewHelperCanvas = import.meta.env.DEV ? (document.getElementById("er-viewhelper") as HTMLCanvasElement | null) : null;
+    this.viewHelper = viewHelperCanvas ? new ViewHelperWidget(viewHelperCanvas) : undefined;
     this.inspectables.set(options.bindingName ?? "Game", this);
-    window.addEventListener("resize", this.onWindowResize);
+    // Covers plain window resizes *and* the three things a plain `resize`
+    // listener misses in an ad-network WebView: MRAID's own ready/sizeChange
+    // signals (a host that never dispatches a native resize once it finishes
+    // laying out — which is how a playable ends up rendering at 0×0 for a
+    // whole session), rotation reporting stale dimensions, and visualViewport
+    // moving without the window resizing. See ViewportWatcher.
+    this.viewport = new ViewportWatcher(this.onWindowResize);
     // three.js already prevents the default and re-initialises itself on
     // restore. What it does not do is tell anyone — so a phone that dropped
     // the context under memory pressure showed a frozen playable with nothing
@@ -365,7 +429,10 @@ export abstract class IonGame {
     Ion.particles.setCamera(activeCamera);
     Ion.particles.render();
     this.renderer.render(this.scene, activeCamera);
-    this.editorSession?.afterRender(activeCamera);
+    this.editorSession?.afterRender?.(activeCamera);
+    // Unconditional, and after the draw: the orientation gizmo tracks whichever
+    // camera actually rendered this frame, gameplay's or the editor's.
+    this.viewHelper?.update(activeCamera);
   }
 
   /**
@@ -381,7 +448,11 @@ export abstract class IonGame {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
-    window.removeEventListener("resize", this.onWindowResize);
+    this.viewport.dispose();
+    // Owns a second WebGLRenderer (its own tiny canvas/context). Browsers cap
+    // live WebGL contexts, so leaking one per dev hot reload eventually starts
+    // force-losing them.
+    this.viewHelper?.dispose();
     this.editorSession?.dispose();
     this.editorSession = undefined;
     this.debugLayer?.dispose();
@@ -488,8 +559,21 @@ export abstract class IonGame {
             return undefined;
           }
         },
+        // Handed over at open time because EditorRoot takes them as
+        // constructor options — see EditorOpenOptions' own doc comment for
+        // why they cannot be subscribed to afterwards, and what broke while
+        // they were being dropped.
+        onColliderDirty: () => this.colliderDirtyCallback?.(),
+        onParticleDirty: () => this.particleDirtyCallback?.(),
+        onEnvironmentDirty: () => this.environmentDirtyCallback?.(),
+        onSceneDirty: () => this.sceneDirtyCallback?.(),
       });
       if (!this.editorSession) this.mainLayer.style.display = "";
+      // The three listener-style callbacks EditorRoot *does* accept after
+      // construction. Replayed on every open, not just the first: a session is
+      // destroyed on Exit and rebuilt on the next entry, and the Engine Room
+      // registered its callbacks once, at boot.
+      else this.applyEditorListeners(this.editorSession);
     } else {
       this.editorSession?.dispose();
       this.editorSession = undefined;
@@ -503,6 +587,13 @@ export abstract class IonGame {
   /** The open editor session, or undefined. Escape hatch for tooling; gameplay should not need it. */
   get editor(): EditorSession | undefined {
     return this.editorSession;
+  }
+
+  /** Pushes whatever the Engine Room registered at boot onto a freshly opened session. */
+  private applyEditorListeners(session: EditorSession): void {
+    if (this.gizmoModeChangeCallback) session.onGizmoModeChange(this.gizmoModeChangeCallback);
+    if (this.inspectorStateChangeCallback) session.onInspectorStateChange(this.inspectorStateChangeCallback);
+    if (this.historyChangeCallback) session.onEditorHistoryChange(this.historyChangeCallback);
   }
 
   /** IonEngine's own `endcardUI` getter reads this name. */
@@ -521,8 +612,10 @@ export abstract class IonGame {
   // -----------------------------------------------------------------------
 
   setGizmoMode(mode: string): void { this.editorSession?.setGizmoMode(mode); }
-  onGizmoModeChange(cb: (mode: string) => void): void { this.editorSession?.onGizmoModeChange(cb); }
-  onInspectorStateChange(cb: (state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void): void { this.editorSession?.onInspectorStateChange(cb); }
+  // Stored, then applied — see the callback fields above for why forwarding
+  // straight to `editorSession` dropped every one of these.
+  onGizmoModeChange(cb: (mode: string) => void): void { this.gizmoModeChangeCallback = cb; this.editorSession?.onGizmoModeChange(cb); }
+  onInspectorStateChange(cb: (state: { grid: boolean; helpers: boolean; snap: boolean; space: string }) => void): void { this.inspectorStateChangeCallback = cb; this.editorSession?.onInspectorStateChange(cb); }
   toggleGrid(): boolean | undefined { return this.editorSession?.toggleGrid(); }
   toggleHelpers(): boolean | undefined { return this.editorSession?.toggleHelpers(); }
   toggleSnap(): boolean | undefined { return this.editorSession?.toggleSnap(); }
@@ -535,10 +628,23 @@ export abstract class IonGame {
   serializeColliders(): unknown[] | undefined { return this.editorSession?.serializeColliders(); }
   hasColliderChanges(): boolean { return this.editorSession?.hasColliderChanges() ?? false; }
   markCollidersSaved(): void { this.editorSession?.markCollidersSaved(); }
-  onColliderDirty(cb: () => void): void { this.editorSession?.onColliderDirty(cb); }
+  onColliderDirty(cb: () => void): void { this.colliderDirtyCallback = cb; }
   setColliderDebug(visible: boolean): boolean | undefined { return this.debugLayer?.setVisible(visible); }
   toggleColliderDebug(): boolean | undefined { return this.debugLayer?.toggle(); }
-  getColliderStats(): { total: number; enabled: number; narrowTests: number; activePairs: number } | undefined { return this.editorSession?.getColliderStats(); }
+  /**
+   * The collider registry's own counters — **not** the editor session's.
+   *
+   * This forwarded to `editorSession?.getColliderStats()`, so with no editor
+   * open the Engine Room's collider readout showed `0 total / 0 enabled /
+   * 0 narrow tests` no matter how many colliders were registered and
+   * overlapping. Which reads, correctly enough, as "the collision system is
+   * not working" — while detection was in fact running fine and firing
+   * enter/exit exactly as it should.
+   *
+   * The registry is owned by `IonEngine` and always present, so nothing about
+   * this question needs an editor.
+   */
+  getColliderStats(): { total: number; enabled: number; narrowTests: number; activePairs: number } { return Ion.colliders.getStats(); }
   setParticleMode(active: boolean): boolean | undefined { return this.editorSession?.setParticleMode(active); }
   createParticleSystem(presetKey?: string): void { this.editorSession?.createParticleSystem(presetKey); }
   addParticleEmitter(): void { this.editorSession?.addParticleEmitter(); }
@@ -552,24 +658,26 @@ export abstract class IonGame {
   isParticlePreviewPlaying(): boolean { return this.editorSession?.isParticlePreviewPlaying() ?? false; }
   toggleParticleGizmo(kind: string): boolean | undefined { return this.editorSession?.toggleParticleGizmo(kind); }
   getParticlePresets(): { key: string; label: string; description: string }[] { return this.editorSession?.getParticlePresets() ?? []; }
-  setParticleQuality(quality: string): void { this.editorSession?.setParticleQuality(quality); }
+  /** A runtime quality tier, not an editor operation — the Engine Room's Low/Medium/High buttons work with no editor open. */
+  setParticleQuality(quality: string): void { Ion.particles.setQuality(quality as "high" | "medium" | "low"); }
   serializeParticles(): unknown[] | undefined { return this.editorSession?.serializeParticles(); }
   hasParticleChanges(): boolean { return this.editorSession?.hasParticleChanges() ?? false; }
   markParticlesSaved(): void { this.editorSession?.markParticlesSaved(); }
-  onParticleDirty(cb: () => void): void { this.editorSession?.onParticleDirty(cb); }
-  getParticleStats(): unknown | undefined { return this.editorSession?.getParticleStats(); }
+  onParticleDirty(cb: () => void): void { this.particleDirtyCallback = cb; }
+  /** The particle registry's own counters, for the same reason getColliderStats reads the live registry. */
+  getParticleStats(): unknown { return Ion.particles.getStats(); }
   serializeEnvironment(): unknown | undefined { return this.editorSession?.serializeEnvironment(); }
   hasEnvironmentChanges(): boolean { return this.editorSession?.hasEnvironmentChanges() ?? false; }
   markEnvironmentSaved(): void { this.editorSession?.markEnvironmentSaved(); }
-  onEnvironmentDirty(cb: () => void): void { this.editorSession?.onEnvironmentDirty(cb); }
+  onEnvironmentDirty(cb: () => void): void { this.environmentDirtyCallback = cb; }
   serializeScene(): unknown[] | undefined { return this.editorSession?.serializeScene(); }
   hasSceneChanges(): boolean { return this.editorSession?.hasSceneChanges() ?? false; }
   markSceneSaved(): void { this.editorSession?.markSceneSaved(); }
-  onSceneDirty(cb: () => void): void { this.editorSession?.onSceneDirty(cb); }
+  onSceneDirty(cb: () => void): void { this.sceneDirtyCallback = cb; }
   editorUndo(): boolean { return this.editorSession?.editorUndo() ?? false; }
   editorRedo(): boolean { return this.editorSession?.editorRedo() ?? false; }
   getEditorHistory(): unknown | undefined { return this.editorSession?.getEditorHistory(); }
-  onEditorHistoryChange(cb: () => void): void { this.editorSession?.onEditorHistoryChange(cb); }
+  onEditorHistoryChange(cb: () => void): void { this.historyChangeCallback = cb; this.editorSession?.onEditorHistoryChange(cb); }
   getEditorViewportInfo(): unknown | undefined { return this.editorSession?.getEditorViewportInfo(); }
   requestObjectPick(declaredType: string | undefined, callbacks: unknown): boolean { return this.editorSession?.requestObjectPick(declaredType, callbacks) ?? false; }
   cancelObjectPick(): void { this.editorSession?.cancelObjectPick(); }

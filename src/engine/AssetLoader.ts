@@ -44,6 +44,41 @@ export class AssetLoader {
   private glbs = new Map<string, GLTF>();
   private audioBuffers = new Map<string, AudioBuffer>();
 
+  /**
+   * Loads that have been started but haven't resolved yet, keyed
+   * `kind:path`.
+   *
+   * The resolved caches above only de-duplicate *sequential* requests: the
+   * second call is a cache hit because the first one already finished. Two
+   * calls that overlap both miss, and both start a real fetch — so a
+   * manifest that lists one texture twice (an easy thing to do once a
+   * project has several entity modules contributing entries), or a
+   * `loadGlb()` from an entity constructor for a model `preload()` is
+   * fetching at that same moment, downloaded and GPU-uploaded the asset
+   * twice and left one copy unreachable, i.e. leaked for the life of the
+   * loader. Handing back the in-flight promise makes "one path, one load"
+   * true regardless of call timing.
+   */
+  private readonly pending = new Map<string, Promise<unknown>>();
+
+  /**
+   * Runs `start` unless a load for this key is already in flight, in which
+   * case the existing promise is returned instead.
+   *
+   * The entry is dropped on settle, not on success — a failed load must be
+   * retryable, and leaving a rejected promise cached would make every
+   * later attempt fail with the original error rather than trying again.
+   */
+  private once<T>(key: string, start: () => Promise<T>): Promise<T> {
+    const inFlight = this.pending.get(key) as Promise<T> | undefined;
+    if (inFlight) return inFlight;
+    const promise = start().finally(() => {
+      this.pending.delete(key);
+    });
+    this.pending.set(key, promise);
+    return promise;
+  }
+
   /** Loads every entry in the manifest, reporting (loadedCount, totalCount) as it goes. */
   async preload(
     manifest: AssetEntry[],
@@ -75,7 +110,7 @@ export class AssetLoader {
     const cached = this.textures.get(path);
     if (cached) return Promise.resolve(cached);
 
-    return new Promise((resolve, reject) => {
+    return this.once(`texture:${path}`, () => new Promise<THREE.Texture>((resolve, reject) => {
       this.textureLoader.load(
         path,
         (tex) => {
@@ -86,14 +121,14 @@ export class AssetLoader {
         undefined,
         (err) => reject(new Error(`Failed to load texture "${path}": ${err}`))
       );
-    });
+    }));
   }
 
   loadGlb(path: string): Promise<GLTF> {
     const cached = this.glbs.get(path);
     if (cached) return Promise.resolve(cached);
 
-    return new Promise((resolve, reject) => {
+    return this.once(`glb:${path}`, () => new Promise<GLTF>((resolve, reject) => {
       this.gltfLoader.load(
         path,
         (gltf) => {
@@ -103,14 +138,14 @@ export class AssetLoader {
         undefined,
         (err) => reject(new Error(`Failed to load model "${path}": ${err}`))
       );
-    });
+    }));
   }
 
   loadAudio(path: string): Promise<AudioBuffer> {
     const cached = this.audioBuffers.get(path);
     if (cached) return Promise.resolve(cached);
 
-    return new Promise((resolve, reject) => {
+    return this.once(`audio:${path}`, () => new Promise<AudioBuffer>((resolve, reject) => {
       this.audioLoader.load(
         path,
         (buffer) => {
@@ -120,7 +155,7 @@ export class AssetLoader {
         undefined,
         (err) => reject(new Error(`Failed to load audio "${path}": ${err}`))
       );
-    });
+    }));
   }
 
   /** Sync getters — only safe to call after preload() has resolved for that path. */
@@ -175,6 +210,10 @@ export class AssetLoader {
    * dispose() is the caller.
    */
   dispose(): void {
+    // Anything still downloading resolves into a cache this call is about
+    // to empty; forgetting it here just means a late arrival can't be
+    // handed to a caller that asks after teardown.
+    this.pending.clear();
     for (const texture of this.textures.values()) texture.dispose();
     this.textures.clear();
     // The clones handed out by instantiateGlb() share this geometry, so this

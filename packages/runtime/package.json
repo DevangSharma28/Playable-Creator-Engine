@@ -1,6 +1,6 @@
 {
   "name": "@ion-engine/runtime",
-  "version": "4.5.0",
+  "version": "5.0.0",
   "description": "ION Engine runtime — the public API a game is written against. Ships in the production build.",
   "type": "module",
   "license": "SEE LICENSE IN LICENSE.md",

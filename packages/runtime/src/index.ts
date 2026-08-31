@@ -20,7 +20,7 @@
 // events without any engine wiring. Everything below this block is the
 // advanced surface — still supported, still exported, but not what a game
 // needs to reach for first.
-export { Game, Entity, ION, SimpleZone } from "./simple";
+export { Game, Entity, Prop, SceneNode, ION, SimpleZone } from "./simple";
 export type { Vec3Like, ShapeOptions, ZoneOptions } from "./simple";
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
@@ -116,6 +116,16 @@ export type { CtaNetwork } from "../../../src/engine/Cta";
 export { MraidAdapter } from "../../../src/engine/MraidAdapter";
 export { MindworksAdapter } from "../../../src/engine/MindworksAdapter";
 export { setCrashRecoveryUrl } from "../../../src/engine/core/CrashOverlay";
+// The analytics seam. `Ion.track()` is the call a game makes; this is what a
+// host page (or a project's own entry point) installs to receive them.
+export { Telemetry } from "../../../src/engine/Telemetry";
+export type { TelemetrySink, TelemetryProps } from "../../../src/engine/Telemetry";
+
+// ── Viewport ───────────────────────────────────────────────────────────────
+// Already wired inside IonGame; exported for a project that drives its own
+// renderer sizing and wants the same rotation/MRAID/visualViewport coverage.
+export { ViewportWatcher } from "../../../src/engine/core/ViewportWatcher";
+export type { ViewportWatcherOptions } from "../../../src/engine/core/ViewportWatcher";
 
 // ── Editor host (used by the dev entry only; inert in production) ───────────
 export { registerEditorHost, getEditorHost, isEditorAvailable } from "./editor-host";

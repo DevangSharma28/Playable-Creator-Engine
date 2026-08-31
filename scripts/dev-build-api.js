@@ -25,14 +25,27 @@ const PORT = Number(process.env.ION_API_PORT ?? 8001);
  * CLI passes the real project root explicitly and the fallback stays put.
  */
 const ROOT = process.env.ION_PROJECT_ROOT ? path.resolve(process.env.ION_PROJECT_ROOT) : path.join(__dirname, "..");
-/** Best-effort: a generated project always has one, but a malformed or absent package.json shouldn't stop the API booting. */
-const PACKAGE_VERSION = (() => {
+/**
+ * A package.json's `version`, read fresh off disk.
+ *
+ * Deliberately `readFileSync` + `JSON.parse`, never `require`: `require`
+ * memoises the parsed module for the life of the process, so even moving
+ * these reads out of module scope would keep handing back the value the
+ * first call saw.
+ *
+ * Best-effort — a generated project always has a package.json, but a
+ * malformed or absent one shouldn't stop the API booting or take a request
+ * down.
+ */
+function readVersion(file) {
   try {
-    return require(path.join(ROOT, "package.json")).version ?? "0.0.0";
+    return JSON.parse(fs.readFileSync(file, "utf8")).version;
   } catch {
-    return "0.0.0";
+    return undefined;
   }
-})();
+}
+
+const projectVersion = () => readVersion(path.join(ROOT, "package.json")) ?? "0.0.0";
 
 /**
  * The ION engine version, which is not the same thing as the project version.
@@ -42,14 +55,18 @@ const PACKAGE_VERSION = (() => {
  * customer's own 0.1.0 says nothing about that. Read from the installed
  * @ion-engine/runtime; in ION's own checkout there is no such package, and
  * the repo version *is* the engine version.
+ *
+ * **Resolved per request, not once at boot.** Both of these used to be
+ * module-level constants, which made the version pill silently lie in the
+ * one situation it exists for: upgrade the engine (or, with a `file:`
+ * dependency, rebuild the packages) while `ion dev` is running, and the
+ * panel kept reporting the version the server happened to start with —
+ * indefinitely, and with no hint it was stale. Three long-lived dev servers
+ * against the same project reported three different versions, none of them
+ * what was on disk. Reading two small JSON files on a request that fires
+ * once per panel load costs nothing worth measuring.
  */
-const ION_VERSION = (() => {
-  try {
-    return require(path.join(ROOT, "node_modules", "@ion-engine", "runtime", "package.json")).version;
-  } catch {
-    return PACKAGE_VERSION;
-  }
-})();
+const ionVersion = () => readVersion(path.join(ROOT, "node_modules", "@ion-engine", "runtime", "package.json")) ?? projectVersion();
 const UI_DIR = path.join(ROOT, "src", "game", "ui"); // src/ is split into engine/ (reusable) and game/ (this playable ad) — mainLayout.json/endcardLayout.json live under the latter
 const LAYOUTS_DIR = path.join(UI_DIR, "layouts");
 const ACTIVE_FILES = { main: "mainLayout.json", endcard: "endcardLayout.json" };
@@ -955,7 +972,13 @@ const server = http.createServer((req, res) => {
   if (req.method === "GET" && req.url === "/version") {
     res.setHeader("Content-Type", "application/json");
     res.writeHead(200);
-    res.end(JSON.stringify({ version: ION_VERSION, projectVersion: PACKAGE_VERSION, ...readGitInfo() }));
+    // `root` is here so the readout can say *which project answered*. The
+    // panel reaches this API by origin alone, and an origin is not an
+    // identity: an orphaned dev API from a deleted project holds its port
+    // just as well as a live one, and answers just as confidently. That
+    // exact case produced a version pill showing a version this checkout
+    // never had and a commit that is not an object in its repository.
+    res.end(JSON.stringify({ version: ionVersion(), projectVersion: projectVersion(), root: ROOT, ...readGitInfo() }));
     return;
   }
 

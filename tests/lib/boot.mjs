@@ -15,10 +15,13 @@ import { loadRuntime } from "./runtime-bundle.mjs";
 /**
  * @param {object} options
  * @param {(runtime: object) => Function} options.game  Returns the Game subclass to boot, given the runtime module.
+ * @param {boolean} [options.dev]  Boot the dev build (`import.meta.env.DEV` true) instead of the production one.
  */
-export async function bootGame({ game, data, manifest, assets, engineOptions, dom } = {}) {
+export async function bootGame({ game, data, manifest, assets, engineOptions, dom, dev = false } = {}) {
   const env = installDom(dom);
-  const runtime = await loadRuntime();
+  // `dev: true` boots the build a dev preview actually runs — see
+  // loadRuntime's own note on why that is a different bundle, not a flag.
+  const runtime = await loadRuntime({ dev });
   let instance;
   let createError;
 
