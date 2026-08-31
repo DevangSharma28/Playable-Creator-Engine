@@ -29,7 +29,7 @@ import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
-import { launchChrome } from "./verify-bundle.mjs";
+import { launchChrome, waitForExit, removeDirRetrying } from "./verify-bundle.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -216,10 +216,17 @@ async function main() {
       step(7, `after a full reload it is still at x=${reloaded.x.toFixed(3)}, visible=${reloaded.visible}`);
     }
   } finally {
-    browser.close();
+    // browser.close() already waits out Chrome's own teardown race (see
+    // verify-bundle.mjs). vite/api get the same treatment before their
+    // directory is removed — both still have file handles open under
+    // `project` (dist/, .build-cache/, IONEngine/) for a moment after
+    // SIGTERM, and rmSync raced them exactly like it raced Chrome's profile
+    // dir. See removeDirRetrying's own doc comment.
+    await browser.close();
     vite.kill("SIGTERM");
     api.kill("SIGTERM");
-    fs.rmSync(project, { recursive: true, force: true });
+    await Promise.all([waitForExit(vite), waitForExit(api)]);
+    await removeDirRetrying(project);
   }
 
   if (problems.length) {
