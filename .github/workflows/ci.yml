@@ -45,6 +45,17 @@ jobs:
       # one anyone tested against.
       - run: npm ci
 
+      # tests/project-generator.test.mjs runs the real create-ion-project.mjs,
+      # which auto-detects a local packages/ checkout and shells out to it —
+      # and that checkout has to actually be *built* (packages/*/dist/), the
+      # same as any client project's node_modules would be. packages/*/dist is
+      # git-ignored on purpose (it's a build artifact, see .gitignore), so a
+      # fresh checkout has none and every one of those tests fails with "The
+      # ION packages ... haven't been built." This step is what the `build`
+      # job's own end-to-end step already does; it has to happen here too,
+      # before `npm test`, not only there.
+      - run: node scripts/build-packages.mjs
+
       # typecheck + the whole node:test suite: runtime lifecycle, the simple
       # API, serialization round-trips, undo/redo, the project generator, the
       # dev API, the compatibility gate, particles, shaders, geometry parity,
