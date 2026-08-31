@@ -64,7 +64,11 @@ function cloneProject() {
   spawnSync("tar", ["--exclude=node_modules", "--exclude=.git", "--exclude=dist", "--exclude=.build-cache", "-cf", "-", "."], { cwd: ROOT, stdio: ["ignore", "pipe", "ignore"], maxBuffer: 512 * 1024 * 1024 });
   const tar = spawnSync("bash", ["-c", `tar --exclude=node_modules --exclude=.git --exclude=dist --exclude=.build-cache -cf - . | (cd ${JSON.stringify(dir)} && tar xf -)`], { cwd: ROOT, stdio: "ignore" });
   if (tar.status !== 0) throw new Error("could not copy the project");
-  fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"));
+  // "junction" (Node docs: ignored outside Windows) rather than a plain
+  // symlink — a directory symlink needs SeCreateSymbolicLinkPrivilege
+  // (admin, or Developer Mode enabled) on Windows and EPERMs without it; a
+  // junction needs neither and points at the same real node_modules.
+  fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"), "junction");
   return dir;
 }
 
@@ -81,7 +85,7 @@ async function main() {
   console.log(`    server   ${origin}\n`);
 
   spawnSync(process.execPath, [path.join(project, "scripts", "sync-assets.js")], { cwd: project, stdio: "ignore" });
-  const vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: project, stdio: "ignore" });
+  const vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: project, stdio: "ignore", shell: process.platform === "win32" });
   const api = spawn(process.execPath, [path.join(project, "scripts", "dev-build-api.js")], {
     cwd: project,
     stdio: "ignore",
@@ -217,7 +221,14 @@ async function main() {
     }
   } finally {
     browser.close();
-    vite.kill("SIGTERM");
+    // vite runs through a shell on Windows to resolve npx.cmd (see
+    // startDevServer), so vite.pid is the shell's, not vite's — killing it
+    // leaves the real vite process (and its locks on `project`) running,
+    // and the rmSync below then fails with EPERM. taskkill /t kills the
+    // whole tree instead. api has no shell in between, so a plain kill()
+    // reaches it directly on every platform.
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(vite.pid), "/t", "/f"]);
+    else vite.kill("SIGTERM");
     api.kill("SIGTERM");
     fs.rmSync(project, { recursive: true, force: true });
   }

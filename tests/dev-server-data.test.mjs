@@ -44,7 +44,11 @@ function cloneProject() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ion-vite-"));
   const tar = spawnSync("bash", ["-c", `tar --exclude=node_modules --exclude=.git --exclude=dist --exclude=.build-cache -cf - . | (cd ${JSON.stringify(dir)} && tar xf -)`], { cwd: ROOT, stdio: "ignore" });
   if (tar.status !== 0) throw new Error("could not copy the project");
-  fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"));
+  // "junction" (Node docs: ignored outside Windows) rather than a plain
+  // symlink — a directory symlink needs SeCreateSymbolicLinkPrivilege
+  // (admin, or Developer Mode enabled) on Windows and EPERMs without it; a
+  // junction needs neither and points at the same real node_modules.
+  fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules"), "junction");
   return dir;
 }
 
@@ -56,7 +60,7 @@ test.before(async () => {
   project = cloneProject();
   const port = await freePort();
   origin = `http://127.0.0.1:${port}`;
-  vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: project, stdio: "ignore" });
+  vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], { cwd: project, stdio: "ignore", shell: process.platform === "win32" });
   const deadline = Date.now() + 60_000;
   for (;;) {
     try { if ((await fetch(origin)).ok) return; } catch { /* starting */ }
@@ -66,7 +70,15 @@ test.before(async () => {
 });
 
 test.after(() => {
-  vite?.kill("SIGTERM");
+  // vite was spawned through a shell on Windows (see cloneProject's caller
+  // above) to resolve npx.cmd at all — but that means its own .pid is the
+  // shell's, not vite's, so vite.kill() only kills the shell and leaves the
+  // real vite process (and its file watchers/locks on `project`) running.
+  // taskkill /t kills that whole process tree instead.
+  if (vite) {
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(vite.pid), "/t", "/f"]);
+    else vite.kill("SIGTERM");
+  }
   if (project) fs.rmSync(project, { recursive: true, force: true });
 });
 

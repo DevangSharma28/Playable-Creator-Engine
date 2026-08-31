@@ -8,7 +8,6 @@
     "ion": "./bin/ion.mjs"
   },
   "exports": {
-    ".": "./lib/index.mjs",
     "./config": "./lib/config.mjs",
     "./package.json": "./package.json"
   },

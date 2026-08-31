@@ -122,7 +122,7 @@ applySceneBindings({}, "Game", sceneBindingsRaw, scene);
   }, null, 2));
 
   await t.test("loading them compiles", () => {
-    const result = spawnSync("npx", ["tsc", "-p", path.join(dir, "tsconfig.json")], { cwd: ROOT, encoding: "utf8" });
+    const result = spawnSync("npx", ["tsc", "-p", path.join(dir, "tsconfig.json")], { cwd: ROOT, encoding: "utf8", shell: process.platform === "win32" });
     const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
     assert.equal(result.status, 0, `a populated data file no longer typechecks:\n${output}`);
     assert.ok(!output.includes("TS2352"), `TS2352 is back — a loader is asking for a tuple a .json import cannot provide:\n${output}`);

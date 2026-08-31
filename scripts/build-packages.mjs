@@ -158,7 +158,7 @@ function emitTypes(pkg) {
     // tsc reports diagnostics on *stdout*, not stderr. Discarding it meant a
     // type-emit failure printed "FAILED" followed by a blank line, with the
     // actual error nowhere to be seen.
-    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"] }
+    { cwd: ROOT, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" }
   );
   // tsc mirrors the rootDir tree, so the real entry lands nested. Re-point a
   // flat index.d.ts at it rather than trying to flatten the tree — the nested

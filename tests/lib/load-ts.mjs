@@ -23,7 +23,7 @@ function rewriteRelativeSpecifiers(code) {
 }
 
 function emit(tsPath, outDir, seen) {
-  const name = tsPath.split("/").pop().replace(/\.ts$/, "");
+  const name = tsPath.split(/[\\/]/).pop().replace(/\.ts$/, "");
   if (seen.has(name)) return;
   seen.add(name);
   const { code } = esbuild.transformSync(readFileSync(tsPath, "utf8"), { loader: "ts", format: "esm", target: "es2020" });
@@ -41,6 +41,6 @@ function emit(tsPath, outDir, seen) {
 export async function loadTsModule(tsPath) {
   const dir = mkdtempSync(join(tmpdir(), "ion-ts-"));
   emit(tsPath, dir, new Set());
-  const entry = join(dir, `${tsPath.split("/").pop().replace(/\.ts$/, "")}.mjs`);
+  const entry = join(dir, `${tsPath.split(/[\\/]/).pop().replace(/\.ts$/, "")}.mjs`);
   return import(pathToFileURL(entry).href);
 }

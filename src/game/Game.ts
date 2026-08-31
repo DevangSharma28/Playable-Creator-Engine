@@ -158,8 +158,14 @@ export class Game {
   /** Dev-only: class-name -> live instance lookup for the Engine Room's Control Desk panel (see IonEngine.installDevHooks' __getInspectable hook). Explicit, hand-picked entries — same reasoning as Bindings.ts's explicit field wiring, not a reflective registry that auto-discovers every object the game happens to construct. */
   private readonly inspectables: Map<string, object>;
 
-  private constructor(canvas: HTMLCanvasElement, model: THREE.Group, clips: THREE.AnimationClip[], sceneModel: THREE.Group, musicBuffer: AudioBuffer) {
-    this.assetLoader = new AssetLoader();
+  private constructor(canvas: HTMLCanvasElement, assetLoader: AssetLoader, model: THREE.Group, clips: THREE.AnimationClip[], sceneModel: THREE.Group, musicBuffer: AudioBuffer) {
+    // The loader create() already preloaded the manifest with — not a fresh
+    // one. A fresh loader here has never resolved anything, so every
+    // getTexture() call below (environment background, particle textures)
+    // threw, was swallowed by its own try/catch, and silently fell back —
+    // the first texture anyone authors in environment.json or particles.json
+    // would render as the default/fallback instead of what was authored.
+    this.assetLoader = assetLoader;
 
     this.scene = new THREE.Scene();
 
@@ -422,7 +428,7 @@ export class Game {
     const sceneModel = loader.getGlb(libGlb.sceneGLB).scene;
     const musicBuffer = loader.getAudio(libAudio.MainMusic);
 
-    const game = new Game(canvas, model, clips, sceneModel, musicBuffer);
+    const game = new Game(canvas, loader, model, clips, sceneModel, musicBuffer);
     // Every asset is loaded and the game is fully constructed — Mindworks'
     // own loading overlay waits for this before it'll consider the
     // playable loaded at all (see MindworksAdapter.gameReady's own doc
@@ -970,6 +976,11 @@ export class Game {
     // a generated environment map — both would otherwise accumulate one
     // full set per in-place hot reload.
     this.sceneEnv.dispose();
+    // Releases the GPU textures/geometries this instance's manifest preload
+    // uploaded (the player model, the Cinema_World environment, every
+    // preloaded texture) — see AssetLoader.dispose()'s own doc comment for
+    // why skipping this leaks GPU memory once per hot reload.
+    this.assetLoader.dispose();
     this.renderer.dispose();
   }
 

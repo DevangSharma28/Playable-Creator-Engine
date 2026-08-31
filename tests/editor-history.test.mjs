@@ -12,13 +12,18 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
+import { fileURLToPath } from "node:url";
 import { installDom } from "./lib/dom-env.mjs";
 
 const dom = installDom();
 test.after(() => dom.restore());
 
+// fileURLToPath, not the URL's own .pathname: a file:// URL's pathname on
+// Windows is "/D:/Self/...", which readFileSync then resolves against the
+// process's current drive, producing "D:\D:\Self\..." — fileURLToPath is
+// the platform-correct way to turn a file URL back into an fs path.
 const { EditorHistory, propertyCommand } = await import("./lib/load-ts.mjs").then(({ loadTsModule }) =>
-  loadTsModule(new URL("../src/engine/editor/EditorHistory.ts", import.meta.url).pathname)
+  loadTsModule(fileURLToPath(new URL("../src/engine/editor/EditorHistory.ts", import.meta.url)))
 );
 
 /** A command that just moves a number, with a record of what was called. */

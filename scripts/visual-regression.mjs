@@ -111,6 +111,7 @@ async function startDevServer({ port, apiPort }) {
   const vite = spawn("npx", ["vite", "--port", String(port), "--strictPort", "--host", "127.0.0.1"], {
     cwd: ROOT,
     stdio: "ignore",
+    shell: process.platform === "win32",
   });
   const api = spawn(process.execPath, [path.join(ROOT, "scripts", "dev-build-api.js")], {
     cwd: ROOT,
@@ -124,7 +125,13 @@ async function startDevServer({ port, apiPort }) {
     apiOrigin: `http://127.0.0.1:${apiPort}`,
     mirror,
     stop() {
-      vite.kill("SIGTERM");
+      // Same reasoning as verify-scene-persistence.mjs's matching teardown:
+      // vite runs through a shell on Windows (to resolve npx.cmd), so its
+      // .pid is the shell's, not vite's — plain kill() leaves the real
+      // process (and its locks on `mirror`) running and the rmSync below
+      // fails with EPERM. taskkill /t kills the whole tree instead.
+      if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(vite.pid), "/t", "/f"]);
+      else vite.kill("SIGTERM");
       api.kill("SIGTERM");
       fs.rmSync(mirror, { recursive: true, force: true });
     },

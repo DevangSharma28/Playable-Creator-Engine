@@ -1112,7 +1112,11 @@ const server = http.createServer((req, res) => {
         writeJsonAtomic(targetPath, data);
         res.setHeader("Content-Type", "application/json");
         res.writeHead(200);
-        res.end(JSON.stringify({ ok: true, path: path.relative(ROOT, targetPath) }));
+        // Forward slashes always, regardless of host OS — this is a JSON API
+        // contract read by the browser client (and asserted on by tests), not
+        // a path for this process's own fs calls, so it must not vary with
+        // path.sep the way path.relative()'s raw output does on Windows.
+        res.end(JSON.stringify({ ok: true, path: path.relative(ROOT, targetPath).split(path.sep).join("/") }));
       })
       .catch((err) => {
         res.setHeader("Content-Type", "application/json");

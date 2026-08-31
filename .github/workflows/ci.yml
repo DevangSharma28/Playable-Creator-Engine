@@ -45,6 +45,13 @@ jobs:
       # one anyone tested against.
       - run: npm ci
 
+      # tests/project-generator.test.mjs runs create-ion-project.mjs against
+      # packages/*/dist — gitignored, not part of the checkout — so without
+      # this the generator suite fails on every run with "the ION packages
+      # ... haven't been built", not because of anything the change under
+      # test did.
+      - run: node scripts/build-packages.mjs
+
       # typecheck + the whole node:test suite: runtime lifecycle, the simple
       # API, serialization round-trips, undo/redo, the project generator, the
       # dev API, the compatibility gate, particles, shaders, geometry parity,

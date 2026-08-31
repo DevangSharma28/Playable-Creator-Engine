@@ -32,6 +32,13 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
+# python3's stdout encoding otherwise follows the OS locale — on Windows
+# that's typically cp1252, which can't encode the ✓/✖/⚠ characters the
+# heredocs below print, and crashes with UnicodeEncodeError after dist/
+# is already built (silently dropping build-report.json and the
+# submittability gate instead of failing loudly at the top of the build).
+export PYTHONIOENCODING=utf-8
+
 # Bash's own auto-incrementing elapsed-seconds counter — read again near the
 # end for the Build Report's "how long did this take" figure. Reset to 0
 # here (not relied on being 0 already) so a re-sourced/nested invocation
