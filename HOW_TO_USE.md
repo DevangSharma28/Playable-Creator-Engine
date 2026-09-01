@@ -144,7 +144,440 @@ constructor(scene: THREE.Scene) {
 
 `Game.ts` also re-applies every saved assignment automatically — but only *after* every constructor has already finished running. A constructor that reads the field immediately needs to call this itself first.
 
-## 8. Write gameplay code with Ion
+## 8. Code, explained like you're new
+
+Everything above is buttons to click. This is the typing.
+
+It's written plainly on purpose — if a sentence needs a computer-science degree, it's a bad sentence. **You never import `three`.** ION hides all of that.
+
+> **The big idea.** Think of a box of LEGO. ION is the table, the lights, the camera and the bricks. You don't build the table. You just decide what to make and where to put it.
+
+### Three words, and you know the whole thing
+
+| Word | What it is |
+|---|---|
+| **Game** | The *whole* thing. You get exactly one. It says what exists and what happens. |
+| **Prop** | A thing that just sits there — a coin, a wall, a tree. It has no brain. Every `ION.scene.*` call hands you one. |
+| **Entity** | A thing with a brain — a player, an enemy. It gets to think every frame. |
+
+A Prop and an Entity understand the *same words*. `moveBy` means the same thing on both, in the same units. So if a coin later needs a brain, you change one line, not the file.
+
+### 8.1 The whole game
+
+Four blanks to fill in. That's the file.
+
+```ts
+import { Game, ION } from "ion";
+
+export default class MyGame extends Game {
+
+  start() {
+    // Runs ONCE, at the very beginning. Build your world here.
+  }
+
+  update(dt: number) {
+    // Runs EVERY frame — about 60 times a second.
+  }
+
+  ready() {
+    // Runs once more, after the editor's saved files have loaded.
+  }
+
+  stop() {
+    // Runs at the very end. Tidy up here if you need to.
+  }
+}
+```
+
+> **What is `dt`?** It's how many seconds passed since the last frame — a small number, usually about `0.016` (one sixtieth of a second).
+>
+> Always multiply movement by `dt`. A fast phone draws more frames than a slow one, so `x += 5` would move **twice as fast on a better phone**. `x += 5 * dt` moves 5 units per second on every phone. Same game for everyone.
+
+### 8.2 Making things
+
+Five ways to put something in the world. All of them hand you back a **Prop**.
+
+```ts
+// A box.
+const crate = ION.scene.box({ color: "brown", size: 1, x: 0, y: 0.5, z: 0 });
+
+// A ball.
+const ball = ION.scene.sphere({ color: "red", radius: 0.5, y: 1 });
+
+// A tube.
+const pillar = ION.scene.cylinder({ color: "grey", radius: 0.3, height: 3 });
+
+// The floor. It's already lying down flat — you don't have to turn it.
+ION.scene.ground({ color: "green", size: 40 });
+
+// A model you made in Blender. It must be in src/game/assets.ts first, or ION
+// tells you so — by name — instead of silently drawing nothing.
+const hero = ION.scene.model("./assets/models/hero.glb", { y: 0, size: 1 });
+```
+
+Every option is optional. Leave one out and you get a sensible default.
+
+| Option | What it does |
+|---|---|
+| `color` | A name — `"red"`, `"orange"`, `"blue"` — or `"#e8961e"`, or `0xe8961e`. Typo it and ION says so instead of guessing a wrong colour. |
+| `size` | How big, all round. `1` is one metre-ish. |
+| `width`, `height`, `depth` | Use these instead of `size` when it isn't a cube. |
+| `radius` | For balls and tubes. |
+| `x`, `y`, `z` | Where to put it. **x** = left/right, **y** = up/down, **z** = towards you / away. |
+| `opacity` | `1` is solid, `0` is invisible, `0.5` is see-through. |
+| `metal`, `rough` | How shiny. `metal: 1` is a mirror, `rough: 1` is chalk. |
+| `name` | A label, so you can find it again later by that name. |
+
+### 8.3 What you can do to a thing
+
+This is the same list for a Prop **and** for an Entity. Learn it once.
+
+```ts
+const coin = ION.scene.box({ color: "yellow", size: 0.5, name: "Coin" });
+
+// ── Where it is ─────────────────────────────────────────
+coin.moveTo(2, 1, 0);          // go exactly there
+coin.moveBy(0, 0.1, 0);        // go a little bit up from wherever you are
+coin.position.y = 3;           // or just set one number
+
+// ── Which way it's facing (DEGREES, like a protractor) ──
+coin.rotation.y = 90;          // a quarter turn
+coin.rotateBy(0, 45, 0);       // turn 45 more
+coin.spin(120);                // keep turning, 120 degrees every second, forever
+coin.stopSpin();               // stop where it is
+
+// ── How it looks ────────────────────────────────────────
+coin.color = "gold";
+coin.opacity = 0.5;
+coin.size = 2;                 // twice as big
+coin.visible = false;          // hide it (it's still there)
+
+// ── Talking about other things ──────────────────────────
+coin.lookAt(player);                    // turn to face something
+const far = coin.distanceTo(player);    // how far apart, in a straight line
+coin.add(sparkle);                      // stick something on, so it moves along too
+
+// ── Getting rid of it ───────────────────────────────────
+coin.destroy();                // gone, and its memory is handed back
+```
+
+> **Two traps ION takes away from you.**
+>
+> **Turning is in degrees.** A half circle is `180`. Raw Three.js uses *radians*, where half a circle is `3.14159…`. You never have to think about that here.
+>
+> **Always `destroy()`, never just hide.** If you make and throw away coins all game long without `destroy()`, the phone's memory fills up and the ad gets slower and slower. `destroy()` hands the memory back.
+
+### 8.4 Finding something again
+
+If you gave it a `name`, you can ask for it back — including things you placed in the **3D editor** rather than in code.
+
+```ts
+const coin  = ION.scene.find("Coin");     // one thing, or undefined
+const coins = ION.scene.findAll("Coin");  // every thing with that name, as a list
+
+if (coin) coin.spin(90);
+for (const c of coins) c.destroy();
+```
+
+Asking twice gives you back the *same* handle, not a copy. So `find("Coin") === find("Coin")` is true, and a `spin()` you started through one is visible through the other.
+
+### 8.5 A thing with a brain — Entity
+
+A Prop just sits there. When something needs to *decide* things every frame, make it an Entity.
+
+```ts
+import { Entity, ION } from "ion";
+
+export class Player extends Entity {
+  speed = 6;
+
+  start() {
+    // Runs once, when it's created. Give it something to look like.
+    this.shape = ION.scene.box({ color: "orange", size: 1, y: 0.5 });
+  }
+
+  update(dt: number) {
+    // Runs every frame, all by itself. You never call this.
+    const move = ION.input.axis;
+    this.moveBy(move.x * this.speed * dt, 0, move.y * this.speed * dt);
+  }
+
+  stop() {
+    // Runs when it's destroyed.
+  }
+}
+```
+
+Using it is one line. Making it puts it in the world — there is no "add" step to forget:
+
+```ts
+start() {
+  this.player = new Player();
+  ION.camera.follow(this.player);
+}
+```
+
+### 8.6 The player's finger
+
+```ts
+// The joystick, and WASD / arrow keys, both at once. You don't choose.
+// x and y are between -1 and 1. Both are 0 when nobody is touching.
+const move = ION.input.axis;
+
+// Is a key held down right now?
+if (ION.input.isDown(" ")) jump();          // " " is the space bar
+
+// A quick tap anywhere.
+ION.input.onTap((point) => console.log("tapped at", point.x, point.y));
+
+// A flick.
+ION.input.onSwipe((direction) => {
+  if (direction === "up") jump();           // "up" | "down" | "left" | "right"
+});
+```
+
+Most playable ads are played with a thumb. `ION.input.axis` already works for touch **and** keyboard, so you can test at a desk without a touchscreen and change nothing later.
+
+### 8.7 The camera
+
+```ts
+ION.camera.follow(this.player);   // glide along behind them
+ION.camera.stopFollow();          // stay put from now on
+ION.camera.shake(0.4, 0.3);       // how hard, for how many seconds — a hit or a crash
+
+ION.camera.position.y = 12;       // move it yourself
+const zoom = ION.camera.fov;      // how wide it sees, in degrees
+```
+
+How far back and how smoothly it follows are set in the **Environment** dock in the 3D editor, not in code — so you can nudge the shot while the game runs.
+
+### 8.8 Bumping into things
+
+A **zone** is an invisible box. When something walks into it, you get told.
+
+```ts
+// 1. Give the player a body, so there is something to notice.
+ION.colliders.attach(this.player, { size: 1 });
+
+// 2. Put an invisible box somewhere.
+const goal = ION.colliders.zone({ name: "Goal", size: 3, x: 5, y: 0.5, z: 0 });
+
+// 3. Say what happens.
+goal.onEnter(() => ION.ui.showEndcard());
+goal.onExit(() => console.log("left the goal"));
+
+goal.enabled = false;             // switch it off without deleting it
+
+// Find a zone you drew in the editor (press K) instead of in code.
+ION.colliders.find("Goal")?.onEnter(() => win());
+```
+
+> **A zone with nothing to notice never fires.** If `onEnter` never happens, you almost certainly forgot step 1 — `ION.colliders.attach(...)` on the thing that's meant to walk in.
+
+### 8.9 Sound
+
+```ts
+ION.audio.play("./assets/sounds/coin.ogg");        // a one-off "ding"
+ION.audio.play("./assets/sounds/coin.ogg", 0.4);   // quieter
+
+ION.audio.music("./assets/sounds/theme.ogg");      // loops forever
+ION.audio.stopMusic();
+
+ION.audio.volume = 0.5;                            // everything, 0 to 1
+```
+
+**Why is there no sound at the start?** Phone browsers refuse to make noise until the player touches the screen once. That's a rule of the browser, not a bug. ION starts the audio for you the moment they first touch — you don't write anything.
+
+### 8.10 Sparkles and explosions
+
+You *draw* effects in the editor (press <kbd>P</kbd>), then set them off from code by name.
+
+```ts
+ION.particles.play("Coin Burst");              // where you drew it
+ION.particles.play("Coin Burst", this.player); // or at something
+ION.particles.play("Coin Burst", { x: 0, y: 1, z: 0 });
+
+ION.particles.stop("Rain");
+ION.particles.quality("low");                  // fewer bits, for slow phones
+```
+
+### 8.11 Words and buttons on the screen
+
+You *design* the screen in the UI Editor and give each piece a name. Code just changes them.
+
+```ts
+ION.ui.text("score", 12);                 // change some words
+ION.ui.show("hint");
+ION.ui.hide("hint");
+ION.ui.value("progress", 0.75);           // a bar, 0 to 1
+ION.ui.onClick("play-button", () => start());
+ION.ui.showEndcard();                     // the "Install now" screen
+```
+
+> **Every playable ad must be able to end.** If nothing ever calls `ION.ui.showEndcard()`, the player can never reach the install screen — and ad networks reject it. Wire it early, not last.
+
+### 8.12 Waiting, repeating, and smooth movement
+
+```ts
+ION.after(3, () => ION.ui.show("hint"));      // once, in 3 seconds
+ION.every(0.5, () => spawnCoin());            // again and again, every half second
+
+// Slide numbers from where they are to where you want, smoothly.
+ION.tween(coin.position, { y: 3 }, 0.4);
+ION.tween(coin.scale, { x: 2, y: 2, z: 2 }, 0.3, { easing: ION.ease.bounce });
+
+const seconds = ION.time;                     // how long the game has been going
+```
+
+Easing is *how* it moves. Try them and pick what feels good:
+
+| Curve | What it feels like |
+|---|---|
+| `ION.ease.smooth` | Slow, fast, slow. The safe one. |
+| `ION.ease.out` | Starts fast, gently stops. |
+| `ION.ease.in` | Starts slow, speeds up. |
+| `ION.ease.bounce` | Lands and bounces, like a dropped ball. |
+| `ION.ease.elastic` | Wobbles past and springs back. |
+| `ION.ease.back` | Overshoots a little, then settles. Great for pop-ins. |
+
+**These all run on game time.** Open the UI editor or the 3D view and every timer freezes with it, then carries on exactly where it stopped. So your endcard can't fire while you're halfway through moving a button.
+
+### 8.13 Letting parts of your game talk
+
+Instead of the coin needing to know about the scoreboard, it just shouts. Whoever cares, listens.
+
+```ts
+// Somewhere a coin is picked up:
+ION.emit("coin-collected", { total: 5 });
+
+// Somewhere else entirely — this doesn't know coins exist:
+ION.on("coin-collected", (info) => ION.ui.text("score", info.total));
+```
+
+Use the same word on both sides and it works. Nothing to declare anywhere.
+
+### 8.14 Rolling dice
+
+```ts
+ION.random();            // somewhere between 0 and 1
+ION.random(-3, 3);       // somewhere between -3 and 3
+ION.randomInt(1, 6);     // a whole number: 1, 2, 3, 4, 5 or 6
+```
+
+### 8.15 The install button
+
+```ts
+ION.ui.onClick("install-button", () => ION.cta());
+```
+
+> **Always `ION.cta()`, never `window.open()`.** Every ad network wants the click sent through its *own* door, and several will reject an ad that opens a link by itself. `ION.cta()` works out which network is running the ad and uses the right door — and falls back to a normal new tab when you're just testing.
+
+### 8.16 A whole small game
+
+Everything above, in one file that actually runs. Collect five coins, then the endcard.
+
+```ts
+import { Game, Entity, ION, type Prop } from "ion";
+
+class Player extends Entity {
+  speed = 6;
+  start() {
+    this.shape = ION.scene.box({ color: "orange", size: 1, y: 0.5 });
+    ION.colliders.attach(this, { size: 1 });
+  }
+  update(dt: number) {
+    const move = ION.input.axis;
+    this.moveBy(move.x * this.speed * dt, 0, move.y * this.speed * dt);
+  }
+}
+
+export default class MyGame extends Game {
+  player!: Player;
+  score = 0;
+
+  start() {
+    ION.scene.ground({ color: "green", size: 40 });
+
+    this.player = new Player();
+    ION.camera.follow(this.player);
+
+    // Five coins. Each one spins by itself and has its own little zone.
+    for (let i = 0; i < 5; i++) {
+      const x = ION.random(-4, 4);
+      const z = ION.random(-4, 4);
+
+      const coin = ION.scene.box({ color: "yellow", size: 0.5, x, y: 0.5, z, name: "Coin" + i });
+      coin.spin(120);
+
+      ION.colliders.zone({ name: "Coin" + i, size: 1, x, y: 0.5, z })
+        .onEnter(() => this.collect(coin));
+    }
+
+    ION.ui.text("score", "0 / 5");
+  }
+
+  collect(coin: Prop) {
+    if (coin.isDestroyed) return;      // only count it once
+    coin.destroy();
+
+    this.score += 1;
+    ION.ui.text("score", this.score + " / 5");
+    ION.audio.play("./assets/sounds/coin.ogg");
+    ION.particles.play("Coin Burst", coin);
+    ION.camera.shake(0.2, 0.15);
+
+    if (this.score >= 5) ION.after(0.6, () => ION.ui.showEndcard());
+  }
+
+  ready() {
+    ION.ui.onClick("install-button", () => ION.cta());
+  }
+}
+```
+
+No renderer, no scene graph, no loop, no `three` import, nothing to remember to register. That's the whole point.
+
+### 8.17 When you really do need Three.js
+
+Rare, but not blocked. Every handle keeps the real object on `.object3D`.
+
+```ts
+const crate = ION.scene.box();
+crate.object3D.material.wireframe = true;   // an escape hatch, not the main road
+```
+
+If you find yourself using it a lot, that's worth reporting — it usually means the plain API is missing something it should have.
+
+### Code cheat sheet
+
+| I want to… | Write |
+|---|---|
+| Make a shape | `ION.scene.box / sphere / cylinder / ground / model` |
+| Find it again | `ION.scene.find(name)` · `ION.scene.findAll(name)` |
+| Move it | `moveTo(x,y,z)` · `moveBy(x,y,z)` · `position.y = 2` |
+| Turn it (degrees) | `rotation.y = 90` · `rotateBy(0,45,0)` · `spin(120)` |
+| Change how it looks | `color` · `opacity` · `size` · `visible` |
+| Throw it away | `thing.destroy()` |
+| Give it a brain | `class X extends Entity` — `start` / `update(dt)` / `stop` |
+| Read the joystick | `ION.input.axis` · `isDown(key)` · `onTap` · `onSwipe` |
+| Camera | `follow` · `stopFollow` · `shake(strength, seconds)` |
+| Notice a bump | `ION.colliders.attach(thing, {size})` then `zone(...).onEnter(fn)` |
+| Sound | `ION.audio.play` · `music` · `stopMusic` · `volume` |
+| Effects | `ION.particles.play(name, at?)` · `stop` · `quality` |
+| Screen | `ION.ui.text` · `show` · `hide` · `value` · `onClick` · `showEndcard` |
+| Later / repeat / glide | `ION.after` · `ION.every` · `ION.tween` · `ION.ease.*` |
+| Talk between parts | `ION.emit(name, data)` · `ION.on(name, fn)` |
+| Dice | `ION.random(a,b)` · `ION.randomInt(a,b)` |
+| Install click | `ION.cta()` |
+| Escape hatch | `thing.object3D` |
+
+## 9. Advanced: the engine API underneath
+
+> Everything in section 8 is the plain API — what a game is normally written against, and what a generated
+> project's starter uses. This section is the layer beneath it: the engine's own classes, for the cases the
+> plain API doesn't cover. **You don't need any of it to build a playable.**
+
+### 9.1 Write gameplay code with Ion
 
 Everything above is the visual tools. This is for writing actual gameplay logic — timed beats, tweens, cross-system events — without hand-rolling timers or holding direct references between classes.
 
@@ -172,7 +605,7 @@ Worth knowing:
 - Call `Ion.*` from a constructor, `update()`, or an event handler — not a file's top-level module code. `Ion` only exists once `IonEngine.boot()` has actually created a game; calling it too early throws a clear error saying exactly that.
 - `Ion.on`/`Ion.emit` don't need event names declared anywhere — use the same string on both sides. Type the payload at the call site if you want it checked: `Ion.on<{total: number}>("coin-collected", fn)`.
 
-### Animate anything with `Animator`
+### 9.2 Animate anything with `Animator`
 
 `Ion.tween` is for animating a target's *own* fields toward a value directly (`mesh.scale`, `mesh.position`). `Animator` is for when you want the raw progress number yourself instead — driving two different things together, a custom formula, anything that isn't "move these fields to this value."
 
@@ -211,7 +644,7 @@ Movement input also has a desktop fallback now: **WASD or arrow keys** move the 
 
 See [ENGINE.md](ENGINE.md)'s `Ion.ts` / `core/Scheduler.ts` / `core/Animator.ts` / `core/EventBus.ts` / `core/InputManager.ts` sections for the full API and the reasoning behind each piece.
 
-## 9. Ship it
+## 10. Ship it
 
 **🛠 Builder** (top of Engine Room) runs `build.sh`: compresses every model/audio asset, bundles `src/main.ts` with Vite, inlines the JS directly into `src/index.template.html` (`vite-plugin-singlefile`), then base64-inlines every real asset straight into that same file — one genuinely self-contained `dist/index.html`, no `dist/assets/` folder, nothing else to upload. It opens directly via `file://` and works on any ad network that only accepts a single file, including the exact syntax/module checks Mintegral's Mindworks review enforces (build.sh checks for those automatically on every build — see 📊 Build Report below). None of the Engine Room/dev-only code above is included in it; the production template never references any of it.
 
