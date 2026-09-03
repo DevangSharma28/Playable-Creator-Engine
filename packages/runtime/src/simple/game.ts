@@ -26,6 +26,8 @@ import { bindIonFacade } from "./ion";
 export abstract class Game extends IonGame implements SimpleGameHost {
   /** Every live entity, in creation order. */
   private readonly entities: Entity[] = [];
+  /** Nodes with a live AnimationMixer — see SimpleGameHost.registerAnimated for why this is not the entity list. */
+  private readonly animated: SceneNode[] = [];
   private pendingStart: Entity[] = [];
   private cameraTarget: SceneNode | { x: number; y: number; z: number } | undefined;
   private shake = { strength: 0, remaining: 0, total: 0 };
@@ -75,6 +77,10 @@ export abstract class Game extends IonGame implements SimpleGameHost {
     for (const entity of [...this.entities]) {
       if (!entity.isDestroyed) entity.update(dt);
     }
+    // Animation last, so a clip switched during this frame's update() is the
+    // one that gets advanced, rather than starting a frame late. Same copy
+    // rule: destroying an animated node unregisters it mid-iteration.
+    for (const node of [...this.animated]) node.tickAnimation(dt);
   }
 
   /**
@@ -97,6 +103,11 @@ export abstract class Game extends IonGame implements SimpleGameHost {
     this.stop();
     for (const entity of [...this.entities]) entity.destroy();
     this.entities.length = 0;
+    // Anything still animating at teardown (a Prop is not an entity, so the
+    // sweep above does not reach one) — its mixer would otherwise keep the
+    // clips and the object reachable for the life of the page.
+    for (const node of [...this.animated]) node.stopAnimation();
+    this.animated.length = 0;
     this.pendingStart.length = 0;
     this.stopAllSounds();
     bindActiveGame(undefined);
@@ -146,6 +157,17 @@ export abstract class Game extends IonGame implements SimpleGameHost {
   }
 
   /** @internal — ION.camera.follow */
+  /** @internal — see SimpleGameHost.registerAnimated. */
+  registerAnimated(node: SceneNode): void {
+    if (!this.animated.includes(node)) this.animated.push(node);
+  }
+
+  /** @internal */
+  unregisterAnimated(node: SceneNode): void {
+    const index = this.animated.indexOf(node);
+    if (index >= 0) this.animated.splice(index, 1);
+  }
+
   setCameraTarget(target: SceneNode | { x: number; y: number; z: number } | undefined): void {
     this.cameraTarget = target;
   }

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import { GLTFLoader, GLTF } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { clone as skeletonClone } from "three/examples/jsm/utils/SkeletonUtils.js";
 import { MeshoptDecoder } from "three/examples/jsm/libs/meshopt_decoder.module.js";
 import { disposeObject3D } from "./core/disposeScene";
 
@@ -177,9 +178,30 @@ export class AssetLoader {
     return buf;
   }
 
-  /** Deep-clones a cached glTF scene so you can place multiple instances (e.g. several coins). */
+  /**
+   * Deep-clones a cached glTF scene so you can place multiple instances (e.g.
+   * several coins, or two of the same character).
+   *
+   * Uses three's `SkeletonUtils.clone`, **not** `Object3D.clone(true)`, and
+   * that difference is the whole reason this method has a comment.
+   * `Object3D.clone(true)` copies a `SkinnedMesh` but leaves its `skeleton`
+   * pointing at the **original's** bones — verified, not assumed: clone a
+   * rigged GLB that way and `clone.getObjectByName("Body").skeleton.bones[0]`
+   * is the *source* bone, not the clone's own.
+   *
+   * The symptom is bizarre if you don't know the cause. Every instance of a
+   * character shares one skeleton, so they all play whatever animation was
+   * started last, in perfect lockstep — and posing one poses the rest.
+   * `SkeletonUtils.clone` walks the copied hierarchy and rebinds each
+   * `SkinnedMesh` to the matching bones inside its *own* copy.
+   *
+   * Applied unconditionally rather than only when a `SkinnedMesh` is found:
+   * it handles an unrigged tree identically, and a conditional here means the
+   * rigged path is the one that only runs in projects that have a rigged
+   * model — i.e. the path least likely to be exercised before it ships.
+   */
   instantiateGlb(path: string): THREE.Group {
-    return this.getGlb(path).scene.clone(true);
+    return skeletonClone(this.getGlb(path).scene) as THREE.Group;
   }
 
   /** Returns the animation clips for a preloaded GLB. */

@@ -317,6 +317,87 @@ start() {
 }
 ```
 
+### 8.5.1 A rigged character — the player as an object
+
+A model with a skeleton is the normal case for a player, and it is three things: load it, animate it, move it.
+
+```ts
+import { Entity, ION, type Prop, type Vec3 } from "ion";
+import { libGlb } from "./assets";
+
+export class Player extends Entity {
+  speed = 6;
+  model!: Prop;
+
+  start() {
+    // The clips come with it — you don't load them separately.
+    this.model = ION.scene.model(libGlb.hero);
+    this.add(this.model);          // moves with the player
+    this.model.castShadow = true;  // reaches every mesh inside, not just the group
+    this.model.play("Idle");
+  }
+
+  update(dt: number) {
+    const move = ION.input.axis;
+    const direction: Vec3 = ION.vec3(move.x, 0, move.y);
+
+    if (direction.length() > 0.01) {
+      this.moveBy(...direction.normalize().multiplyScalar(this.speed * dt).toArray());
+      this.model.play("Run");      // already running? then this does nothing
+    } else {
+      this.model.play("Idle");
+    }
+  }
+}
+```
+
+**Animation lives on the handle.**
+
+```ts
+hero.animations           // ["Idle", "Run", "Jump"] — what this model shipped with
+hero.play("Run");                          // 0.2s crossfade, loops
+hero.play("Jump", { loop: false });        // once, then holds the last frame
+hero.play("Walk", { fade: 0, speed: 2 });  // no blend, double speed
+hero.stopAnimation();                      // back to the bind pose
+hero.currentAnimation                      // "Run" | undefined
+hero.isPlaying                             // boolean
+```
+
+Calling `play("Run")` every frame while a key is held is fine — re-playing the clip that is already running is a no-op, not a restart. Restarting would pin the animation to frame zero forever.
+
+> **Two of the same character animate independently.** That sounds obvious and is not: three.js's own `Object3D.clone(true)` copies a `SkinnedMesh` but leaves its skeleton bound to the **original's** bones, so every instance shares one skeleton — they all play whichever clip started last, in lockstep, and posing one poses the rest. ION clones with `SkeletonUtils.clone`, which rebinds each copy to its own bones.
+
+**Reaching inside the model.** GLB nodes have names; `part()` gives you one as a handle.
+
+```ts
+hero.part("Sword")?.hide();
+hero.part("Cape")?.color = "red";
+```
+
+### 8.5.2 Vectors
+
+`position` and `scale` are **live** vectors with the maths on them, so they compose instead of needing conversions.
+
+```ts
+player.position.y += 2;                 // live — the thing moves
+player.position.add(ION.vec3(0, 0, 1));
+const gap = player.position.distanceTo(enemy.position);
+
+// Point at something, move a fixed speed toward it, allocate nothing per frame.
+const toTarget = ION.vec3().subVectors(enemy.position, player.position);
+player.moveBy(...toTarget.normalize().multiplyScalar(speed * dt).toArray());
+```
+
+`ION.vec3(x, y, z)` makes one; `ION.vec3()` makes a zero vector to write into, which is how you avoid allocating inside `update()`. `ION.quat()` is there for turning smoothly toward a direction, where Euler angles behave badly.
+
+| | |
+|---|---|
+| `position`, `scale` | `Vec3` — live, full maths (`add`, `sub`, `normalize`, `length`, `lerp`, `distanceTo`, `cross`, `dot`, `clone`, …) |
+| `rotation` | degrees, per axis — the easy one |
+| `quaternion` | `Quat` — for blending orientations |
+
+`Vec3` is a type alias for three's own `Vector3` rather than a wrapper class, deliberately: a wrapper would mean reimplementing forty methods of well-tested vector maths and allocating a conversion on every crossing, sixty times a second. Your source still never says `THREE` — it says `Vec3` and `ION.vec3()`, which is the boundary that matters.
+
 ### 8.6 The player's finger
 
 ```ts

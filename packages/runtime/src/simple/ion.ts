@@ -4,7 +4,7 @@ import { Cta } from "../../../../src/engine/Cta";
 import type { ScheduledHandle } from "../../../../src/engine/core/Scheduler";
 import type { Collider } from "../../../../src/engine/collision";
 import { Entity } from "./entity";
-import { ION_OWNED, SceneNode, type Vec3Like } from "./node";
+import { ION_OWNED, SceneNode, type Vec3Like, type Vec3, type Quat } from "./node";
 import { Prop, propFor, installPropColorSetter } from "./prop";
 import { requireGame, type SimpleGameHost } from "./context";
 
@@ -184,7 +184,14 @@ const scene = {
       }
     });
     game().world.add(object);
-    return propFor(object);
+    const prop = propFor(object);
+    // The clips travel with the handle, so `prop.play("Run")` works on the
+    // thing you were just handed. They used to be dropped here: the GLB
+    // carried them, `instantiateGlb` returned only the scene, and a rigged
+    // character arrived in the world with no way to animate it short of
+    // importing three and building a mixer by hand.
+    prop.setClips(loader.getAnimations(path));
+    return prop;
   },
 
   /** Put something into the world yourself. Entities and `ION.scene.*` results add themselves; this is for anything else. */
@@ -476,6 +483,26 @@ export const ION = {
   },
 
   /** A random number, because every game needs one. */
+  /**
+   * A vector. `ION.vec3(0, 1, 0)` — or `ION.vec3()` for a zero one to write
+   * into, which is how you avoid allocating inside `update()`.
+   *
+   * The same type `position` and `scale` hand back, so they compose directly:
+   *
+   * ```ts
+   * const toTarget = ION.vec3().subVectors(enemy.position, this.position);
+   * this.moveBy(...toTarget.normalize().multiplyScalar(speed * dt).toArray());
+   * ```
+   */
+  vec3(x = 0, y = 0, z = 0): Vec3 {
+    return new THREE.Vector3(x, y, z);
+  },
+
+  /** A quaternion, for turning smoothly toward a direction instead of snapping through Euler angles. */
+  quat(): Quat {
+    return new THREE.Quaternion();
+  },
+
   random(min = 0, max = 1): number {
     return min + Math.random() * (max - min);
   },

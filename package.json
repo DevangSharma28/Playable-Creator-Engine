@@ -1,6 +1,6 @@
 {
   "name": "cube-joystick-ad",
-  "version": "5.0.1",
+  "version": "5.2.0",
   "description": "",
   "main": "index.js",
   "scripts": {
@@ -9,8 +9,9 @@
     "build": "bash build.sh",
     "check:build": "node scripts/check-build-report.mjs",
     "check:compat": "node scripts/compat-scan.mjs dist/index.html",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/editor/tsconfig.json",
     "packages": "node scripts/build-packages.mjs",
+    "favicon": "node scripts/make-favicon.mjs",
     "test": "npm run typecheck && npm run test:unit && npm run test:ui-editor-smoke",
     "test:unit": "node --test --test-concurrency=1 tests/*.test.mjs",
     "test:runtime": "node --test tests/runtime-lifecycle.test.mjs tests/simple-api.test.mjs",

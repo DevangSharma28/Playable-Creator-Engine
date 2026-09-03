@@ -51,7 +51,7 @@ if (!fs.existsSync(REPORT)) {
   process.exit(EXIT_CANNOT_CHECK);
 }
 
-/** @type {{distBytes:number,gzipBytes:number,budgetBytes:number,overBudget:boolean,buildDurationSec:number,halfFloat:boolean,compatibilityWarnings:string[],unusedAssets:{path?:string,name?:string}[]}} */
+/** @type {{distBytes:number,gzipBytes:number,budgetBytes:number,overBudget:boolean,buildDurationSec:number,halfFloat:boolean,builtAt?:string,previous?:{distBytes:number,gzipBytes:number,builtAt?:string}|null,compatibilityWarnings:string[],unusedAssets:{path?:string,name?:string}[]}} */
 let report;
 try {
   report = JSON.parse(fs.readFileSync(REPORT, "utf8"));
@@ -80,9 +80,30 @@ if (report.overBudget) {
   failures.push(`over the ${mb(report.budgetBytes)} size budget (${mb(report.distBytes)})`);
 }
 
+/**
+ * "+18 KB since the previous build" — written by build.sh, which stashes the
+ * outgoing report before Vite wipes dist/.
+ *
+ * Absent on a first build (nothing to compare against) and reported in bytes
+ * under a kilobyte, so a two-byte change cannot render as "0.0 KB" next to an
+ * arrow claiming it grew.
+ */
+function sizeChange() {
+  const previous = report.previous;
+  if (!previous || typeof previous.distBytes !== "number") return null;
+  const diff = report.distBytes - previous.distBytes;
+  if (diff === 0) return "no change since last build";
+  const magnitude = Math.abs(diff);
+  const size = magnitude < 1024 ? `${magnitude} B` : magnitude < 1024 * 1024 ? kb(magnitude) : mb(magnitude);
+  return `${diff > 0 ? "+" : "−"}${size} since last build`;
+}
+
+const change = sizeChange();
+
 console.log("");
 console.log("Build report");
 console.log(`  dist/index.html   ${mb(report.distBytes)}  (${kb(report.gzipBytes)} gzipped)`);
+if (change) console.log(`  change            ${change}`);
 console.log(`  budget            ${mb(report.budgetBytes)}${report.overBudget ? "  ✖ OVER" : "  ✓"}`);
 console.log(`  build duration    ${report.buildDurationSec}s`);
 console.log(`  mesh compression  ${report.halfFloat ? "meshopt (half float)" : "quantize only"}`);
@@ -101,6 +122,7 @@ if (process.env.GITHUB_STEP_SUMMARY) {
     "| | |",
     "| --- | --- |",
     `| \`dist/index.html\` | ${mb(report.distBytes)} (${kb(report.gzipBytes)} gzipped) |`,
+    ...(change ? [`| Change | ${change} |`] : []),
     `| Budget | ${mb(report.budgetBytes)} ${report.overBudget ? "— **over**" : "— ok"} |`,
     `| Duration | ${report.buildDurationSec}s |`,
     `| Ad-network compatibility | ${warnings.length === 0 ? "clean" : `**${warnings.length} warning(s)**`} |`,

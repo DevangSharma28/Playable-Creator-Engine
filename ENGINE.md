@@ -1415,18 +1415,6 @@ It talks to `scripts/dev-build-api.js` (localhost:8001, dev-only, started by `np
 
 `GET /list-environment` returns `{ version: 1 }` when no file exists rather than an error — `loadSceneEnv` fills every missing field from its own defaults, so an empty object is a valid answer for a project that has never opened the dock.
 
-### 11.5 Dev-server ports, and why the page is told its API origin
-
-`npm run dev` (`scripts/dev.js`) reserves both ports before either child process binds, using the same `packages/project/lib/ports.mjs` the packaged `ion dev` uses — one implementation, not two. Vite gets `--port`; the API gets `ION_API_PORT` and an `ION_DEV_ORIGINS` CORS entry for the port Vite actually got. A moved port is printed (`ion  port 8000 was taken — using 8002`).
-
-`vite.config.mts`'s `ionDevApiOriginPlugin` then injects `window.__ION_API_ORIGIN` into `index.html`, so the Engine Room is **told** where its API is rather than falling back to the hardcoded `http://127.0.0.1:8001` in its own script.
-
-> This is worth the two moving parts because of what the old arrangement did when 8001 was taken. Vite bound 8000 and the API exited with its "port in use" message — and `dev.js` deliberately keeps Vite alive when the API dies, because the game still serves fine without the Build button, so that message just scrolled past. The Engine Room then fell back to 8001, which was **another project's API**. The version pill, the commit hash, the build report and every Save went to that project. Nothing errored, because from the page's point of view nothing had.
->
-> The case that actually produced it was worse than a port clash between two live projects: the process on 8001 was an orphaned dev API whose project directory had been moved to the Trash hours earlier. A dev server outlives the folder it was started in. It answered `/version` exactly as confidently as a live one, and the only visible symptom was a version this checkout has never had (`v4.4.0`) beside a commit hash that is not an object in this repository (`9bf731b`).
->
-> `GET /version` now also reports `root`, and the pill's tooltip shows it — so *which project answered* is a hover away rather than an investigation.
-
 ### 11.4 Data files
 
 Every one is a **real static import** in `Game.ts`, so all of it ships.
@@ -1443,6 +1431,38 @@ Every one is a **real static import** in `Game.ts`, so all of it ships.
 > **Known Limitation.** `src/game/environment.json` is a new file and may still be untracked in git in a working copy that predates it. `Game.ts` imports it statically, so a clone without it **will not build**. Commit it.
 
 ---
+
+### 11.5 Dev-server ports, and why the page is told its API origin
+
+`npm run dev` (`scripts/dev.js`) reserves both ports before either child process binds, using the same `packages/project/lib/ports.mjs` the packaged `ion dev` uses — one implementation, not two. Vite gets `--port`; the API gets `ION_API_PORT` and an `ION_DEV_ORIGINS` CORS entry for the port Vite actually got. A moved port is printed (`ion  port 8000 was taken — using 8002`).
+
+`vite.config.mts`'s `ionDevApiOriginPlugin` then injects `window.__ION_API_ORIGIN` into `index.html`, so the Engine Room is **told** where its API is rather than falling back to the hardcoded `http://127.0.0.1:8001` in its own script.
+
+> This is worth the two moving parts because of what the old arrangement did when 8001 was taken. Vite bound 8000 and the API exited with its "port in use" message — and `dev.js` deliberately keeps Vite alive when the API dies, because the game still serves fine without the Build button, so that message just scrolled past. The Engine Room then fell back to 8001, which was **another project's API**. The version pill, the commit hash, the build report and every Save went to that project. Nothing errored, because from the page's point of view nothing had.
+>
+> The case that actually produced it was worse than a port clash between two live projects: the process on 8001 was an orphaned dev API whose project directory had been moved to the Trash hours earlier. A dev server outlives the folder it was started in. It answered `/version` exactly as confidently as a live one, and the only visible symptom was a version this checkout has never had (`v4.4.0`) beside a commit hash that is not an object in this repository (`9bf731b`).
+>
+> `GET /version` now also reports `root`, and the pill's tooltip shows it — so *which project answered* is a hover away rather than an investigation.
+
+### 11.6 The Builder and the Build Report
+
+Both live in the Engine Room (`index.html`) and read files `build.sh` already wrote — neither runs a build step of its own beyond the 🚀 Build Now button's `POST /build`.
+
+**Builder panel** (`🛠 Builder`). Pre-build size estimate from `GET /estimate-size`, the Half Float compression toggle, Build Now, and Build Report. The freshness pill says whether the build is current; a line beneath it now says *when* it happened (`Last build: 5m ago · Sep 1, 12:06 PM`). `builtAtMs` had been in that endpoint's response all along and was simply not being shown, so "Up to date" read the same for a build from thirty seconds ago and one from last Tuesday that nothing had touched since.
+
+**Build Report** (`📊 Build Report`). Summary cards, a size-composition bar, per-asset compression detail from glTF-Transform's `inspect()`, unused-asset detection, and data-driven optimization notes. Its top bar carries the build timestamp — `Built 5 minutes ago · Sep 1, 12:06 PM`, small and dim, because it is context for every number on the page rather than a headline. The relative half re-renders every 30s while the modal is open, and only while it is open.
+
+Also: **⧉ Copy** puts a plain-text summary on the clipboard (size, gzip, duration, mesh mode, change vs previous, and any over-budget/compatibility/stale warning) for pasting into a PR or a chat; and **Esc** closes the report without closing the Builder underneath it.
+
+`renderBuiltAt` falls back to the report file's own mtime when `builtAt` is absent, so a `dist/` produced by an older ION still shows a real time rather than a blank.
+
+### 11.7 The favicon
+
+`scripts/make-favicon.mjs` resizes `src/engine/icon/IONENGINE_ICON.png` to 64×64 and stamps it as an inline `data:` URI into every page that shows a browser tab — `index.html`, `tools/ui-editor.html`, and the four guides. Re-run it after changing the logo; it is idempotent (the tag sits between `<!-- ion:favicon -->` markers and is replaced, never appended).
+
+Inlined rather than served as `/favicon.png` because these pages are served by three different things — Vite from the project root, Vite's `public/`, and the packaged Studio's own middleware, which serves a closed list of files off `@ion-engine/editor/studio`. A `<link href="/favicon.png">` would have to be taught to all three plus `build-packages.mjs`'s copy list, and a missing rule shows up as a silently absent icon rather than an error. At 64×64 it is ~3 KB per page.
+
+**`src/index.template.html` is deliberately not in the list.** It becomes the shipped playable, which runs inside an ad network's WebView where there is no browser tab — the bytes could never be seen, and every byte counts against the budget the build gates on. Add it to `PAGES` in that script if you want branded demo links.
 
 ## 12 · Build and production
 
@@ -1547,6 +1567,26 @@ A sibling dev artifact, never inlined into `dist/index.html`. Merges:
 
 Served by `GET /build-report` to the Engine Room's 📊 **Build Report** button.
 
+### 12.5.1 Build timestamps and the previous-build delta
+
+`dist/build-report.json` carries two things beyond the raw numbers:
+
+| Field | What it is |
+| --- | --- |
+| `builtAt` | When the **build** finished. Distinct from `generatedAt`, which is when the *assets were compressed* — an earlier moment, and absent entirely when the compression step was skipped or failed, which is exactly when a "last build" readout still has to work. |
+| `previous` | `{ builtAt, distBytes, gzipBytes }` from the build before this one, or `null` on a first build. |
+
+`previous` is what lets everything answer *"did my change make it bigger?"* — the one question a size budget actually gets asked. The Builder panel shows it as a chip on the Total Size and Gzipped cards, and `npm run build` prints it:
+
+```
+  dist/index.html   0.79 MB  (206 KB gzipped)
+  change            +20 KB since last build
+```
+
+> **Why the previous report is stashed to a temp file.** It cannot simply be read at the point the new report is written, because by then two separate steps have destroyed it: `vite.config.prod.mts` sets `emptyOutDir: true`, so Vite wipes `dist/`; and `compress-assets.mjs` deletes `.build-cache/` before repopulating it, which rules out the one directory that otherwise outlives a build. So `build.sh` copies it to a `mktemp` file before either runs, and removes it on the way out.
+
+> **Sub-kilobyte changes are reported in bytes.** `fmtBytes`' smallest unit is KB to one decimal, so a 7-byte change rendered as "↑ 0.0 KB" — a chip shouting that something grew, next to a number saying it did not.
+
 ### 12.6 The submittability gate
 
 Three consumers, one source of truth.
@@ -1617,14 +1657,14 @@ npm run test:visual     # ION Studio layout regression, real browser
 npm run verify:bundle   # run a built dist/index.html in headless Chrome
 ```
 
-**521 assertions across nineteen suites — 519 passing, 2 skipped, none failing**, plus a clean `tsc --noEmit`. `npm test` runs everything except the three that need a browser or several minutes; CI runs those too.
+**533 assertions across nineteen suites — 531 passing, 2 skipped, none failing**, plus a clean `tsc --noEmit`. `npm test` runs everything except the three that need a browser or several minutes; CI runs those too.
 
 ### 13.1 What runs where
 
 | Suite | Assertions | What it covers |
 | --- | --- | --- |
 | `runtime-lifecycle` | 21 | Boot, frames reaching the renderer, `elapsed` being game time in both timestep modes, teardown releasing GPU resources, re-boot into the same canvas, crash handling, resize across extreme aspect ratios. |
-| `simple-api` | 61 | `Game`, `Entity`, `Prop` and `ION` — scene building, the handle vocabulary (degrees, colour, `spin`, `destroy`, handle identity), camera follow and shake, input, audio, timers and tweens, events, colliders and zones, UI, and the errors each produces when used wrongly. |
+| `simple-api` | 73 | `Game`, `Entity`, `Prop` and `ION` — scene building, the handle vocabulary (degrees, colour, `spin`, `destroy`, handle identity), camera follow and shake, input, audio, timers and tweens, events, colliders and zones, UI, and the errors each produces when used wrongly. |
 | `serialization` | 32 | Round-trips for scene environment, colliders, particles, scene bindings, UI layouts and `ion.config.json`, plus partial and malformed input for each. |
 | `editor-history` | 20 | Undo/redo: stack order, redo invalidation, gesture merging, dirty tracking, the 200-entry bound and its discard contract, re-entrancy, subscriptions. |
 | `project-generator` | 25 | What `create-ion-project.mjs` writes, the client/engine boundary in the generated tree, template config, and `ion.config.json` validation. |
@@ -1750,6 +1790,7 @@ Everything here is a real gap in the current code. Nothing in this document desc
 | 8 | ~~Narrow-phase collision maths is untested directly~~ — **closed** | `tests/collision-intersect.test.mjs` drives `intersect.ts` as the engine calls it: every shape pair, both argument orders, each case repeated after an unrelated call (the scratch-pool stomp guard the file's own header warns about), point containment, and `penetration`'s exact box↔box MTV plus its `up`-constrained behaviour. |
 | 8 | ~~No visual regression~~ — **partially closed** | `scripts/visual-regression.mjs` checks ION Studio's layout across eight viewports in a real browser and asserts measurable invariants (no horizontal scroll, docks on screen, dock open/close reversibility). It does **not** compare images, so a wrong gradient or a few-pixel drift still goes unseen. See [§13.5](#135-browser-verification). |
 | 9 | ~~No boot-sequence test~~ — **closed** | `tests/runtime-lifecycle.test.mjs` drives the real `IonEngine.boot()` and asserts the ordering directly, including that a re-boot retires the previous game rather than running both. |
+| 10a | ~~`packages/` was never typechecked~~ — **closed** | `npm run typecheck` ran `tsc --noEmit` against `src` only — its `include` is `["src"]` — so the entire published product was outside it. The package build did catch type errors (that is how a missing import in `simple/node.ts` was found), but only when someone ran `npm run packages`. The script now also runs both package tsconfigs. |
 | 10 | **`index.html` is untyped and untested** | ~2,100 lines of vanilla JS against ~60 silently-guarded `window.__*` hooks, with no shared `.d.ts` and no boot-time hook assertion. `scripts/visual-regression.mjs` now at least fails if it throws while laying out. |
 | 11 | ~~`public/ui-editor.html` is a committed build artifact~~ — **closed** | Untracked and gitignored. `scripts/sync-assets.js` (npm's `predev`) still mirrors `tools/ui-editor.html` into `public/` so Vite serves it at `/ui-editor.html`; `tools/` is the single source. |
 
@@ -2029,6 +2070,14 @@ ION.scene.box({ color: "yellow", size: 0.6, name: `Coin${i}` }).spin(120);  // d
 | `mesh.material.opacity = 0.5` (renders opaque unless you also set `transparent`) | `prop.opacity = 0.5` |
 | `mesh.removeFromParent()` — **leaks the geometry and material** | `prop.destroy()` — unparents *and* frees what ION built |
 | `mesh.scale.setScalar(2)` | `prop.size = 2` |
+
+**Rigged models are first class.** `ION.scene.model()` carries the GLB's clips onto the handle, so `hero.play("Run")` works on the thing you were just handed — no `THREE.AnimationMixer`, no `Map` of actions, no per-frame tick to remember, no hand-written crossfade. `animations` lists the names, `play(name, { fade, loop, speed })` blends, `stopAnimation()` returns to the bind pose, and re-playing the clip already running is a **no-op** rather than a restart (calling `play("Run")` from `update()` while a key is held is the obvious way to write movement; restarting each frame would pin it to frame zero). A mixer is built on the first `play()` and registered with the game's frame loop, so a scene full of boxes registers nothing; `destroy()` retires it.
+
+> **The bug this exposed.** `AssetLoader.instantiateGlb` used `Object3D.clone(true)`, which copies a `SkinnedMesh` but leaves its `skeleton` bound to the **original's** bones — verified directly, not assumed: `clone.getObjectByName("Body").skeleton.bones[0]` came back as the *source* bone. Every instance of a character therefore shared one skeleton, so they all played whichever clip started last, in lockstep, and posing one posed the rest. It now clones with `SkeletonUtils.clone`, applied unconditionally — it handles an unrigged tree identically, and a conditional would mean the rigged path only runs in projects that have a rigged model, i.e. the path least likely to be exercised before it ships.
+
+**Vectors are real.** `position`, `scale` and `quaternion` hand back live `Vec3`/`Quat` values with the full maths on them (`add`, `normalize`, `lerp`, `distanceTo`, `cross`, …), and `ION.vec3()` / `ION.quat()` construct them. Both are **type aliases** for three's own classes rather than wrapper classes: a wrapper would mean reimplementing forty methods of well-tested vector maths and allocating a conversion on every crossing into and out of the engine, sixty times a second. A game still never writes `THREE` — it writes `Vec3` and `ION.vec3()`, which is the boundary that matters.
+
+**Reaching inside a model.** `part(name)` returns a named GLB node as its own `Prop` (`hero.part("Sword")?.hide()`), and `castShadow`/`receiveShadow` traverse to every mesh underneath — a per-mesh flag in three.js, where setting it on the group does nothing at all, silently.
 
 **`SceneNode` is the shared half**, and the reason there is one vocabulary rather than two: `Entity` (has an `update()`, you subclass it) and `Prop` (has no behaviour, `ION.scene.*` returns it) both extend it, so `moveBy`, `rotation`, `lookAt`, `distanceTo`, `spin` and `destroy` mean the same thing and take the same units on either. Anything that accepts "something in the world" — `ION.camera.follow`, `ION.colliders.attach`, `ION.particles.play`, `ION.scene.add` — takes a `SceneNode`. Moving a prop to an entity is a change of declaration, not a rewrite. Collapsing the duplicated half also took `Entity` from 225 lines to 99.
 

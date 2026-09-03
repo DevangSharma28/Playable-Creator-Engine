@@ -45,6 +45,26 @@ SECONDS=0
 : "${ION_BUILD_LIB:=scripts}"
 : "${ION_VITE_CONFIG:=vite.config.prod.mts}"
 
+# Stash the outgoing build report before anything can delete it.
+#
+# The report block at the end wants the *previous* build's sizes, so it can
+# say "+18 KB since last build" - the one question a size budget actually
+# gets asked. It cannot just read dist/build-report.json at that point,
+# because by then two separate steps have destroyed it:
+#
+#   - vite.config.prod.mts sets `emptyOutDir: true`, so Vite wipes dist/.
+#   - compress-assets.mjs deletes .build-cache/ before repopulating it,
+#     which rules out the one directory that otherwise outlives a build.
+#
+# So it goes somewhere neither of them can reach: a temp file owned by this
+# invocation, removed on the way out.
+ION_PREV_REPORT=""
+if [ -f dist/build-report.json ]; then
+  ION_PREV_REPORT="$(mktemp -t ion-prev-report)"
+  cp dist/build-report.json "$ION_PREV_REPORT"
+fi
+export ION_PREV_REPORT
+
 
 # Compresses assets/models/*.glb and assets/sounds/*.ogg into .build-cache/
 # — never touches assets/ itself. HALF_FLOAT (set by the Builder panel's
@@ -192,6 +212,7 @@ PY
 # step itself: a missing/malformed .build-cache/report.json (compression
 # was skipped or failed) shouldn't fail the whole build over a report file.
 BUILD_DURATION_S="$SECONDS" python3 - <<'PY'
+import datetime
 import gzip
 import json
 import os
@@ -251,7 +272,32 @@ if compatibility_warnings:
 else:
     print("\u2713 No known ad-network compatibility issues found (no ES-module syntax, no ES2019+ syntax, no post-ES2018 runtime APIs).")
 
+# The report that is about to be replaced, read before it is — this is what
+# lets the Builder answer "did my change make it bigger?", which is the one
+# question a size budget actually gets asked. Only the three numbers worth
+# comparing are carried forward, so the file cannot grow a chain of every
+# build ever run.
+report_path = pathlib.Path("dist/build-report.json")
+previous_path = os.environ.get("ION_PREV_REPORT") or ""
+try:
+    _prev = json.loads(pathlib.Path(previous_path).read_text())
+    previous = {
+        "builtAt": _prev.get("builtAt") or _prev.get("generatedAt"),
+        "distBytes": _prev.get("distBytes"),
+        "gzipBytes": _prev.get("gzipBytes"),
+    }
+    # A report with no size in it compares to nothing.
+    if previous["distBytes"] is None:
+        previous = None
+except (FileNotFoundError, json.JSONDecodeError, AttributeError, OSError):
+    previous = None
+
 report = {
+    # When the *build* finished. Distinct from generatedAt below, which is
+    # when the assets were compressed — an earlier moment, and absent
+    # entirely when the compression step was skipped or failed, which is
+    # exactly when a "last build" readout must still work.
+    "builtAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
     "generatedAt": compress_report.get("generatedAt"),
     "halfFloat": compress_report.get("halfFloat"),
     "buildDurationSec": int(os.environ.get("BUILD_DURATION_S", "0")),
@@ -259,13 +305,17 @@ report = {
     "gzipBytes": gzip_bytes,
     "budgetBytes": BUDGET_BYTES,
     "overBudget": dist_bytes > BUDGET_BYTES,
+    "previous": previous,
     "assets": compress_report["assets"],
     "unusedAssets": compress_report.get("unusedAssets", []),
     "compatibilityWarnings": compatibility_warnings,
 }
-pathlib.Path("dist/build-report.json").write_text(json.dumps(report, indent=2))
+report_path.write_text(json.dumps(report, indent=2))
 print(f"Wrote dist/build-report.json ({dist_bytes:,} bytes dist, {gzip_bytes:,} bytes gzipped)")
 PY
+
+# The stash has been folded into the new report; nothing else reads it.
+[ -n "$ION_PREV_REPORT" ] && rm -f "$ION_PREV_REPORT"
 
 # No dist/assets/ copy step — every real asset is inlined into
 # dist/index.html above, so there's nothing left to copy alongside it.

@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import { SceneNode } from "./node";
+import { SceneNode, installPropFactory } from "./node";
 
 /**
  * Something in the world that has no behaviour of its own — a crate, a coin,
@@ -142,6 +142,10 @@ export function propFor(object: THREE.Object3D): Prop {
 function unregisterProp(object: THREE.Object3D): void {
   props.delete(object);
 }
+
+// Hands SceneNode.part() the ability to build a Prop without importing this
+// module for its value — see the type-only import at the top of node.ts.
+installPropFactory(propFor);
 
 /**
  * Colour conversion, injected rather than imported.
