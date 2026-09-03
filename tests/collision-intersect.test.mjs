@@ -348,6 +348,70 @@ test("penetration", async (t) => {
   });
 });
 
+test("degenerate and concentric shapes", async (t) => {
+  await t.test("concentric shapes are still separable", () => {
+    // A pair that overlaps as completely as it is possible to overlap used to
+    // report *no* penetration. Two spheres have no principal axes of their
+    // own, so the centre-to-centre direction is their only candidate axis —
+    // and a zero-length one is correctly rejected, which left the candidate
+    // set empty and `penetration` answering "not touching". `depenetrate`
+    // then returned zero and `moveAndSlide` never pushed, so anything that
+    // spawned on top of the player stayed inside it permanently.
+    const out = v();
+    for (const [label, a, b] of [
+      ["sphere/sphere", sphere([0, 0, 0], 1), sphere([0, 0, 0], 1)],
+      ["sphere/box", sphere([0, 0, 0], 1), box([0, 0, 0], [2, 2, 2])],
+      ["box/box", box([0, 0, 0], [2, 2, 2]), box([0, 0, 0], [2, 2, 2])],
+      ["cylinder/cylinder", cylinder([0, 0, 0], 1, 2), cylinder([0, 0, 0], 1, 2)],
+    ]) {
+      assert.equal(shapesOverlap(a, b), true, `${label}: concentric shapes overlap`);
+      assert.equal(penetration(a, b, out), true, `${label}: and must be pushable apart`);
+      assert.ok(out.length() > 0, `${label}: with a real, non-zero push`);
+    }
+  });
+
+  await t.test("near-coincident centres behave like coincident ones", () => {
+    // The realistic version of the case above: two things spawned at the same
+    // spot, or float drift. 1e-9 apart is well inside the 1e-10 squared-length
+    // threshold that rejects the centre-delta axis.
+    const out = v();
+    assert.equal(penetration(sphere([1e-9, 0, 0], 1), sphere([0, 0, 0], 1), out), true);
+    assert.ok(out.length() > 0);
+  });
+
+  await t.test("the concentric push is deterministic", () => {
+    // Direction does not matter — every direction is equally valid for a
+    // concentric pair — but it must not change between frames, or the object
+    // would jitter along a different axis each tick instead of leaving.
+    const first = v();
+    const second = v();
+    penetration(sphere([0, 0, 0], 1), sphere([0, 0, 0], 1), first);
+    shapesOverlap(box([9, 9, 9], [1, 1, 1]), sphere([9, 9, 9], 1)); // dirty the scratch pool
+    penetration(sphere([0, 0, 0], 1), sphere([0, 0, 0], 1), second);
+    assert.deepEqual(first.toArray(), second.toArray());
+  });
+
+  await t.test("a false return leaves `out` zeroed, not holding the last push", () => {
+    // `penetration` is exported public API. A caller that checks the boolean
+    // loosely used to get whatever vector the *previous* call had written.
+    const out = v();
+    assert.equal(penetration(sphere([0, 0, 0], 1), sphere([0, 0, 0], 1), out), true);
+    assert.ok(out.length() > 0, "primed with a real push");
+    assert.equal(penetration(sphere([0, 0, 0], 1), sphere([50, 0, 0], 1), out), false);
+    assert.deepEqual(out.toArray(), [0, 0, 0], "cleared on the way out");
+  });
+
+  await t.test("zero-sized shapes report no penetration rather than a fake one", () => {
+    // Overlap depth genuinely is 0, so "nothing to push" is the honest answer
+    // — and `out` must still come back clean.
+    const out = v();
+    assert.equal(penetration(sphere([0, 0, 0], 0), sphere([0, 0, 0], 0), out), false);
+    assert.deepEqual(out.toArray(), [0, 0, 0]);
+    assert.equal(penetration(box([0, 0, 0], [0, 0, 0]), box([0, 0, 0], [0, 0, 0]), out), false);
+    assert.deepEqual(out.toArray(), [0, 0, 0]);
+  });
+});
+
 test("consistency", async (t) => {
   await t.test("shapesOverlap agrees with the pairwise functions it dispatches to", () => {
     const cases = [

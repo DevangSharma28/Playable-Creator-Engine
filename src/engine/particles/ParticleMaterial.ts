@@ -247,7 +247,7 @@ export function getDefaultParticleTexture(): THREE.Texture {
   return defaultTexture;
 }
 
-/** Releases the shared default texture. Only ParticleManager teardown calls this — an individual emitter must never, since every other emitter shares it. */
+/** Releases the shared default texture. Reached only through `ParticleManager.disposeSharedResources` (see its doc comment — nothing in this repository calls it, and why). An individual emitter must never call this, since every other emitter shares the texture. */
 export function disposeDefaultParticleTexture(): void {
   defaultTexture?.dispose();
   defaultTexture = undefined;

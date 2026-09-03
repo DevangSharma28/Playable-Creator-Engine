@@ -367,10 +367,22 @@ export class ParticleManager {
   /**
    * Releases process-wide shared resources (the default particle texture).
    *
-   * Separate from clear() and called only at real teardown: the shared
-   * texture is used by every emitter that hasn't overridden it, so an
-   * individual system disposing must never touch it, and a hot reload
-   * that immediately builds new emitters would just rebuild it.
+   * Separate from clear() because the shared texture is used by every emitter
+   * that hasn't overridden it: an individual system disposing must never touch
+   * it, and a hot reload that immediately builds new emitters would only
+   * rebuild it.
+   *
+   * **Nothing in this repository calls this.** That is deliberate rather than
+   * an oversight, and the doc comment used to claim otherwise ("only
+   * ParticleManager teardown calls this"), which was simply false. There is no
+   * "the page is going away" hook to hang it on: `IonEngine`'s teardown runs
+   * on every hot reload, and releasing the texture there would free it out
+   * from under the emitters the next bundle is about to build. A playable ad's
+   * page dies with the ad, so the one 64×64 texture it leaks costs nothing.
+   *
+   * It is exported for a host that genuinely owns engine lifetime — an editor
+   * or a site that mounts and unmounts ION repeatedly — and should be called
+   * *after* the last `clear()`, when no further emitters will be created.
    */
   disposeSharedResources(): void {
     disposeDefaultParticleTexture();

@@ -211,6 +211,76 @@ test("re-boot into the same canvas (what a hot reload does)", async (t) => {
     harness.dispose();
   });
 
+  await t.test("twelve cycles of a game with particles, colliders and animation stay flat", async () => {
+    // The 4-boot check above builds three primitives. This one exercises the
+    // subsystems that own their *own* resources and their own registries —
+    // particle buffers, the collider registry, and an AnimationMixer — across
+    // enough cycles that a per-reload leak of even one object is visible.
+    const clip = new THREE.AnimationClip("Spin", 1, [
+      new THREE.QuaternionKeyframeTrack("Bone.quaternion", [0, 1], [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]),
+    ]);
+    class RiggedLoader extends runtime.AssetLoader {
+      constructor() {
+        super();
+        const root = new THREE.Group();
+        const bone = new THREE.Bone();
+        bone.name = "Bone";
+        root.add(bone);
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+        geometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(new Array(12).fill(0), 4));
+        geometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 4));
+        const body = new THREE.SkinnedMesh(geometry, new THREE.MeshStandardMaterial());
+        body.name = "Body";
+        body.bind(new THREE.Skeleton([bone]));
+        root.add(body);
+        this.gltf = { scene: root, animations: [clip] };
+      }
+      getGlb() { return this.gltf; }
+      getAnimations() { return this.gltf.animations; }
+      get cached() { return { textures: [], models: ["./h.glb"], audio: [] }; }
+    }
+
+    const build = ({ Game, ION }) => class Heavy extends Game {
+      start() {
+        ION.scene.ground();
+        ION.scene.box({ name: "Crate" }).spin(90);
+        const hero = ION.scene.model("./h.glb");
+        hero.play("Spin", { fade: 0 });
+        ION.colliders.attach(hero, { size: 1 });
+        ION.colliders.zone({ name: "Z", size: 3 });
+      }
+    };
+
+    const harness = await bootGame({ assets: new RiggedLoader(), game: build });
+    harness.frames(3);
+    const baseline = { ...harness.env.gl.counts };
+    const GameClass = Object.getPrototypeOf(harness.game).constructor;
+
+    for (let i = 0; i < 11; i++) {
+      runtime.IonEngine.boot(harness.env.canvas, {
+        createGame: (canvas) => GameClass.create(canvas, { assets: new RiggedLoader() }),
+      });
+      for (let drain = 0; drain < 30; drain++) await Promise.resolve();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      harness.frames(3);
+    }
+
+    const after = harness.env.gl.counts;
+    for (const key of ["textures", "buffers", "programs", "framebuffers"]) {
+      assert.ok(
+        after[key] <= baseline[key],
+        `${key} accumulated over 12 cycles: ${baseline[key]} → ${after[key]}`
+      );
+    }
+    // Only the newest game may hold live registrations. A stale collider from
+    // a retired bundle sitting in the new scene is the exact failure
+    // IonEngine's teardown ordering exists to prevent.
+    assert.equal(runtime.Ion.colliders.all.length, 2, "one game's worth of colliders, not twelve");
+    assert.equal(runtime.Ion.particles.all.length, 0);
+    harness.dispose();
+  });
+
   await t.test("retires the previous game rather than running both", async () => {
     const harness = await bootGame({
       game: ({ Game }) => class Counting extends Game {

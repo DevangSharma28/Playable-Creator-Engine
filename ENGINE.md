@@ -559,7 +559,11 @@ renderer.render(scene, activeCamera)
 viewHelper?.update(activeCamera)        // DEV
 ```
 
-> **Known Limitation — shadows are configured but nothing casts.** The shipped `environment.json` has `shadowsEnabled: true` with `shadowType: "pcfsoft"`, every mesh in the environment GLB has `castShadow`/`receiveShadow` set, and both directional lights have `castShadow: false`. The result is zero shadows on screen while every material still compiles its shadow-map defines. Either turn `castShadow` on for the sun in the Environment dock (and size `shadowCameraExtent` to the real environment footprint — the shipped `20` was tuned for a 10-unit arena, not the ~109×124-unit environment model), or turn `shadowsEnabled` off for a free win. The engine supports both; the shipped configuration commits to neither.
+> **Known Limitation — shadows are configured but nothing casts.** The shipped `environment.json` has `shadowsEnabled: true` with `shadowType: "pcfsoft"`, every mesh in the environment GLB has `castShadow`/`receiveShadow` set, and no light has `castShadow: true`. The result is zero shadows on screen. Either turn `castShadow` on for the sun in the Environment dock (and size `shadowCameraExtent` to the real environment footprint — the shipped `20` was tuned for a 10-unit arena, not the ~109×124-unit environment model), or turn `shadowsEnabled` off. The engine supports both; the shipped configuration commits to neither.
+>
+> An earlier version of this note also claimed the wasted configuration cost shader compilation — "every material still compiles its shadow-map defines". **That is not accurate.** three.js gates the define on `renderer.shadowMap.enabled && shadows.length > 0` (verified in the installed `three/build/three.cjs`), so with no casting light the define is not added and no shadow map is rendered. What remains is a configuration that reads as enabled and does nothing visible — a correctness-of-intent problem, not a performance one.
+>
+> *Verification limit:* the gate above was read directly from the installed three build. How three populates that `shadows` list could not be located in the minified bundle, so "no casting lights ⇒ empty list" is standard three behaviour rather than something confirmed in this repository.
 
 > **Known Limitation — depth precision.** The default camera `near` is `0.01` against a `far` of `1000`, a 100,000:1 ratio that spends the depth buffer up close and invites z-fighting on coplanar GLB geometry. Nothing in the reference playable comes within a unit of the camera. Both are now authorable in the Environment dock.
 
@@ -1657,20 +1661,20 @@ npm run test:visual     # ION Studio layout regression, real browser
 npm run verify:bundle   # run a built dist/index.html in headless Chrome
 ```
 
-**533 assertions across nineteen suites — 531 passing, 2 skipped, none failing**, plus a clean `tsc --noEmit`. `npm test` runs everything except the three that need a browser or several minutes; CI runs those too.
+**540 assertions across nineteen suites — 538 passing, 2 skipped, none failing**, plus a clean `tsc --noEmit`. `npm test` runs everything except the three that need a browser or several minutes; CI runs those too.
 
 ### 13.1 What runs where
 
 | Suite | Assertions | What it covers |
 | --- | --- | --- |
-| `runtime-lifecycle` | 21 | Boot, frames reaching the renderer, `elapsed` being game time in both timestep modes, teardown releasing GPU resources, re-boot into the same canvas, crash handling, resize across extreme aspect ratios. |
+| `runtime-lifecycle` | 22 | Boot, frames reaching the renderer, `elapsed` being game time in both timestep modes, teardown releasing GPU resources, re-boot into the same canvas, crash handling, resize across extreme aspect ratios. |
 | `simple-api` | 73 | `Game`, `Entity`, `Prop` and `ION` — scene building, the handle vocabulary (degrees, colour, `spin`, `destroy`, handle identity), camera follow and shake, input, audio, timers and tweens, events, colliders and zones, UI, and the errors each produces when used wrongly. |
 | `serialization` | 32 | Round-trips for scene environment, colliders, particles, scene bindings, UI layouts and `ion.config.json`, plus partial and malformed input for each. |
 | `editor-history` | 20 | Undo/redo: stack order, redo invalidation, gesture merging, dirty tracking, the 200-entry bound and its discard contract, re-entrancy, subscriptions. |
 | `project-generator` | 25 | What `create-ion-project.mjs` writes, the client/engine boundary in the generated tree, template config, and `ion.config.json` validation. |
 | `dev-api` | 16 | The endpoints every ION editor saves through: round-trips, validation, atomic writes, and path containment. |
 | `compat-scan` | 29 | Each ad-network compatibility rule against the pattern it claims to catch, and the shipped bundle against all of them. |
-| `collision-intersect` | 38 | `intersect.ts` directly: every shape pair's overlap answer, argument-order symmetry, scratch-pool reuse, point containment, and `penetration`'s minimum-translation and `up`-constrained behaviour. |
+| `collision-intersect` | 44 | `intersect.ts` directly: every shape pair's overlap answer, argument-order symmetry, scratch-pool reuse, point containment, and `penetration`'s minimum-translation and `up`-constrained behaviour. |
 | `packaged-dev-facade` | 9 | `IonGame`'s dev-panel surface: registry-backed stats with no editor open, the orientation gizmo's ownership and its absence from a production build, and that callbacks registered at boot survive to a session opened later — and are replayed onto every subsequent one. |
 | `engine-core` | 23 | `Scheduler` (game clock, repeat re-basing, nested scheduling, `clear`), `AssetLoader` (in-flight de-duplication, retryable failures, progress), `Telemetry` (buffering, bounds, a throwing sink), `ViewportWatcher` (de-duplication, deferred re-measure, disposal). |
 | `particles` | 40 | The simulation over typed arrays — emission, lifetimes, buffer capacity, seeded determinism, shapes, collision, curves, module gating. |
@@ -1787,6 +1791,7 @@ Everything here is a real gap in the current code. Nothing in this document desc
 
 | # | Gap | Detail |
 | --- | --- | --- |
+| 8b | ~~Concentric shapes could not be pushed apart~~ — **closed** | `penetration()` returned `false` for a pair whose centres coincided (or sat within ~1e-9 of each other): two spheres have no principal axes, so the centre-to-centre direction is their only candidate, and a zero-length one is correctly rejected — leaving an empty candidate set and the answer "not touching" for the most complete overlap possible. `depenetrate` therefore returned zero and `moveAndSlide` never pushed, so anything spawned on top of the player stayed inside it permanently. A deterministic fallback axis is used when no other candidate survives, and `penetration` now zeroes its `out` vector before returning false rather than leaving the previous call's push in it. |
 | 8 | ~~Narrow-phase collision maths is untested directly~~ — **closed** | `tests/collision-intersect.test.mjs` drives `intersect.ts` as the engine calls it: every shape pair, both argument orders, each case repeated after an unrelated call (the scratch-pool stomp guard the file's own header warns about), point containment, and `penetration`'s exact box↔box MTV plus its `up`-constrained behaviour. |
 | 8 | ~~No visual regression~~ — **partially closed** | `scripts/visual-regression.mjs` checks ION Studio's layout across eight viewports in a real browser and asserts measurable invariants (no horizontal scroll, docks on screen, dock open/close reversibility). It does **not** compare images, so a wrong gradient or a few-pixel drift still goes unseen. See [§13.5](#135-browser-verification). |
 | 9 | ~~No boot-sequence test~~ — **closed** | `tests/runtime-lifecycle.test.mjs` drives the real `IonEngine.boot()` and asserts the ordering directly, including that a re-boot retires the previous game rather than running both. |
