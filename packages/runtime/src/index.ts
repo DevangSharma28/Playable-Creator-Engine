@@ -21,7 +21,7 @@
 // advanced surface — still supported, still exported, but not what a game
 // needs to reach for first.
 export { Game, Entity, Prop, SceneNode, ION, SimpleZone } from "./simple";
-export type { Vec3Like, ShapeOptions, ZoneOptions } from "./simple";
+export type { Vec3Like, Vec3, Quat, ShapeOptions, ZoneOptions } from "./simple";
 
 // ── Lifecycle ──────────────────────────────────────────────────────────────
 export { IonEngine } from "../../../src/engine/IonEngine";

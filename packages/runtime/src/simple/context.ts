@@ -24,6 +24,18 @@ export interface SimpleGameHost {
   registerEntity(entity: Entity): void;
   unregisterEntity(entity: Entity): void;
 
+  /**
+   * Nodes with a live AnimationMixer, ticked once per frame.
+   *
+   * Separate from the entity list because the two are genuinely different
+   * sets: a `Prop` is not an entity and is never ticked, but a *rigged* prop
+   * still has to have its mixer advanced — and an `Entity` may hold an
+   * animated model without being animated itself. Registration happens on the
+   * first `play()`, so a scene full of boxes registers nothing.
+   */
+  registerAnimated(node: SceneNode): void;
+  unregisterAnimated(node: SceneNode): void;
+
   readonly world: import("three").Scene;
   readonly assetLoader: import("../../../../src/engine/AssetLoader").AssetLoader;
   readonly rig: import("../../../../src/engine/core/CameraHandler").CameraHandler;

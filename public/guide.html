@@ -5,6 +5,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ion Engine Guide</title>
+  <!-- ion:favicon -->
+  <link rel="icon" type="image/png" href="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAMAAACdt4HsAAADAFBMVEVMaXHr5fXz8PhbQKf08Pi1j/lbQKn////c0PLi2//08PhvUL22kPlfRKvs5vb18fm6lfrNxt1sTbq4kvr38/z49fzu6fbx7ff//f/KsO/59vzx7/ZtT7s1HGxLNotZPqfz7/dWPKJ9W8xmSbE3N1z39Pn7+P1ZPqRoSrVpS7lfQ6l6Wcp1VcRjSK13V8dYPqVdQqq+mfs8LnJdQqdOOI5xUsBcQqrt6PbFoP/y7vjv6vd0VcEyJF9aP6b6+fvPyd80JWNiRa6BXs9qTbhsTL728vv38/tROJ4gCVBhRbA/LHnv6/dyXK56WcdMNJZEMH19XMdXPZ/y8PbBnfv8+/2BXtD9+/3LxNxIM4ZaQKIhFkhWPplKMYk6J3GFYtObdt1VO6D29Pnz7fpUN6OHYs/a1Oe5nOg1JmQ+KXu8tNTf0figksdvTsM4J2s5Jm9xVLI2J2Y2J2o/MHFMM5TOu/H///349vurh+S6n+qQa97bzPZxUrtvXaTGre8lGE/FtuHGpPnPw+g3KWciFkrMqP/6+fzKt+/p3vr49/rx7Peai8N2Xqn6+f23nOeHasSXgMPo3fm9q96rl8/Gre7NvuWAXc5UQI6Xc903J2TQrv9bQJg4K2ouH1ozJWJTRHuflbyWdde9ouqCX9C6o+mMaNf6+fr18vnYyfP6+fz49/qtiu/ZyfXGvtr6+fzWx/LHo+ro4PTEp/KmktQ1JmQyJV/AnvQ6LGyNbdC4mez5+Pv6+Pv49/r29Pn39vn59/tyU7/m4fGXcdx4WsafeeH59/uTb9l8Yr6hfOb5+Px6Ya6hjcqJcrbCnvnBnPq1k/MXCkGvmdwqHVQ7LGkrH1TPrvyPgLGrpsHDvdRhVYiAXcyRhLv69/r39/pwUsCihdrIqvB4YbmEZ8THp/c6KGx4V8W4nOi1m+H////48/768/9qTbJlSLX8+f/z7vv28fwwIl5dQa379v9hRLHx5//38P/bz/D08PpMOoLAmf7u5f0sHlcjFU5gSZyIZdjs4P7j3+33uaG1AAAA+3RSTlMA/Ef9/f39AwIB+v39/f39/f39/f38/f3+Bf5L/Qf9/f39/f4B+/78/v39/P3+/P37/Qz9/f39+v77/f3V9/v+4ZL6/f37/PwDjRv6/fz9/fv8Dv37/v39/f37/jEj/BjDSvz9Df02+P796f3+/f3+XCvnd7IXzSNP/tz8/Yf7+Pr7oOv+3Jn9sDH+UztIbqP35sp1+YX+L8T8UU3qbP39/WTKW+xYw6Pje/7N/fD+HCWp/YI4wK/9/dROooiVn5/000aIi6H8TrlluIPq9P76/dXgrtT6sOpo6P1sadv9Z/z5yfT067n//////////////////////////o8UNvoAAAAJcEhZcwAACxIAAAsSAdLdfvwAAAf0SURBVFjDtZd3XFPnGsff4wkZJ8RAMGTcAAkhEEIChEBCiISWsIrsPQSsZYqgWAUsS8SqddW96qjWarXu1XF7b3vb2z1v993jn4AFwtSKo/c5J8C9SBDwfu7D58OHkff7+77P+0Deg9BDisUgPzNZ6BGLyURbNn60BTEZj7Qc4jN+b7Zas36TgRisR1jOQk8+a1UQhML67JuIxZytPQOt+m1ODqHIylIQvjm/XoUYs0JA/MuvWBUKc/fwcLeZ4FpfeXm0ozONv7jRKiYUwp6dBw/uHBQqCLFw48WZSkAS48/nYPdm4e5PQxAK+XS30EwQ1nN/Yc6omRDz3Ekq/vbOhUjE8mGghTtvgwTf+tFz5MlOGy86bRbGElndbds8kAg1NMAgJWxr6zcTRuG506JpJCB+S701DuI3fFIEy5nbTpx4TwRfFH2yIYcwxlrrHzpW9tHpJois/h0f+7BEaN/x1cXFq39XjhJY6OMdXSDRbX5r6rGyjw7NqBAOP58IqaI9xfeio4uj761+LwO+TXx+WEgDiTfmOJZgUaMjhvihHZvJZu07fi86zTs72zsaJD4kf7J5xxBI+DqebRY1OgRB45+n4kv3RGenpSVnhzUBARDvl1AS58VSIpaa7QcILLRqo5BvlEr572wmW/nu8ezk5OSAgMLW1tCA6ADv6HsnPkRwopvfEdNoMFYw26yJ6zPegHiplOg+Cc0rfTtQbTKpA27UFoyMFNTIvZOT07yL378AEieFNCAQ1vqMCQQGmiOEeCmN6K4XoXf/GtjUxFabQltbK9aurWhtzVMHBAaavP+4DYnqSQCNZuyegxgTAf1GgZRE8E8/7s/m8dhqVUWBbf4LCF2dbyuw6QLUYU3spW+/xadxYb1UKn7yQUC3USAgETTr8D/6lGxeasFIxZUQtLUReVypGClIlah5Ax8MW8nl5OvEv3IA4CvIXxE50mp5OqTuv4ouXMoMv3QBXd1vKxgp9L/MzSEgXWAWC4yOANy29k6pQEATSIVHv7RVXPFAxz772dk5/LO/o4TDFbYvjwqlAohX+Lbv5go6J22hX1FWm3p5kC8QcIXtR2z761DDtXAXNyht+LWLqG6/7cjublA0D15OrSyL650M4OfW1NQmne/MWfyd7dBhJNr1OcQ7u7m5uLiEr9nFQIc7bN/dzuk/n1RbU5MrvjlpC11819S81JrQr9qO3PkmEZVfC3dzHgO4aNf9qxwVfXPnSNtXnrXwsih+72RAnGteYaFnZWVrx3JU2vL5z07Ozk5OowQtSLSI0PKOO7WVnoWFea58hwae+RxVempHHdr3LcQ72QsQANBqMw98uw/VdVSmqzT5nq78yT3ojHP11Mkt7PRDHmjPmXAtlU8CKAOtds2BL/agkD8UhkmUOk9HBgAIVVnYgfLHPNATfWlfhLtR653sW8g8sOafA48DQB4QxlOFTgmQmAJukICfIjUvZmqpHTg5k8dw4G+adCUA5t/wNkk4oVFxDgCxFMDbDtCogkxnQILag3bd6x/IcM5PdoCazQl1dQjI/S+DYA4niENKOLs5Z657USXjqIJHDdQS1ZQADi/sPwCOXtZ0JtzFZd3rTfE4R68PHjUw8aYGqCYAVJwg/LXMNa8FyXC6no5H2gH2Jsb1OAbAKVCAARLAoet18d7J8TjuhUMFjwEsAIh12ERP3dgxDgTrVSoVjuvxmJgg3F6RA3YA2wJzEDvZoDc211OnHDfQ68lF+iD2UhnuBTUGkAeylbhDQCcFkKjlj4WQc0CnUwC/mFGAn5e9BxoA+DkEDAEAB4AGDA7iAzqdDtfhuAwAXniQH1Sf30ESoJZMASB7kC+3mDSHihBauGggOJJsniwmRublBQC8b9FChIoOadQ8ef4UBmfz8jUWdtjer+FfscfTkQO4XxAFCIL1fZFPeyD0wtd7TWx/TX5e7jwHBsayvSka+HNMW3ZrbSIp0af3w2X+MfHkejI+ce2tZclsnlKTsrfM6ACAcaOaUzhKniQw7e6K5SxSoi8y3j8m3Y9uj19xNy2AzbNwUpqjuIaeif8P4FrTtQCbF1Gd7qW08MK8l926bpeQ+fNk4/HRYWyJhZ5eLY3DFvTCdWfi2+upfiPm7huV9JTcIrFLMEEifenSeDJ+ORUvscifSorydTcQXacQ8pkI8Nm1vcuAxblXy+gWniQMOnEdjqNu0aI6iL8+Fp9fLeBihq7tuxIm3Q+YqPzVLpAQu5IS0AnT3RWHE1BCAvKB+ORANluipOIxY9er5Yjp8yAB3vxFLRt6SYlNpAS8veYf/R4kir4/mh/I5vlb+vyqI+IwQ+f2Fg/E8HF8uy9/BnoZIc4lJSzK4HbrDz/++IO1na60ULsXR4zGM6e8pZWuv38Tw+IMm+JxuSa+it//yy++/CqYD7pskzvE925oKXUcPy6x1S5xtjlel1IlxmixBnFVii4+KZeKf2brNJdV8n6z/jYpgf0ppbJK7A4lrqpM2WSg4teXTn9dhiekxiWURFVzGc09IsKdW9Z81jcCWzB9/HgnSk4N9mDYzXkCd6oE4ljMcPP++pKH7f4BiZdICWwuFADmYmR844zix584SlYOLjbMHS2sZ/BSyeyevCiJIQNIwIeha8lLs37sgsFsAAkMavHgypJZPnONXd6PLRnCsKElxyDeB82+mKTE/fsrG2ba/MnbYKKExsYExETof3h6nsXhTYHwQf/f+jcZs79QUOO2cAAAAABJRU5ErkJggg==">
+  <!-- /ion:favicon -->
   <link rel="stylesheet" href="/guide.css">
 </head>
 
@@ -59,6 +62,11 @@
         <h4>Colliders &amp; Areas →</h4>
         <p>Trigger zones, solid walls, and character movement. <code>onTriggerEnter</code>,
           <code>moveAndSlide</code>, tags and masks.</p>
+      </a>
+      <a class="card" href="#code" style="text-decoration:none">
+        <h4>Code, explained like you're new →</h4>
+        <p>Every call you'll actually type, in plain words — shapes, movement, input, bumping,
+          sound, effects, screen text, timers — ending in one small game that really runs.</p>
       </a>
       <a class="card" href="/guide-particles.html" style="text-decoration:none">
         <h4>Particles &amp; VFX →</h4>
@@ -323,7 +331,468 @@ new Animator({ time: 1, delay: 0.3 }, (progress) =&gt; {
       </div>
     </section>
 
-    <h2 style="margin-top:64px;">Engine code reference</h2>
+    <h2 id="code" style="margin-top:64px;">Code, explained like you're new</h2>
+    <p class="lede">
+      Everything on this page so far was buttons to click. This part is the typing.
+      It's written plainly on purpose — if a sentence needs a computer-science degree, it's a bad sentence.
+      <strong>You never import <code>three</code>.</strong> ION hides all of that.
+    </p>
+
+    <div class="callout">
+      <strong>The big idea.</strong> Think of a box of LEGO. ION is the table, the lights, the camera and the
+      bricks. You don't build the table. You just decide what to make and where to put it.
+    </div>
+
+    <h3>Three words, and you know the whole thing</h3>
+    <div class="ref-table">
+      <div class="k">Game</div>
+      <div class="v">The <em>whole</em> thing. You get exactly one. It says what exists and what happens.</div>
+      <div class="k">Prop</div>
+      <div class="v">A thing that just sits there — a coin, a wall, a tree. It has no brain.
+        Every <code>ION.scene.*</code> call hands you one.</div>
+      <div class="k">Entity</div>
+      <div class="v">A thing with a brain — a player, an enemy. It gets to think every frame.</div>
+    </div>
+    <p class="dim">A Prop and an Entity understand the <em>same words</em>. <code>moveBy</code> means the same
+      thing on both, in the same units. So if a coin later needs a brain, you change one line, not the file.</p>
+
+    <h3>1 · The whole game</h3>
+    <p>Four blanks to fill in. That's the file.</p>
+    <pre><code>import { Game, ION } from "ion";
+
+export default class MyGame extends Game {
+
+  start() {
+    <span class="c">// Runs ONCE, at the very beginning. Build your world here.</span>
+  }
+
+  update(dt) {
+    <span class="c">// Runs EVERY frame — about 60 times a second.</span>
+  }
+
+  ready() {
+    <span class="c">// Runs once more, after the editor's saved files have loaded.</span>
+  }
+
+  stop() {
+    <span class="c">// Runs at the very end. Tidy up here if you need to.</span>
+  }
+}</code></pre>
+
+    <div class="callout">
+      <strong>What is <code>dt</code>?</strong> It's how many seconds passed since the last frame — a small
+      number, usually about <code>0.016</code> (one sixtieth of a second).
+      <br><br>
+      Always multiply movement by <code>dt</code>. A fast phone draws more frames than a slow one, so
+      <code>x += 5</code> would move <em>twice as fast on a better phone</em>. <code>x += 5 * dt</code> moves
+      5 units per second on every phone. Same game for everyone.
+    </div>
+
+    <h3>2 · Making things</h3>
+    <p>Five ways to put something in the world. All of them hand you back a <strong>Prop</strong>.</p>
+    <pre><code><span class="c">// A box.</span>
+const crate = ION.scene.box({ color: "brown", size: 1, x: 0, y: 0.5, z: 0 });
+
+<span class="c">// A ball.</span>
+const ball = ION.scene.sphere({ color: "red", radius: 0.5, y: 1 });
+
+<span class="c">// A tube.</span>
+const pillar = ION.scene.cylinder({ color: "grey", radius: 0.3, height: 3 });
+
+<span class="c">// The floor. It's already lying down flat — you don't have to turn it.</span>
+ION.scene.ground({ color: "green", size: 40 });
+
+<span class="c">// A model you made in Blender. It must be in src/game/assets.ts first,
+// or ION will tell you so — by name — instead of silently drawing nothing.</span>
+const hero = ION.scene.model("./assets/models/hero.glb", { y: 0, size: 1 });</code></pre>
+
+    <p>Every option is optional. Leave one out and you get a sensible default.</p>
+    <div class="api">
+      <div class="api-head">Options you can pass to any shape</div>
+      <div class="api-row"><div class="sig">color</div><div class="desc">A name — <code>"red"</code>, <code>"orange"</code>, <code>"blue"</code> — or <code>"#e8961e"</code>, or <code>0xe8961e</code>. Typo it and ION says so instead of guessing a wrong colour.</div></div>
+      <div class="api-row"><div class="sig">size</div><div class="desc">How big, all round. <code>1</code> is one metre-ish.</div></div>
+      <div class="api-row"><div class="sig">width, height, depth</div><div class="desc">Use these instead of <code>size</code> when it isn't a cube.</div></div>
+      <div class="api-row"><div class="sig">radius</div><div class="desc">For balls and tubes.</div></div>
+      <div class="api-row"><div class="sig">x, y, z</div><div class="desc">Where to put it. <strong>x</strong> = left/right, <strong>y</strong> = up/down, <strong>z</strong> = towards you / away.</div></div>
+      <div class="api-row"><div class="sig">opacity</div><div class="desc"><code>1</code> is solid, <code>0</code> is invisible. <code>0.5</code> is see-through.</div></div>
+      <div class="api-row"><div class="sig">metal, rough</div><div class="desc">How shiny. <code>metal: 1</code> is a mirror, <code>rough: 1</code> is chalk.</div></div>
+      <div class="api-row"><div class="sig">name</div><div class="desc">A label, so you can find it again later by that name.</div></div>
+    </div>
+
+    <h3>3 · What you can do to a thing</h3>
+    <p>This is the same list for a Prop <em>and</em> for an Entity. Learn it once.</p>
+    <pre><code>const coin = ION.scene.box({ color: "yellow", size: 0.5, name: "Coin" });
+
+<span class="c">// ── Where it is ─────────────────────────────────────────</span>
+coin.moveTo(2, 1, 0);          <span class="c">// go exactly there</span>
+coin.moveBy(0, 0.1, 0);        <span class="c">// go a little bit up from wherever you are</span>
+coin.position.y = 3;           <span class="c">// or just set one number</span>
+
+<span class="c">// ── Which way it's facing (DEGREES, like a protractor) ──</span>
+coin.rotation.y = 90;          <span class="c">// a quarter turn</span>
+coin.rotateBy(0, 45, 0);       <span class="c">// turn 45 more</span>
+coin.spin(120);                <span class="c">// keep turning, 120 degrees every second, forever</span>
+coin.stopSpin();               <span class="c">// stop where it is</span>
+
+<span class="c">// ── How it looks ────────────────────────────────────────</span>
+coin.color = "gold";
+coin.opacity = 0.5;
+coin.size = 2;                 <span class="c">// twice as big</span>
+coin.visible = false;          <span class="c">// hide it (it's still there)</span>
+
+<span class="c">// ── Talking about other things ──────────────────────────</span>
+coin.lookAt(player);           <span class="c">// turn to face something</span>
+const far = coin.distanceTo(player);   <span class="c">// how far apart, in a straight line</span>
+coin.add(sparkle);             <span class="c">// stick something on, so it moves along too</span>
+
+<span class="c">// ── Getting rid of it ───────────────────────────────────</span>
+coin.destroy();                <span class="c">// gone, and its memory is handed back</span></code></pre>
+
+    <div class="callout warn">
+      <strong>Two traps ION takes away from you.</strong><br><br>
+      <strong>Turning is in degrees.</strong> A half circle is <code>180</code>. Raw Three.js uses
+      <em>radians</em>, where half a circle is <code>3.14159…</code>. You never have to think about that here.
+      <br><br>
+      <strong>Always <code>destroy()</code>, never just hide.</strong> If you make and throw away coins all
+      game long without <code>destroy()</code>, the phone's memory fills up and the ad gets slower and slower.
+      <code>destroy()</code> hands the memory back.
+    </div>
+
+    <h3>4 · Finding something again</h3>
+    <p>If you gave it a <code>name</code>, you can ask for it back — including things you placed in the
+      <strong>3D editor</strong> rather than in code.</p>
+    <pre><code>const coin  = ION.scene.find("Coin");        <span class="c">// one thing, or undefined</span>
+const coins = ION.scene.findAll("Coin");     <span class="c">// every thing with that name, as a list</span>
+
+if (coin) coin.spin(90);
+for (const c of coins) c.destroy();</code></pre>
+    <p class="dim">Asking twice gives you back the <em>same</em> handle, not a copy. So
+      <code>find("Coin") === find("Coin")</code> is true, and a <code>spin()</code> you started through one is
+      visible through the other.</p>
+
+    <h3>5 · A thing with a brain — Entity</h3>
+    <p>A Prop just sits there. When something needs to <em>decide</em> things every frame, make it an Entity.</p>
+    <pre><code>import { Entity, ION } from "ion";
+
+export class Player extends Entity {
+  speed = 6;
+
+  start() {
+    <span class="c">// Runs once, when it's created. Give it something to look like.</span>
+    this.shape = ION.scene.box({ color: "orange", size: 1, y: 0.5 });
+  }
+
+  update(dt) {
+    <span class="c">// Runs every frame, all by itself. You never call this.</span>
+    const move = ION.input.axis;
+    this.moveBy(move.x * this.speed * dt, 0, move.y * this.speed * dt);
+  }
+
+  stop() {
+    <span class="c">// Runs when it's destroyed.</span>
+  }
+}</code></pre>
+    <p>Using it is one line. Making it puts it in the world — there is no "add" step to forget:</p>
+    <pre><code>start() {
+  this.player = new Player();
+  ION.camera.follow(this.player);
+}</code></pre>
+
+    <h3>5b · A rigged character — the player as an object</h3>
+    <p>A model with a skeleton is the normal case for a player. Three things: load it, animate it, move it.</p>
+    <pre><code>import { Entity, ION, type Prop, type Vec3 } from "ion";
+import { libGlb } from "./assets";
+
+export class Player extends Entity {
+  speed = 6;
+  model!: Prop;
+
+  start() {
+    <span class="c">// The clips come with it — you don't load them separately.</span>
+    this.model = ION.scene.model(libGlb.hero);
+    this.add(this.model);          <span class="c">// moves with the player</span>
+    this.model.castShadow = true;  <span class="c">// reaches every mesh inside, not just the group</span>
+    this.model.play("Idle");
+  }
+
+  update(dt: number) {
+    const move = ION.input.axis;
+    const direction: Vec3 = ION.vec3(move.x, 0, move.y);
+
+    if (direction.length() &gt; 0.01) {
+      this.moveBy(...direction.normalize().multiplyScalar(this.speed * dt).toArray());
+      this.model.play("Run");      <span class="c">// already running? then this does nothing</span>
+    } else {
+      this.model.play("Idle");
+    }
+  }
+}</code></pre>
+
+    <p><strong>Animation lives on the handle.</strong></p>
+    <pre><code>hero.animations                            <span class="c">// ["Idle", "Run", "Jump"] — what it shipped with</span>
+hero.play("Run");                          <span class="c">// 0.2s crossfade, loops</span>
+hero.play("Jump", { loop: false });        <span class="c">// once, then holds the last frame</span>
+hero.play("Walk", { fade: 0, speed: 2 });  <span class="c">// no blend, double speed</span>
+hero.stopAnimation();                      <span class="c">// back to the bind pose</span>
+hero.currentAnimation                      <span class="c">// "Run" | undefined</span>
+hero.isPlaying                             <span class="c">// boolean</span></code></pre>
+    <p class="dim">Calling <code>play("Run")</code> every frame while a key is held is fine — re-playing the clip
+      that's already running is a no-op, not a restart. Restarting would pin the animation to frame zero forever.</p>
+
+    <div class="callout warn"><strong>Two of the same character animate independently.</strong> That sounds obvious
+      and isn't: three.js's own <code>Object3D.clone(true)</code> copies a <code>SkinnedMesh</code> but leaves its
+      skeleton bound to the <em>original's</em> bones — so every instance shares one skeleton, they all play
+      whichever clip started last in lockstep, and posing one poses the rest. ION clones with
+      <code>SkeletonUtils.clone</code>, which rebinds each copy to its own bones.</div>
+
+    <p><strong>Reaching inside the model.</strong> GLB nodes have names; <code>part()</code> gives you one as a handle.</p>
+    <pre><code>hero.part("Sword")?.hide();
+hero.part("Cape")?.color = "red";</code></pre>
+
+    <h3>5c · Vectors</h3>
+    <p><code>position</code> and <code>scale</code> are <strong>live</strong> vectors with the maths on them, so they
+      compose instead of needing conversions.</p>
+    <pre><code>player.position.y += 2;                 <span class="c">// live — the thing moves</span>
+player.position.add(ION.vec3(0, 0, 1));
+const gap = player.position.distanceTo(enemy.position);
+
+<span class="c">// Point at something, move a fixed speed toward it, allocate nothing per frame.</span>
+const toTarget = ION.vec3().subVectors(enemy.position, player.position);
+player.moveBy(...toTarget.normalize().multiplyScalar(speed * dt).toArray());</code></pre>
+    <div class="ref-table">
+      <div class="k">position, scale</div>
+      <div class="v"><code>Vec3</code> — live, full maths: <code>add</code>, <code>sub</code>,
+        <code>normalize</code>, <code>length</code>, <code>lerp</code>, <code>distanceTo</code>, <code>cross</code>,
+        <code>dot</code>, <code>clone</code>, …</div>
+      <div class="k">rotation</div>
+      <div class="v">Degrees, per axis — the easy one.</div>
+      <div class="k">quaternion</div>
+      <div class="v"><code>Quat</code> — for blending orientations, where Euler angles behave badly.</div>
+    </div>
+    <p class="dim"><code>ION.vec3(x, y, z)</code> makes one; <code>ION.vec3()</code> makes a zero vector to write
+      into, which is how you avoid allocating inside <code>update()</code>. <code>Vec3</code> is a type alias for
+      three's own <code>Vector3</code> rather than a wrapper class, deliberately — a wrapper would mean
+      reimplementing forty methods of well-tested vector maths and allocating a conversion on every crossing, sixty
+      times a second. Your source still never says <code>THREE</code>: it says <code>Vec3</code> and
+      <code>ION.vec3()</code>, which is the boundary that matters.</p>
+
+    <h3>6 · The player's finger</h3>
+    <pre><code><span class="c">// The joystick, and WASD / arrow keys, both at once. You don't choose.
+// x and y are between -1 and 1. Both are 0 when nobody is touching.</span>
+const move = ION.input.axis;
+
+<span class="c">// Is a key held down right now?</span>
+if (ION.input.isDown(" ")) jump();          <span class="c">// " " is the space bar</span>
+
+<span class="c">// A quick tap anywhere.</span>
+ION.input.onTap((point) =&gt; console.log("tapped at", point.x, point.y));
+
+<span class="c">// A flick.</span>
+ION.input.onSwipe((direction) =&gt; {
+  if (direction === "up") jump();           <span class="c">// "up" | "down" | "left" | "right"</span>
+});</code></pre>
+    <div class="callout">Most playable ads are played with a thumb. <code>ION.input.axis</code> already works
+      for touch <em>and</em> keyboard, so you can test at a desk without a touchscreen and change nothing later.</div>
+
+    <h3>7 · The camera</h3>
+    <pre><code>ION.camera.follow(this.player);   <span class="c">// glide along behind them</span>
+ION.camera.stopFollow();          <span class="c">// stay put from now on</span>
+ION.camera.shake(0.4, 0.3);       <span class="c">// how hard, for how many seconds — for a hit or a crash</span>
+
+ION.camera.position.y = 12;       <span class="c">// move it yourself</span>
+const zoom = ION.camera.fov;      <span class="c">// how wide it sees, in degrees</span></code></pre>
+    <p class="dim">How far back and how smoothly it follows are set in the <strong>Environment</strong> dock in
+      the 3D editor, not in code — so you can nudge the shot while the game runs.</p>
+
+    <h3>8 · Bumping into things</h3>
+    <p>A <strong>zone</strong> is an invisible box. When something walks into it, you get told.</p>
+    <pre><code><span class="c">// 1. Give the player a body, so there is something to notice.</span>
+ION.colliders.attach(this.player, { size: 1 });
+
+<span class="c">// 2. Put an invisible box somewhere.</span>
+const goal = ION.colliders.zone({ name: "Goal", size: 3, x: 5, y: 0.5, z: 0 });
+
+<span class="c">// 3. Say what happens.</span>
+goal.onEnter(() =&gt; ION.ui.showEndcard());
+goal.onExit(() =&gt; console.log("left the goal"));
+
+goal.enabled = false;             <span class="c">// switch it off without deleting it</span>
+
+<span class="c">// Find a zone you drew in the editor (press K) instead of in code.</span>
+ION.colliders.find("Goal")?.onEnter(() =&gt; win());</code></pre>
+    <div class="callout warn"><strong>A zone with nothing to notice never fires.</strong> If
+      <code>onEnter</code> never happens, you almost certainly forgot step 1 —
+      <code>ION.colliders.attach(...)</code> on the thing that's meant to walk in.</div>
+
+    <h3>9 · Sound</h3>
+    <pre><code>ION.audio.play("./assets/sounds/coin.ogg");        <span class="c">// a one-off "ding"</span>
+ION.audio.play("./assets/sounds/coin.ogg", 0.4);  <span class="c">// quieter</span>
+
+ION.audio.music("./assets/sounds/theme.ogg");     <span class="c">// loops forever</span>
+ION.audio.stopMusic();
+
+ION.audio.volume = 0.5;                            <span class="c">// everything, 0 to 1</span></code></pre>
+    <div class="callout audio"><strong>Why is there no sound at the start?</strong> Phone browsers refuse to
+      make noise until the player touches the screen once. That's a rule of the browser, not a bug. ION starts
+      the audio for you the moment they first touch — you don't write anything.</div>
+
+    <h3>10 · Sparkles and explosions</h3>
+    <p>You <em>draw</em> effects in the editor (press <strong>P</strong>), then set them off from code by name.</p>
+    <pre><code>ION.particles.play("Coin Burst");              <span class="c">// where you drew it</span>
+ION.particles.play("Coin Burst", this.player); <span class="c">// or at something</span>
+ION.particles.play("Coin Burst", { x: 0, y: 1, z: 0 });
+
+ION.particles.stop("Rain");
+ION.particles.quality("low");                  <span class="c">// fewer bits, for slow phones</span></code></pre>
+
+    <h3>11 · Words and buttons on the screen</h3>
+    <p>You <em>design</em> the screen in the UI Editor and give each piece a name. Code just changes them.</p>
+    <pre><code>ION.ui.text("score", 12);                 <span class="c">// change some words</span>
+ION.ui.show("hint");
+ION.ui.hide("hint");
+ION.ui.value("progress", 0.75);           <span class="c">// a bar, 0 to 1</span>
+ION.ui.onClick("play-button", () =&gt; start());
+ION.ui.showEndcard();                     <span class="c">// the "Install now" screen</span></code></pre>
+    <div class="callout warn"><strong>Every playable ad must be able to end.</strong> If nothing ever calls
+      <code>ION.ui.showEndcard()</code>, the player can never reach the install screen — and ad networks reject
+      it. Wire it early, not last.</div>
+
+    <h3>12 · Waiting, repeating, and smooth movement</h3>
+    <pre><code>ION.after(3, () =&gt; ION.ui.show("hint"));      <span class="c">// once, in 3 seconds</span>
+ION.every(0.5, () =&gt; spawnCoin());            <span class="c">// again and again, every half second</span>
+
+<span class="c">// Slide numbers from where they are to where you want, smoothly.</span>
+ION.tween(coin.position, { y: 3 }, 0.4);
+ION.tween(coin.scale, { x: 2, y: 2, z: 2 }, 0.3, { easing: ION.ease.bounce });
+
+const seconds = ION.time;                     <span class="c">// how long the game has been going</span></code></pre>
+    <p>Easing is <em>how</em> it moves. Try them and pick what feels good:</p>
+    <div class="ref-table">
+      <div class="k">ION.ease.smooth</div><div class="v">Slow, fast, slow. The safe one.</div>
+      <div class="k">ION.ease.out</div><div class="v">Starts fast, gently stops.</div>
+      <div class="k">ION.ease.in</div><div class="v">Starts slow, speeds up.</div>
+      <div class="k">ION.ease.bounce</div><div class="v">Lands and bounces, like a dropped ball.</div>
+      <div class="k">ION.ease.elastic</div><div class="v">Wobbles past and springs back.</div>
+      <div class="k">ION.ease.back</div><div class="v">Overshoots a little, then settles. Great for pop-ins.</div>
+    </div>
+    <div class="callout"><strong>These all run on game time.</strong> Open the UI editor or the 3D view and every
+      timer freezes with it, then carries on exactly where it stopped. So your endcard can't fire while you're
+      halfway through moving a button.</div>
+
+    <h3>13 · Letting parts of your game talk</h3>
+    <p>Instead of the coin needing to know about the scoreboard, it just shouts. Whoever cares, listens.</p>
+    <pre><code><span class="c">// Somewhere a coin is picked up:</span>
+ION.emit("coin-collected", { total: 5 });
+
+<span class="c">// Somewhere else entirely — this doesn't know coins exist:</span>
+ION.on("coin-collected", (info) =&gt; ION.ui.text("score", info.total));</code></pre>
+    <p class="dim">Use the same word on both sides and it works. Nothing to declare anywhere.</p>
+
+    <h3>14 · Rolling dice</h3>
+    <pre><code>ION.random();            <span class="c">// somewhere between 0 and 1</span>
+ION.random(-3, 3);       <span class="c">// somewhere between -3 and 3</span>
+ION.randomInt(1, 6);     <span class="c">// a whole number: 1, 2, 3, 4, 5 or 6</span></code></pre>
+
+    <h3>15 · The install button</h3>
+    <pre><code>ION.ui.onClick("install-button", () =&gt; ION.cta());</code></pre>
+    <div class="callout"><strong>Always <code>ION.cta()</code>, never <code>window.open()</code>.</strong>
+      Every ad network wants the click sent through its <em>own</em> door, and several will reject an ad that
+      opens a link by itself. <code>ION.cta()</code> works out which network is running the ad and uses the right
+      door — and falls back to a normal new tab when you're just testing.</div>
+
+    <h3>16 · A whole small game</h3>
+    <p>Everything above, in one file that actually runs. Collect five coins, then the endcard.</p>
+    <pre><code>import { Game, Entity, ION } from "ion";
+
+class Player extends Entity {
+  speed = 6;
+  start() {
+    this.shape = ION.scene.box({ color: "orange", size: 1, y: 0.5 });
+    ION.colliders.attach(this, { size: 1 });
+  }
+  update(dt) {
+    const move = ION.input.axis;
+    this.moveBy(move.x * this.speed * dt, 0, move.y * this.speed * dt);
+  }
+}
+
+export default class MyGame extends Game {
+  score = 0;
+
+  start() {
+    ION.scene.ground({ color: "green", size: 40 });
+
+    this.player = new Player();
+    ION.camera.follow(this.player);
+
+    <span class="c">// Five coins. Each one spins by itself and has its own little zone.</span>
+    for (let i = 0; i &lt; 5; i++) {
+      const x = ION.random(-4, 4);
+      const z = ION.random(-4, 4);
+
+      const coin = ION.scene.box({ color: "yellow", size: 0.5, x, y: 0.5, z, name: "Coin" + i });
+      coin.spin(120);
+
+      ION.colliders.zone({ name: "Coin" + i, size: 1, x, y: 0.5, z })
+        .onEnter(() =&gt; this.collect(coin));
+    }
+
+    ION.ui.text("score", "0 / 5");
+  }
+
+  collect(coin) {
+    if (coin.isDestroyed) return;      <span class="c">// only count it once</span>
+    coin.destroy();
+
+    this.score += 1;
+    ION.ui.text("score", this.score + " / 5");
+    ION.audio.play("./assets/sounds/coin.ogg");
+    ION.particles.play("Coin Burst", coin);
+    ION.camera.shake(0.2, 0.15);
+
+    if (this.score &gt;= 5) ION.after(0.6, () =&gt; ION.ui.showEndcard());
+  }
+
+  ready() {
+    ION.ui.onClick("install-button", () =&gt; ION.cta());
+  }
+}</code></pre>
+    <p class="dim">No renderer, no scene graph, no loop, no <code>three</code> import, nothing to remember to
+      register. That's the whole point.</p>
+
+    <h3>When you really do need Three.js</h3>
+    <p>Rare, but not blocked. Every handle keeps the real object on <code>.object3D</code>.</p>
+    <pre><code>const crate = ION.scene.box();
+crate.object3D.material.wireframe = true;   <span class="c">// an escape hatch, not the main road</span></code></pre>
+    <p class="dim">If you find yourself using it a lot, that's worth reporting — it usually means the plain API
+      is missing something it should have.</p>
+
+    <h3 style="margin-top:56px;">Everything on one page</h3>
+    <div class="cheat">
+      <div class="cheat-row"><div class="q">Make a shape</div><div class="a"><code>ION.scene.box / sphere / cylinder / ground / model</code></div></div>
+      <div class="cheat-row"><div class="q">Find it again</div><div class="a"><code>ION.scene.find(name)</code> · <code>ION.scene.findAll(name)</code></div></div>
+      <div class="cheat-row"><div class="q">Move it</div><div class="a"><code>moveTo(x,y,z)</code> · <code>moveBy(x,y,z)</code> · <code>position.y = 2</code></div></div>
+      <div class="cheat-row"><div class="q">Turn it (degrees)</div><div class="a"><code>rotation.y = 90</code> · <code>rotateBy(0,45,0)</code> · <code>spin(120)</code></div></div>
+      <div class="cheat-row"><div class="q">Change how it looks</div><div class="a"><code>color</code> · <code>opacity</code> · <code>size</code> · <code>visible</code></div></div>
+      <div class="cheat-row"><div class="q">Throw it away</div><div class="a"><code>thing.destroy()</code></div></div>
+      <div class="cheat-row"><div class="q">Give it a brain</div><div class="a"><code>class X extends Entity</code> — <code>start</code> / <code>update(dt)</code> / <code>stop</code></div></div>
+      <div class="cheat-row"><div class="q">Read the joystick</div><div class="a"><code>ION.input.axis</code> · <code>isDown(key)</code> · <code>onTap</code> · <code>onSwipe</code></div></div>
+      <div class="cheat-row"><div class="q">Camera</div><div class="a"><code>follow</code> · <code>stopFollow</code> · <code>shake(strength, seconds)</code></div></div>
+      <div class="cheat-row"><div class="q">Notice a bump</div><div class="a"><code>ION.colliders.attach(thing, {size})</code> then <code>zone(...).onEnter(fn)</code></div></div>
+      <div class="cheat-row"><div class="q">Sound</div><div class="a"><code>ION.audio.play</code> · <code>music</code> · <code>stopMusic</code> · <code>volume</code></div></div>
+      <div class="cheat-row"><div class="q">Effects</div><div class="a"><code>ION.particles.play(name, at?)</code> · <code>stop</code> · <code>quality</code></div></div>
+      <div class="cheat-row"><div class="q">Screen</div><div class="a"><code>ION.ui.text</code> · <code>show</code> · <code>hide</code> · <code>value</code> · <code>onClick</code> · <code>showEndcard</code></div></div>
+      <div class="cheat-row"><div class="q">Later / repeat / glide</div><div class="a"><code>ION.after</code> · <code>ION.every</code> · <code>ION.tween</code> · <code>ION.ease.*</code></div></div>
+      <div class="cheat-row"><div class="q">Talk between parts</div><div class="a"><code>ION.emit(name, data)</code> · <code>ION.on(name, fn)</code></div></div>
+      <div class="cheat-row"><div class="q">Dice</div><div class="a"><code>ION.random(a,b)</code> · <code>ION.randomInt(a,b)</code></div></div>
+      <div class="cheat-row"><div class="q">Install click</div><div class="a"><code>ION.cta()</code></div></div>
+      <div class="cheat-row"><div class="q">Escape hatch</div><div class="a"><code>thing.object3D</code></div></div>
+    </div>
+
+    <h2 id="advanced" style="margin-top:64px;">Engine code reference <span class="badge">advanced</span></h2>
+    <p class="dim">Everything above is the plain API — what a game is normally written against, and what the
+      generated starter project uses. Below is the layer underneath it: the engine's own classes, for the cases
+      the plain API doesn't cover. You don't need any of it to build a playable.</p>
     <p class="lede" style="margin-bottom:32px;">Steps 1–8 above are the panels and clicks. This is the rest of
       <code>src/engine/</code> — every reusable class a new playable actually imports, each with the exact
       signature and a minimal real example. <code>Ion</code>/<code>Animator</code> already got a full walkthrough in

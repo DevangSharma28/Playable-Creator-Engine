@@ -320,6 +320,9 @@ function extentAlong(shape: ShapeWorld, axis: THREE.Vector3): number {
   return shape.halfHeight * along + shape.radius * across;
 }
 
+/** Used only when a pair is concentric and has no other candidate — see buildCandidates' tail. Deterministic on purpose. */
+const FALLBACK_AXIS = new THREE.Vector3(1, 0, 0);
+
 const MAX_CANDIDATES = 24;
 const candidates: THREE.Vector3[] = Array.from({ length: MAX_CANDIDATES }, () => new THREE.Vector3());
 const axesA: THREE.Vector3[] = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
@@ -405,6 +408,23 @@ function buildCandidates(a: ShapeWorld, b: ShapeWorld): number {
     candTmp.copy(cpTmp).sub(b.center);
     addNormalized(candTmp);
   }
+
+  // Concentric shapes still have to be separable.
+  //
+  // Two spheres have no principal axes of their own, so the centre-to-centre
+  // direction is their *only* candidate — and `addNormalized` correctly
+  // refuses a zero-length one. The result was that a pair which overlaps as
+  // completely as it is possible to overlap produced **no candidates at all**,
+  // so `penetration` reported "not touching" and `moveAndSlide` never pushed
+  // them apart. Anything that spawned on top of the player stayed inside it
+  // for good, and the 1e-10 threshold means near-coincident (float drift, two
+  // things spawned at the same spot) failed the same way.
+  //
+  // Which direction is used does not matter — the shapes are concentric, so
+  // every direction is equally valid — but it must be *deterministic*, or the
+  // push would pick a different axis each frame and the object would jitter
+  // instead of leaving.
+  if (n === 0) add(FALLBACK_AXIS);
   return n;
 }
 
@@ -428,6 +448,12 @@ function buildCandidates(a: ShapeWorld, b: ShapeWorld): number {
  * scenery instead of being stopped by it.
  */
 export function penetration(a: ShapeWorld, b: ShapeWorld, out: THREE.Vector3, up?: THREE.Vector3): boolean {
+  // Cleared up front so `out` is never left holding a *previous* call's push
+  // when this returns false. ColliderManager happens to be safe either way
+  // (depenetrate zeroes its own accumulator and only adds on true), but this
+  // is exported public API, and handing a caller who checks the boolean
+  // loosely a stale non-zero vector is a trap that costs nothing to remove.
+  out.set(0, 0, 0);
   const count = buildCandidates(a, b);
   sepVec.copy(a.center).sub(b.center);
   let best = Infinity;

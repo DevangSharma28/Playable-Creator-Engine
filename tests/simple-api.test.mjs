@@ -418,6 +418,227 @@ test("Prop — the handle ION.scene.* hands back", async (t) => {
   });
 });
 
+test("rigged models, vectors, and parts", async (t) => {
+  /**
+   * A GLB with a real skeleton, built in memory.
+   *
+   * The point of the suite below is what happens when this is cloned twice, so
+   * it has to be genuinely rigged — a plain mesh would pass every assertion
+   * here while proving nothing.
+   */
+  function riggedGltf() {
+    const root = new THREE.Group();
+    root.name = "Hero";
+    const hips = new THREE.Bone();
+    hips.name = "Hips";
+    const spine = new THREE.Bone();
+    spine.name = "Spine";
+    hips.add(spine);
+    root.add(hips);
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3));
+    geometry.setAttribute("skinIndex", new THREE.Uint16BufferAttribute(new Array(12).fill(0), 4));
+    geometry.setAttribute("skinWeight", new THREE.Float32BufferAttribute([1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0], 4));
+    const body = new THREE.SkinnedMesh(geometry, new THREE.MeshStandardMaterial());
+    body.name = "Body";
+    body.bind(new THREE.Skeleton([hips, spine]));
+    root.add(body);
+
+    const track = new THREE.QuaternionKeyframeTrack(
+      "Spine.quaternion",
+      [0, 1],
+      [0, 0, 0, 1, 0, 0.7071, 0, 0.7071]
+    );
+    return {
+      scene: root,
+      animations: [new THREE.AnimationClip("Run", 1, [track]), new THREE.AnimationClip("Idle", 1, [track])],
+    };
+  }
+
+  /** An AssetLoader that serves the rigged GLB above for any path. */
+  class RiggedLoader extends runtime.AssetLoader {
+    constructor() {
+      super();
+      this.gltf = riggedGltf();
+    }
+    getGlb() { return this.gltf; }
+    getAnimations() { return this.gltf.animations; }
+    get cached() { return { textures: [], models: ["./hero.glb"], audio: [] }; }
+  }
+
+  await t.test("two instances of one rigged model get separate skeletons", async () => {
+    // `Object3D.clone(true)` copies a SkinnedMesh but leaves its skeleton
+    // bound to the ORIGINAL's bones, so every instance shares one skeleton:
+    // they all play whichever clip started last, in lockstep, and posing one
+    // poses the rest. AssetLoader uses SkeletonUtils.clone for exactly this.
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const a = ION.scene.model("./hero.glb");
+    const b = ION.scene.model("./hero.glb", { x: 3 });
+
+    const skinOf = (prop) => {
+      let found;
+      prop.object3D.traverse((n) => { if (!found && n.isSkinnedMesh) found = n; });
+      return found;
+    };
+    const skinA = skinOf(a);
+    const skinB = skinOf(b);
+    assert.ok(skinA && skinB, "both instances contain a SkinnedMesh");
+    assert.notEqual(skinA.skeleton, skinB.skeleton, "each instance must own its skeleton");
+    assert.notEqual(skinA.skeleton.bones[0], skinB.skeleton.bones[0], "and its own bones");
+    // The decisive one: neither may point back at the source model.
+    assert.ok(a.object3D.getObjectByName("Hips"), "the clone has its own bone in its own tree");
+    assert.equal(skinA.skeleton.bones[0], a.object3D.getObjectByName("Hips"), "bound to its own copy, not the source");
+    harness.dispose();
+  });
+
+  await t.test("a model's clips arrive on the handle", async () => {
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    assert.deepEqual(hero.animations, ["Run", "Idle"], "named clips, no three.js needed to read them");
+    assert.equal(hero.currentAnimation, undefined);
+    assert.equal(hero.isPlaying, false);
+    harness.dispose();
+  });
+
+  await t.test("play() starts a clip and advances it on the game's own frames", async () => {
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    hero.play("Run", { fade: 0 });
+    assert.equal(hero.currentAnimation, "Run");
+    assert.equal(hero.isPlaying, true);
+
+    let spine;
+    hero.object3D.traverse((n) => { if (n.name === "Spine") spine = n; });
+    const before = spine.quaternion.clone();
+    harness.frames(20, 16.7);
+    assert.ok(before.angleTo(spine.quaternion) > 0.01, "the pose actually moved — the mixer is being ticked");
+    harness.dispose();
+  });
+
+  await t.test("two instances can play different clips at the same time", async () => {
+    // The behaviour the skeleton fix exists for, asserted end to end.
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const a = ION.scene.model("./hero.glb");
+    const b = ION.scene.model("./hero.glb", { x: 3 });
+    a.play("Run", { fade: 0 });
+    b.play("Idle", { fade: 0, speed: 0 });
+    harness.frames(20, 16.7);
+    assert.equal(a.currentAnimation, "Run");
+    assert.equal(b.currentAnimation, "Idle");
+
+    const spineOf = (prop) => {
+      let s;
+      prop.object3D.traverse((n) => { if (n.name === "Spine") s = n; });
+      return s;
+    };
+    assert.ok(spineOf(a).quaternion.angleTo(spineOf(b).quaternion) > 0.01, "the two poses diverged");
+    harness.dispose();
+  });
+
+  await t.test("re-playing the clip already running does not restart it", async () => {
+    // Calling play("Run") from update() while a key is held is the obvious way
+    // to write movement; restarting each frame would pin it to frame zero.
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    hero.play("Run", { fade: 0 });
+    harness.frames(10, 16.7);
+    let spine;
+    hero.object3D.traverse((n) => { if (n.name === "Spine") spine = n; });
+    const midway = spine.quaternion.clone();
+    hero.play("Run", { fade: 0 });
+    harness.frames(1, 16.7);
+    assert.ok(midway.angleTo(spine.quaternion) < 0.5, "kept going rather than snapping back to the start");
+    harness.dispose();
+  });
+
+  await t.test("an unknown clip warns with the names that do exist", async () => {
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    const warnings = [];
+    const realWarn = console.warn;
+    console.warn = (...args) => warnings.push(args.join(" "));
+    try {
+      hero.play("Sprint");
+    } finally {
+      console.warn = realWarn;
+    }
+    assert.match(warnings.join("\n"), /no such animation/);
+    assert.match(warnings.join("\n"), /Run, Idle/);
+    assert.equal(hero.currentAnimation, undefined, "and nothing started");
+    harness.dispose();
+  });
+
+  await t.test("destroy() retires the mixer instead of leaving it ticking", async () => {
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    hero.play("Run", { fade: 0 });
+    hero.destroy();
+    assert.equal(hero.currentAnimation, undefined);
+    // A retired mixer being ticked would throw or animate a detached tree.
+    assert.doesNotThrow(() => harness.frames(5, 16.7));
+    harness.dispose();
+  });
+
+  await t.test("a shape with no clips says so rather than throwing", async () => {
+    const harness = await scene();
+    const box = ION.scene.box();
+    assert.deepEqual(box.animations, []);
+    const realWarn = console.warn;
+    console.warn = () => {};
+    try {
+      assert.doesNotThrow(() => box.play("Run"));
+    } finally {
+      console.warn = realWarn;
+    }
+    harness.dispose();
+  });
+
+  await t.test("position and scale are live vectors with maths on them", async () => {
+    const harness = await scene();
+    const box = ION.scene.box();
+    box.position.set(3, 4, 0);
+    assert.equal(box.position.length(), 5, "real vector maths, no three.js import in game code");
+    box.position.add(ION.vec3(0, 0, 12));
+    assert.equal(box.position.z, 12, "and it is live — the object actually moved");
+    box.scale.setScalar(2);
+    assert.equal(box.object3D.scale.x, 2);
+
+    const direction = ION.vec3().subVectors(ION.vec3(0, 0, 10), box.position).normalize();
+    assert.ok(Math.abs(direction.length() - 1) < 1e-6);
+    harness.dispose();
+  });
+
+  await t.test("part() reaches a named node inside a model", async () => {
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    const body = hero.part("Body");
+    assert.ok(body, "found by the name the artist gave it");
+    body.hide();
+    assert.equal(body.object3D.visible, false);
+    assert.equal(hero.part("NoSuchNode"), undefined);
+    // The same node asked for twice is the same handle, like scene.find().
+    assert.equal(hero.part("Body"), body);
+    harness.dispose();
+  });
+
+  await t.test("castShadow reaches every mesh, not just the group", async () => {
+    // `castShadow` on a Group does nothing at all in three.js, silently — it
+    // is a per-mesh flag, which for a loaded model means traversing it.
+    const harness = await scene(undefined, { assets: new RiggedLoader() });
+    const hero = ION.scene.model("./hero.glb");
+    hero.castShadow = false;
+    let any = false;
+    hero.object3D.traverse((n) => { if (n.isMesh) any = any || n.castShadow; });
+    assert.equal(any, false, "every mesh underneath was set");
+    hero.castShadow = true;
+    let all = true;
+    hero.object3D.traverse((n) => { if (n.isMesh) all = all && n.castShadow; });
+    assert.equal(all, true);
+    harness.dispose();
+  });
+});
+
 test("ION.camera", async (t) => {
   await t.test("follow() moves the rig toward the target", async () => {
     const harness = await bootGame({

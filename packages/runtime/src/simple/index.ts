@@ -5,6 +5,6 @@ export { Entity } from "./entity";
 // `Entity`, exported so a helper can take "anything in the world".
 export { Prop } from "./prop";
 export { SceneNode } from "./node";
-export type { Vec3Like } from "./node";
+export type { Vec3Like, Vec3, Quat } from "./node";
 export { ION, SimpleZone } from "./ion";
 export type { ShapeOptions, ZoneOptions } from "./ion";
