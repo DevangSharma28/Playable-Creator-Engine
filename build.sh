@@ -67,7 +67,17 @@ SECONDS=0
 # invocation, removed on the way out.
 ION_PREV_REPORT=""
 if [ -f dist/build-report.json ]; then
-  ION_PREV_REPORT="$(mktemp -t ion-prev-report)"
+  # An explicit path template, not `mktemp -t ion-prev-report`. The `-t PREFIX`
+  # form is BSD-only: GNU coreutils (every Linux runner, and Git Bash on
+  # Windows) treats the argument as a template and rejects one with fewer than
+  # three X's — "mktemp: too few X's in template". With `set -e` that killed the
+  # build here, at the top, before anything was built.
+  #
+  # It only bit the *second* build onward, since the enclosing `if` needs a
+  # report from a previous run to exist at all — which is why CI never caught
+  # it (a fresh checkout has no dist/) while the e2e suite, which builds six
+  # times into one project, failed on its second.
+  ION_PREV_REPORT="$(mktemp "${TMPDIR:-/tmp}/ion-prev-report.XXXXXX")"
   cp dist/build-report.json "$ION_PREV_REPORT"
 fi
 export ION_PREV_REPORT
