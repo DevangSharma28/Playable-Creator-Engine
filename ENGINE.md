@@ -1462,7 +1462,7 @@ Also: **⧉ Copy** puts a plain-text summary on the clipboard (size, gzip, durat
 
 ### 11.7 The favicon
 
-`scripts/make-favicon.mjs` resizes `src/engine/icon/IONENGINE_ICON.png` to 64×64 and stamps it as an inline `data:` URI into every page that shows a browser tab — `index.html`, `tools/ui-editor.html`, and the four guides. Re-run it after changing the logo; it is idempotent (the tag sits between `<!-- ion:favicon -->` markers and is replaced, never appended).
+`scripts/make-favicon.mjs` resizes `src/engine/icon/ION-Engine-Icon.png` to 64×64 and stamps it as an inline `data:` URI into every page that shows a browser tab — `index.html`, `tools/ui-editor.html`, and the four guides. Re-run it after changing the logo; it is idempotent (the tag sits between `<!-- ion:favicon -->` markers and is replaced, never appended).
 
 Inlined rather than served as `/favicon.png` because these pages are served by three different things — Vite from the project root, Vite's `public/`, and the packaged Studio's own middleware, which serves a closed list of files off `@ion-engine/editor/studio`. A `<link href="/favicon.png">` would have to be taught to all three plus `build-packages.mjs`'s copy list, and a missing rule shows up as a silently absent icon rather than an error. At 64×64 it is ~3 KB per page.
 

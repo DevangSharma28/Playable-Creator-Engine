@@ -42,7 +42,7 @@ import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const SOURCE = join(ROOT, "src", "engine", "icon", "IONENGINE_ICON.png");
+const SOURCE = join(ROOT, "src", "engine", "icon", "ION-Engine-Icon.png");
 
 /**
  * 64 rather than 32: browsers pick this for retina tabs, macOS touch bars and
